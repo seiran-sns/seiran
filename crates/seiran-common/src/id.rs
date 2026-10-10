@@ -26,6 +26,18 @@ pub fn generate_snowflake_id(created_at: DateTime<Utc>) -> i64 {
     snowflake as i64
 }
 
+/// `at` のミリ秒に採番されうる最小の Snowflake ID（シリアル値0）。`id >= snowflake_id_floor(t)` で
+/// 「`t` 以降に採番された行」を主キーの範囲走査で絞れる。1970年より前は0に丸める
+/// （負のミリ秒をマスクすると巨大な正の値になり、範囲の上下が逆転するため）。
+pub fn snowflake_id_floor(at: DateTime<Utc>) -> i64 {
+    (at.timestamp_millis().max(0) & 0x0000_FFFF_FFFF_FFFF) << 16
+}
+
+/// Snowflake ID のタイムスタンプ部分を復元する。
+pub fn snowflake_id_time(id: i64) -> DateTime<Utc> {
+    DateTime::from_timestamp_millis(id >> 16).unwrap_or(DateTime::<Utc>::MIN_UTC)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -38,6 +50,19 @@ mod tests {
         let id2 = generate_snowflake_id(now + Duration::milliseconds(1));
 
         assert!(id1 < id2, "ID should be chronologically sortable");
+    }
+
+    #[test]
+    fn floor_bounds_ids_generated_at_or_after_the_instant() {
+        let at = Utc::now() - Duration::hours(1);
+        let id = generate_snowflake_id(at);
+        assert!(snowflake_id_floor(at) <= id);
+        assert!(snowflake_id_floor(at + Duration::milliseconds(1)) > id);
+        assert_eq!(
+            snowflake_id_time(id).timestamp_millis(),
+            at.timestamp_millis()
+        );
+        assert_eq!(snowflake_id_floor(DateTime::<Utc>::MIN_UTC), 0);
     }
 
     #[test]

@@ -119,6 +119,69 @@ fn detects_in_subquery_variants() {
     assert!(!contains_in_subquery("WHERE ID = ANY($1)"));
 }
 
+/// `($2::bigint IS NULL OR p.id < $2)` 形式の id カーソル条件。generic plan（sqlx は接続ごとに
+/// 文をキャッシュし、PostgreSQL は数回目から generic plan に切り替えうる）では `$2` が NULL か
+/// どうか分からないので、インデックスの範囲条件にならず id 降順の全走査からの読み飛ばしになる。
+/// `p.id < COALESCE($2::bigint, 9223372036854775807)` / `p.id > COALESCE($3::bigint, 0)` と書く。
+fn contains_nullable_id_cursor(code: &str) -> bool {
+    code.match_indices("IS NULL OR ").any(|(i, m)| {
+        let expr = code[i + m.len()..].split(')').next().unwrap_or("");
+        let parts: Vec<&str> = expr.split_whitespace().collect();
+        matches!(
+            parts.as_slice(),
+            [col, op, param]
+                if (*col == "ID" || col.ends_with(".ID"))
+                    && ["<", ">", "<=", ">="].contains(op)
+                    && param.starts_with('$')
+        )
+    })
+}
+
+#[test]
+fn no_nullable_id_cursor_in_sql() {
+    let root = workspace_root();
+    let mut rust_files = Vec::new();
+    collect_files(&root.join("crates"), &["rs"], &mut rust_files);
+    let this_file = Path::new(file!()).file_name().unwrap();
+    let violations: Vec<_> = rust_files
+        .into_iter()
+        .filter(|path| path.file_name() != Some(this_file))
+        .filter(|path| {
+            let content = std::fs::read_to_string(path).unwrap();
+            contains_nullable_id_cursor(&normalized_code(&content, "//"))
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "`($n IS NULL OR x.id < $n)` は generic plan でインデックス条件になりません。\
+         `x.id < COALESCE($n::bigint, 9223372036854775807)` / `x.id > COALESCE($n::bigint, 0)` で書いてください:\n{}",
+        violations
+            .iter()
+            .map(|p| format!("  {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn detects_nullable_id_cursor_variants() {
+    assert!(contains_nullable_id_cursor(
+        "AND ($2::BIGINT IS NULL OR P.ID < $2)"
+    ));
+    assert!(contains_nullable_id_cursor(
+        "WHERE ($1::BIGINT IS NULL OR ID > $1)"
+    ));
+    assert!(!contains_nullable_id_cursor(
+        "AND P.ID < COALESCE($2::BIGINT, 9223372036854775807)"
+    ));
+    assert!(!contains_nullable_id_cursor(
+        "AND ($3::TEXT IS NULL OR P.AT_RKEY < $3)"
+    ));
+    assert!(!contains_nullable_id_cursor(
+        "AND ($1::BIGINT IS NULL OR P.ACTOR_ID = $1 OR NOT ACTOR_IS_HIDDEN_FOR_VIEWER($1, P.ACTOR_ID))"
+    ));
+}
+
 /// SQL を書いてはいけない層（ワークスペースルートからの相対パス）。
 const NO_SQL_DIRS: &[&str] = &[
     "crates/seiran-api/src",

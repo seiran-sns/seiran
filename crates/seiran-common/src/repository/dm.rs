@@ -216,8 +216,8 @@ impl DmRepository for PgDmRepository {
                      WHERE thread_root_post_id = tr.thread_root_post_id AND deleted_at IS NULL
                      ORDER BY id DESC LIMIT 1
                  ) lp ON true
-                 WHERE ($2::bigint IS NULL OR lp.id < $2)
-                   AND ($3::bigint IS NULL OR lp.id > $3)
+                 WHERE lp.id < COALESCE($2::bigint, 9223372036854775807)
+                   AND lp.id > COALESCE($3::bigint, 0)
              )
              SELECT l.thread_root_post_id, l.last_post_id, l.last_body, l.last_created_at,
                     COALESCE(array_agg(DISTINCT pe.peer_id) FILTER (WHERE pe.peer_id IS NOT NULL AND pe.peer_id != $1), ARRAY[]::bigint[]) AS peer_actor_ids
@@ -251,8 +251,8 @@ impl DmRepository for PgDmRepository {
             crate::timeline_post_joins!(),
             "
              WHERE p.thread_root_post_id = $1 AND p.deleted_at IS NULL
-               AND ($4::bigint IS NULL OR p.id < $4)
-               AND ($5::bigint IS NULL OR p.id > $5)
+               AND p.id < COALESCE($4::bigint, 9223372036854775807)
+               AND p.id > COALESCE($5::bigint, 0)
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
                AND NOT EXISTS (
                    SELECT 1 FROM dm_hidden_messages dh WHERE dh.actor_id = $2 AND dh.post_id = p.id

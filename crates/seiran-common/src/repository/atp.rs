@@ -186,7 +186,7 @@ impl AtpReadRepository for PgAtpReadRepository {
     ) -> Result<Vec<(i64, String)>, sqlx::Error> {
         let rows: Vec<(i64, String)> = sqlx::query_as(
             "SELECT id, sha256 FROM media_files
-             WHERE uploaded_by_actor_id = $1 AND ($3::bigint IS NULL OR id > $3)
+             WHERE uploaded_by_actor_id = $1 AND id > COALESCE($3::bigint, 0)
              ORDER BY id ASC
              LIMIT $2",
         )

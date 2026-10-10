@@ -32,7 +32,8 @@
 - SQL はリポジトリ層（`crates/seiran-common/src/repository/`）にだけ書く。ハンドラ・ジョブ・firehose からは型付きのリポジトリ関数を呼ぶ（`sqlx::query*`・`QueryBuilder`・`sqlx::Row` の使用を `crates/seiran-common/tests/sql_style.rs` が検出する）。
 - SQL で `IN (SELECT ...)` / `NOT IN (SELECT ...)` を使わない。`EXISTS` / `NOT EXISTS` で書く（NULL を含むサブクエリで `NOT IN` が常に偽になる事故の再発防止。`crates/seiran-common/tests/sql_style.rs` が機械的に検出する）。NULL 許容列の比較では NULL 行の扱いを明示する。
 - 「読んでから書く」「書いてから読む」を別々の文で行わない。`RETURNING`・`ON CONFLICT`・`SET col = f(col)` で1文にするか、トランザクション内で `FOR UPDATE` / アドバイザリロックで直列化する。外部 API 呼び出しはトランザクションに含めない。
-- `TimelinePost` を返すクエリは `timeline_post_columns!()` / `timeline_post_joins!()` を使い、可視性は `post_is_visible_to` で判定する（手書きしない）。
+- `TimelinePost` を返すクエリは `timeline_post_columns!()` / `timeline_post_joins!()` を使い、可視性は `post_is_visible_to` で判定する（手書きしない。例外はホーム/ソーシャル/リストの候補抽出 `repository/feed.rs` だけで、関数と一致を検証済みの展開マクロを使う）。
+- id カーソルは `p.id < COALESCE($2::bigint, 9223372036854775807)` と書く（`($2 IS NULL OR p.id < $2)` は generic plan でインデックスが効かない。`sql_style.rs` が検出する）。
 - `TimelinePost` からレスポンスへの組み立ては、frontend API は `handlers::notes::build_note_responses`、Misskey 互換 API は `misskey::convert::build_notes` を使う（添付・リアクション・埋め込み・投票状態等の付与手順を個別に書かない）。
 - `#[allow(clippy::too_many_arguments)]` を新たに書かない。引数の束は構造体にし、長い関数は手順ごとの関数に分ける。
 - Misskey 互換 API とカスタム API で同じ処理を別々に書かない。データ取得・検証・副作用は共通関数にし、差分はレスポンス整形だけに閉じ込める。

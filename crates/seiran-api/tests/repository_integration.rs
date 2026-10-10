@@ -530,3 +530,122 @@ async fn concurrent_pending_upserts_never_downgrade_accepted_follow() {
         Some("accepted")
     );
 }
+
+/// フォロー/メンバーが多い（時間窓方式になる）ホーム・リストのタイムラインを小さい limit で
+/// 遡り切ると、1h/24h/168h の各窓とその先（LATERAL）をまたいでも取りこぼし・重複なく
+/// 対象の全投稿が新しい順に返ること。`since_id` 指定も同じ並びの先頭部分になること。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn feeds_with_many_targets_page_across_time_windows() {
+    use chrono::{Duration, Utc};
+    let pool = test_db_pool().await;
+    let posts = PgPostRepository::new(pool.clone());
+    let follows = PgFollowRepository::new(pool.clone());
+    let lists = PgListRepository::new(pool.clone());
+    let viewer = create_fixture_local_actor(&pool, "fwviewer").await;
+    let stranger = create_fixture_local_actor(&pool, "fwstranger").await;
+    let list_id = seiran_common::generate_snowflake_id(Utc::now());
+    lists
+        .create(list_id, viewer, "feed-windows", true, Utc::now())
+        .await
+        .unwrap();
+    // 時間窓方式の閾値（feed.rs の LATERAL_MAX_TARGETS = 100）を超える数。ユーザー数上限に
+    // 数えられないよう、ローカルアカウントではなくリモートアクターにする。
+    let mut targets = Vec::new();
+    for _ in 0..101 {
+        let actor = seiran_common::generate_snowflake_id(Utc::now());
+        sqlx::query(
+            "INSERT INTO actors (id, actor_type, username, domain, created_at, updated_at)
+             VALUES ($1, 'fedi', $2, 'feed-windows-test.invalid', NOW(), NOW())",
+        )
+        .bind(actor)
+        .bind(format!("fwtarget{}", unique_suffix()))
+        .execute(&pool)
+        .await
+        .unwrap();
+        follows.insert_accepted(viewer, actor).await.unwrap();
+        lists.add_member(list_id, actor, Utc::now()).await.unwrap();
+        targets.push(actor);
+    }
+
+    let now = Utc::now();
+    let ages = [
+        Duration::minutes(10),
+        Duration::minutes(20),
+        Duration::minutes(30),
+        Duration::hours(5),
+        Duration::hours(6),
+        Duration::days(3),
+        Duration::days(4),
+    ];
+    let at = |age| FixturePost {
+        body: "feed-windows",
+        created_at: Some(now - age),
+        ..FixturePost::default()
+    };
+    let mut home_expected = Vec::new();
+    let mut list_expected = Vec::new();
+    for (i, age) in ages.iter().copied().enumerate() {
+        let id = create_fixture_post(&pool, targets[i], at(age)).await;
+        home_expected.push(id);
+        list_expected.push(id);
+        // フォロー外の投稿は混ざらない。
+        create_fixture_post(&pool, stranger, at(age)).await;
+    }
+    for i in 0..12 {
+        let id =
+            create_fixture_post(&pool, targets[i * 7], at(Duration::days(20 + i as i64))).await;
+        home_expected.push(id);
+        list_expected.push(id);
+    }
+    // 自分の投稿はホームにだけ出る。
+    home_expected.push(create_fixture_post(&pool, viewer, at(Duration::hours(2))).await);
+    // フォロー外への返信はホームに出ない（リストは返信先を問わない）。
+    let stranger_post = create_fixture_post(&pool, stranger, at(Duration::hours(30))).await;
+    let reply = create_fixture_post(
+        &pool,
+        targets[3],
+        FixturePost {
+            reply_to_post_id: Some(stranger_post),
+            ..at(Duration::hours(29))
+        },
+    )
+    .await;
+    list_expected.push(reply);
+    home_expected.sort_unstable_by(|a, b| b.cmp(a));
+    list_expected.sort_unstable_by(|a, b| b.cmp(a));
+
+    let mut home_seen = Vec::new();
+    let mut until = None;
+    loop {
+        let page = ids(&posts
+            .home_timeline(viewer, 4, until, None, false)
+            .await
+            .unwrap());
+        if page.is_empty() {
+            break;
+        }
+        until = page.last().copied();
+        home_seen.extend(page);
+    }
+    assert_eq!(home_seen, home_expected, "home_timeline");
+
+    let mut list_seen = Vec::new();
+    let mut until = None;
+    loop {
+        let page = ids(&lists.timeline(list_id, 4, until, None).await.unwrap());
+        if page.is_empty() {
+            break;
+        }
+        until = page.last().copied();
+        list_seen.extend(page);
+    }
+    assert_eq!(list_seen, list_expected, "list timeline");
+
+    let since = home_expected[5];
+    let newer = ids(&posts
+        .home_timeline(viewer, 100, None, Some(since), false)
+        .await
+        .unwrap());
+    assert_eq!(newer, home_expected[..5], "home_timeline since_id");
+}

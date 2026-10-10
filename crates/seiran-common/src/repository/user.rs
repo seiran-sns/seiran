@@ -366,7 +366,7 @@ impl UserRepository for PgUserRepository {
              LEFT JOIN actors a ON a.user_id = u.id AND a.actor_type::text = 'local'
              LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
              LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-             WHERE ($1::bigint IS NULL OR u.id > $1)
+             WHERE u.id > COALESCE($1::bigint, 0)
                AND (
                  $2::text IS NULL
                  OR LOWER(

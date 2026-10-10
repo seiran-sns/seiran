@@ -251,8 +251,8 @@ impl MediaFileRepository for PgMediaFileRepository {
         let rows = sqlx::query_as::<_, MediaFile>(&format!(
             "SELECT {SELECT_COLS} FROM media_files
              WHERE uploaded_by_actor_id = $1
-               AND ($2::bigint IS NULL OR id < $2)
-               AND ($3::bigint IS NULL OR id > $3)
+               AND id < COALESCE($2::bigint, 9223372036854775807)
+               AND id > COALESCE($3::bigint, 0)
              ORDER BY id DESC LIMIT $4"
         ))
         .bind(actor_id)

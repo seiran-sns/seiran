@@ -263,14 +263,16 @@ pub struct FixturePost<'a> {
     pub recipient_actor_ids: &'a [i64],
     pub poll: Option<&'a serde_json::Value>,
     pub content_warning: Option<&'a str>,
+    /// 既定は現在時刻。id もこの時刻から採番する。
+    pub created_at: Option<chrono::DateTime<chrono::Utc>>,
 }
 
 /// fixture 用の投稿を作成し、その posts.id を返す。
 #[allow(dead_code)]
 pub async fn create_fixture_post(pool: &sqlx::PgPool, actor_id: i64, post: FixturePost<'_>) -> i64 {
     use seiran_common::repository::{InsertFullParams, PgPostRepository, PostRepository};
-    let now = chrono::Utc::now();
-    let id = seiran_common::generate_snowflake_id(now);
+    let created_at = post.created_at.unwrap_or_else(chrono::Utc::now);
+    let id = seiran_common::generate_snowflake_id(created_at);
     let ap_object_id = format!("https://localhost/notes/{id}");
     let uuid = uuid::Uuid::new_v4().to_string();
     let emoji_map = serde_json::json!({});
@@ -283,7 +285,7 @@ pub async fn create_fixture_post(pool: &sqlx::PgPool, actor_id: i64, post: Fixtu
             seiran_post_uuid: &uuid,
             reply_to_post_id: post.reply_to_post_id,
             quote_of_post_id: None,
-            created_at: now,
+            created_at,
             visibility: post.visibility.unwrap_or("public"),
             deliver_fedi: false,
             deliver_bsky: false,

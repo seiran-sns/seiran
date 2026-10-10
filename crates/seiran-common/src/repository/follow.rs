@@ -530,8 +530,8 @@ impl FollowRepository for PgFollowRepository {
              WHERE f.follower_actor_id = $1 AND f.status = 'accepted'
                AND a.withdrawn_at IS NULL
                AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
-               AND ($3::bigint IS NULL OR f.id < $3)
-               AND ($4::bigint IS NULL OR f.id > $4)
+               AND f.id < COALESCE($3::bigint, 9223372036854775807)
+               AND f.id > COALESCE($4::bigint, 0)
              ORDER BY f.id DESC
              LIMIT $5",
         )
@@ -564,8 +564,8 @@ impl FollowRepository for PgFollowRepository {
              WHERE f.target_actor_id = $1 AND f.status = 'accepted'
                AND a.withdrawn_at IS NULL
                AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, a.id))
-               AND ($3::bigint IS NULL OR f.id < $3)
-               AND ($4::bigint IS NULL OR f.id > $4)
+               AND f.id < COALESCE($3::bigint, 9223372036854775807)
+               AND f.id > COALESCE($4::bigint, 0)
              ORDER BY f.id DESC
              LIMIT $5",
         )

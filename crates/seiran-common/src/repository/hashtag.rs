@@ -108,8 +108,8 @@ impl HashtagRepository for PgHashtagRepository {
              ", crate::timeline_post_joins!(), "
              WHERE h.name = $1 AND p.deleted_at IS NULL
                AND p.visibility IN ('public', 'unlisted')
-               AND ($2::bigint IS NULL OR p.id < $2)
-               AND ($3::bigint IS NULL OR p.id > $3)
+               AND p.id < COALESCE($2::bigint, 9223372036854775807)
+               AND p.id > COALESCE($3::bigint, 0)
                AND ($5::bigint IS NULL OR p.actor_id = $5 OR NOT actor_is_hidden_for_viewer($5, p.actor_id))
              ORDER BY p.id DESC LIMIT $4"),
         )

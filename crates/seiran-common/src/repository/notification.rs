@@ -181,8 +181,8 @@ impl NotificationRepository for PgNotificationRepository {
             "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, related_actor_id, is_read, created_at
              FROM notifications
              WHERE recipient_actor_id = $1
-               AND ($2::bigint IS NULL OR id < $2)
-               AND ($3::bigint IS NULL OR id > $3)
+               AND id < COALESCE($2::bigint, 9223372036854775807)
+               AND id > COALESCE($3::bigint, 0)
                AND (notifier_actor_id IS NULL OR NOT actor_is_hidden_for_viewer($1, notifier_actor_id))
              ORDER BY id DESC LIMIT $4",
         )

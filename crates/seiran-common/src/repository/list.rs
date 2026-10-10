@@ -341,44 +341,16 @@ impl ListRepository for PgListRepository {
         until_id: Option<i64>,
         since_id: Option<i64>,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        // home_timeline（post.rs）と同じ LATERAL 集約パターン。targets の元が
-        // 「自分+follows」ではなく「list_members」になるだけ。
-        sqlx::query_as::<_, TimelinePost>(concat!(
-            "WITH targets AS (
-                 SELECT actor_id FROM list_members WHERE list_id = $1
-             ),
-             candidate_ids AS (
-                 SELECT p.id
-                 FROM targets t
-                 CROSS JOIN LATERAL (
-                     SELECT id FROM posts p
-                     WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
-                       AND ($2::bigint IS NULL OR p.id < $2)
-                       AND ($3::bigint IS NULL OR p.id > $3)
-                       -- リストタイムラインは閲覧者情報を持たない（誰が見ても同じ内容）ため、
-                       -- 宛先ベースの閲覧制御ができない。directは無条件で除外する
-                       -- （DM本文がリスト経由で第三者に漏れるのを防ぐ最低限の対応）。
-                       AND p.visibility != 'direct'
-                     ORDER BY p.id DESC LIMIT $4
-                 ) p
-                 ORDER BY p.id DESC LIMIT $4
-             )
-             SELECT ",
-            crate::timeline_post_columns!(),
-            "
-             FROM candidate_ids ci
-             JOIN posts p ON p.id = ci.id
-             ",
-            crate::timeline_post_joins!(),
-            "
-             ORDER BY p.id DESC"
-        ))
-        .bind(list_id)
-        .bind(until_id)
-        .bind(since_id)
-        .bind(limit)
-        .fetch_all(&self.pool)
-        .await
+        // home_timeline と同じ候補抽出（feed.rs）。対象が「自分+follows」ではなく
+        // 「list_members」になるだけ。
+        let source = super::feed::FeedSource::ListMembers { list_id };
+        let page = super::feed::FeedPage {
+            limit,
+            until_id,
+            since_id,
+        };
+        let ids = super::feed::feed_candidate_ids(&self.pool, source, page).await?;
+        super::feed::fetch_feed_posts(&self.pool, &ids).await
     }
 
     async fn set_atp_list_record(

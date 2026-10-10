@@ -30,6 +30,7 @@ pub mod email_change;
 pub mod email_short_code;
 pub mod email_verification;
 pub mod emoji;
+pub mod feed;
 pub mod follow;
 pub mod follow_import;
 pub mod hashtag;

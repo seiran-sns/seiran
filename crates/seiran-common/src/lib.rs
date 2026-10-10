@@ -38,7 +38,7 @@ pub mod username;
 pub mod version;
 
 pub use db::{get_db_pool, run_migrations};
-pub use id::generate_snowflake_id;
+pub use id::{generate_snowflake_id, snowflake_id_floor, snowflake_id_time};
 pub use lang::{
     is_supported_display_language, is_supported_language, SUPPORTED_DISPLAY_LANGUAGES,
     SUPPORTED_LANGUAGES,

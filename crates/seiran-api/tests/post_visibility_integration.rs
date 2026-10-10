@@ -312,3 +312,166 @@ async fn embedded_reference_fetch_does_not_leak_direct_post_to_followers() {
     assert_eq!(visible_to(Some(DM_RECIPIENT)).await, 1, "宛先");
     assert_eq!(visible_to(Some(DM_AUTHOR)).await, 1, "投稿者本人");
 }
+
+/// ホーム/ソーシャル/リストの候補抽出がクエリに展開する判定マクロ
+/// （`repository/feed.rs`）が、SQL 関数と同じ結果を返すこと。各判定で真と偽の両方が
+/// 出るデータを用意し、一致が自明にならないようにする。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn visibility_macros_match_sql_functions() {
+    use support::{create_fixture_local_actor, create_fixture_post};
+    let pool = test_db_pool().await;
+    let viewer = create_fixture_local_actor(&pool, "vmviewer").await;
+    let followed = create_fixture_local_actor(&pool, "vmfollowed").await;
+    let repost_muted = create_fixture_local_actor(&pool, "vmrpmuted").await;
+    let stranger = create_fixture_local_actor(&pool, "vmstranger").await;
+    let blocked = create_fixture_local_actor(&pool, "vmblocked").await;
+    let blocker = create_fixture_local_actor(&pool, "vmblocker").await;
+    let muted = create_fixture_local_actor(&pool, "vmmuted").await;
+    let suspended = create_fixture_local_actor(&pool, "vmsuspended").await;
+    for target in [followed, repost_muted] {
+        sqlx::query(
+            "INSERT INTO follows (follower_actor_id, target_actor_id, status) VALUES ($1, $2, 'accepted')",
+        )
+        .bind(viewer)
+        .bind(target)
+        .execute(&pool)
+        .await
+        .unwrap();
+    }
+    for (sql, a, b) in [
+        (
+            "INSERT INTO blocks (blocker_actor_id, blocked_actor_id) VALUES ($1, $2)",
+            viewer,
+            blocked,
+        ),
+        (
+            "INSERT INTO blocks (blocker_actor_id, blocked_actor_id) VALUES ($1, $2)",
+            blocker,
+            viewer,
+        ),
+        (
+            "INSERT INTO mutes (muter_actor_id, muted_actor_id) VALUES ($1, $2)",
+            viewer,
+            muted,
+        ),
+        (
+            "INSERT INTO repost_mutes (muter_actor_id, muted_actor_id) VALUES ($1, $2)",
+            viewer,
+            repost_muted,
+        ),
+    ] {
+        sqlx::query(sql)
+            .bind(a)
+            .bind(b)
+            .execute(&pool)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE actors SET suspended_at = NOW() WHERE id = $1")
+        .bind(suspended)
+        .execute(&pool)
+        .await
+        .unwrap();
+
+    let stranger_post =
+        create_fixture_post(&pool, stranger, macro_fixture("public", None, &[])).await;
+    let followed_post =
+        create_fixture_post(&pool, followed, macro_fixture("public", None, &[])).await;
+    let mut ids = vec![stranger_post, followed_post];
+    for (actor, visibility, reply_to, recipients) in [
+        (followed, "unlisted", None, &[][..]),
+        (followed, "followers_only", None, &[][..]),
+        (stranger, "followers_only", None, &[][..]),
+        (viewer, "followers_only", None, &[][..]),
+        (followed, "direct", None, &[viewer][..]),
+        (followed, "direct", None, &[stranger][..]),
+        (viewer, "direct", None, &[stranger][..]),
+        (followed, "public", Some(stranger_post), &[][..]),
+        (followed, "public", Some(followed_post), &[][..]),
+    ] {
+        let fixture = macro_fixture(visibility, reply_to, recipients);
+        ids.push(create_fixture_post(&pool, actor, fixture).await);
+    }
+    for reposter in [followed, repost_muted] {
+        let id = create_fixture_post(&pool, reposter, macro_fixture("public", None, &[])).await;
+        sqlx::query("UPDATE posts SET repost_of_post_id = $2 WHERE id = $1")
+            .bind(id)
+            .bind(stranger_post)
+            .execute(&pool)
+            .await
+            .unwrap();
+        ids.push(id);
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    for exclude_direct in [false, true] {
+        let rows: Vec<(i64, bool, bool, bool, bool, bool, bool)> = sqlx::query_as(concat!(
+            "SELECT p.id,
+                    post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $2), ",
+            seiran_common::post_visible_to_viewer_sql!("$1", "$2"),
+            ",
+                    post_reply_target_followed($1, p.reply_to_post_id), ",
+            seiran_common::reply_target_followed_sql!("$1"),
+            ",
+                    NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL)
+                         AND repost_is_muted_for_viewer($1, p.actor_id)), ",
+            seiran_common::repost_not_muted_sql!("$1"),
+            "
+             FROM posts p WHERE p.id = ANY($3)"
+        ))
+        .bind(viewer)
+        .bind(exclude_direct)
+        .bind(&ids)
+        .fetch_all(&pool)
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), ids.len());
+        for (id, f_vis, m_vis, f_reply, m_reply, f_repost, m_repost) in rows {
+            assert_eq!(
+                f_vis, m_vis,
+                "可視性 post={id} exclude_direct={exclude_direct}"
+            );
+            assert_eq!(f_reply, m_reply, "リプライ先フォロー post={id}");
+            assert_eq!(f_repost, m_repost, "リポストミュート post={id}");
+            seen.extend([("vis", f_vis), ("reply", f_reply), ("repost", f_repost)]);
+        }
+    }
+
+    let actors = [followed, stranger, blocked, blocker, muted, suspended];
+    let rows: Vec<(i64, bool, bool)> = sqlx::query_as(concat!(
+        "SELECT a.id, NOT actor_is_hidden_for_viewer($1, a.id), ",
+        seiran_common::actor_not_hidden_sql!("$1", "a.id"),
+        " FROM actors a WHERE a.id = ANY($2)"
+    ))
+    .bind(viewer)
+    .bind(&actors[..])
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    assert_eq!(rows.len(), actors.len());
+    for (id, f, m) in rows {
+        assert_eq!(f, m, "非表示アクター actor={id}");
+        seen.insert(("hidden", f));
+    }
+    for kind in ["vis", "reply", "repost", "hidden"] {
+        assert!(
+            seen.contains(&(kind, true)) && seen.contains(&(kind, false)),
+            "{kind} の判定で真と偽の両方が出るデータになっていない"
+        );
+    }
+}
+
+fn macro_fixture<'a>(
+    visibility: &'a str,
+    reply_to_post_id: Option<i64>,
+    recipient_actor_ids: &'a [i64],
+) -> support::FixturePost<'a> {
+    support::FixturePost {
+        body: "macro-equivalence",
+        visibility: Some(visibility),
+        reply_to_post_id,
+        recipient_actor_ids,
+        ..support::FixturePost::default()
+    }
+}

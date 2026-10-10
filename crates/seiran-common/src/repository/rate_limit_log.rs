@@ -21,16 +21,24 @@ async fn lock_actor(
 }
 
 /// `since` 以降の投稿数（リポスト・削除済みを含む）。
+///
+/// 削除済みも数えるので `idx_posts_actor_id`（`deleted_at IS NULL` の部分インデックス）は
+/// 使えず、`actor_id` と `created_at` だけでは posts の全件走査になる。ローカル投稿の id は
+/// 作成時刻から採番した Snowflake なので、`id >= snowflake_id_floor(since)` を足して主キーの
+/// 範囲走査（直近の全投稿だけ）に絞る。
 pub async fn count_posts_since(
     pool: &PgPool,
     actor_id: i64,
     since: DateTime<Utc>,
 ) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE actor_id = $1 AND created_at >= $2")
-        .bind(actor_id)
-        .bind(since)
-        .fetch_one(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM posts WHERE id >= $3 AND actor_id = $1 AND created_at >= $2",
+    )
+    .bind(actor_id)
+    .bind(since)
+    .bind(crate::snowflake_id_floor(since))
+    .fetch_one(pool)
+    .await
 }
 
 /// `since` 以降の検索が `max` 回未満なら1回記録して真を返す。

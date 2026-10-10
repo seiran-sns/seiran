@@ -58,8 +58,8 @@ pub async fn list(
     sqlx::query_as(
         "SELECT id, post_id FROM bookmarks
          WHERE actor_id = $1
-           AND ($2::bigint IS NULL OR id < $2)
-           AND ($3::bigint IS NULL OR id > $3)
+           AND id < COALESCE($2::bigint, 9223372036854775807)
+           AND id > COALESCE($3::bigint, 0)
          ORDER BY id DESC LIMIT $4",
     )
     .bind(actor_id)

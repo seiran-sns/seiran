@@ -129,7 +129,7 @@ pub async fn outbox_page(
          LEFT JOIN posts orig ON orig.id = p.repost_of_post_id
          LEFT JOIN actors oa ON oa.id = orig.actor_id
          WHERE p.actor_id = $1 AND {PUBLIC_POST_CONDITION}
-           AND ($2::BIGINT IS NULL OR p.id < $2)
+           AND p.id < COALESCE($2::bigint, 9223372036854775807)
          ORDER BY p.id DESC LIMIT $3"
     ))
     .bind(actor_id)

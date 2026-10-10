@@ -401,7 +401,7 @@ impl ActorRepository for PgActorRepository {
     ) -> Result<Vec<Actor>, sqlx::Error> {
         sqlx::query_as::<_, Actor>(&format!(
             "SELECT {ACTOR_COLS} FROM actors
-             WHERE at_did IS NOT NULL AND ($2::bigint IS NULL OR id > $2)
+             WHERE at_did IS NOT NULL AND id > COALESCE($2::bigint, 0)
              ORDER BY id ASC
              LIMIT $1"
         ))
@@ -762,9 +762,11 @@ pub async fn lite_rows_for_actors(
 /// PDSあたりDID数上限がどの状態までを数えるか不明なため、最も保守的に全て数える）。
 /// `users`行を持たないシステムアクターは含めない。
 pub async fn count_local_accounts(pool: &sqlx::PgPool) -> Result<i64, sqlx::Error> {
-    sqlx::query_scalar("SELECT COUNT(*) FROM actors WHERE actor_type = 'local' AND user_id IS NOT NULL")
-        .fetch_one(pool)
-        .await
+    sqlx::query_scalar(
+        "SELECT COUNT(*) FROM actors WHERE actor_type = 'local' AND user_id IS NOT NULL",
+    )
+    .fetch_one(pool)
+    .await
 }
 
 /// DID 転出済みにする（既に設定済みなら最初の時刻を保つ）。
@@ -905,7 +907,7 @@ pub async fn list_suspended(
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
          LEFT JOIN users u ON u.id = a.user_id
-         WHERE a.suspended_at IS NOT NULL AND ($1::bigint IS NULL OR a.id > $1)
+         WHERE a.suspended_at IS NOT NULL AND a.id > COALESCE($1::bigint, 0)
          ORDER BY a.id
          LIMIT $2",
     )

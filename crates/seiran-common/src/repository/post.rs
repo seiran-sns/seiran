@@ -864,47 +864,19 @@ impl PostRepository for PgPostRepository {
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         // `actor_id = $1 OR actor_id IN (follows...)` を素朴に `ORDER BY id DESC LIMIT` すると、
         // posts 全体（Bsky Jetstream 経由で無関係なリモート投稿を含め100万行超）を id 降順に
-        // スキャンしながら1行ずつフィルタする実行計画になり、フォロー数が少ないユーザーほど
-        // 大量の無関係行を読み飛ばすまで終わらない（100万行規模で秒単位）。
-        // targets（自分+フォロー中）を LATERAL で actor_id ごとに `idx_posts_actor_id` を引かせ、
-        // 各アクター最大 limit 件だけ取ってからマージソートする形に書き換えると、
-        // 既存インデックスのみで数ms に収まる。
-        sqlx::query_as::<_, TimelinePost>(
-            concat!("WITH targets AS (
-                 SELECT $1::bigint AS actor_id
-                 UNION
-                 SELECT target_actor_id FROM follows
-                 WHERE follower_actor_id = $1 AND status = 'accepted'
-                   AND NOT actor_is_hidden_for_viewer($1, target_actor_id)
-             ),
-             candidate_ids AS (
-                 SELECT p.id
-                 FROM targets t
-                 CROSS JOIN LATERAL (
-                     SELECT id FROM posts p
-                     WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
-                       AND ($2::bigint IS NULL OR p.id < $2)
-                       AND ($3::bigint IS NULL OR p.id > $3)
-                       AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
-                       AND post_reply_target_followed($1, p.reply_to_post_id)
-                       AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
-                     ORDER BY p.id DESC LIMIT $4
-                 ) p
-                 ORDER BY p.id DESC LIMIT $4
-             )
-             SELECT ", crate::timeline_post_columns!(), "
-             FROM candidate_ids ci
-             JOIN posts p ON p.id = ci.id
-             ", crate::timeline_post_joins!(), "
-             ORDER BY p.id DESC"),
-        )
-        .bind(actor_id)
-        .bind(until_id)
-        .bind(since_id)
-        .bind(limit)
-        .bind(exclude_direct)
-        .fetch_all(&self.pool)
-        .await
+        // スキャンしながら1行ずつフィルタする実行計画になり、フォロー中の投稿が疎なほど
+        // 大量の無関係行を読み飛ばすまで終わらない。候補の取り出し方は feed.rs 参照。
+        let source = super::feed::FeedSource::Following {
+            viewer_actor_id: actor_id,
+            exclude_direct,
+        };
+        let page = super::feed::FeedPage {
+            limit,
+            until_id,
+            since_id,
+        };
+        let ids = super::feed::feed_candidate_ids(&self.pool, source, page).await?;
+        super::feed::fetch_feed_posts(&self.pool, &ids).await
     }
 
     async fn local_timeline(
@@ -919,8 +891,8 @@ impl PostRepository for PgPostRepository {
             concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p ", crate::timeline_post_joins!(), "
              WHERE p.is_local = true AND p.deleted_at IS NULL
-               AND ($2::bigint IS NULL OR p.id < $2)
-               AND ($3::bigint IS NULL OR p.id > $3)
+               AND p.id < COALESCE($2::bigint, 9223372036854775807)
+               AND p.id > COALESCE($3::bigint, 0)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
@@ -944,53 +916,29 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        // home_timeline（自分+フォロー中、LATERAL方式）とlocal_timeline（ローカル全体、
-        // is_localインデックス使用）の候補IDをUNIONしてから外側で再度LIMITする。
-        // 片方のみのLATERAL/インデックス最適化をそのまま活かせる（#78）。
-        sqlx::query_as::<_, TimelinePost>(
-            concat!("WITH targets AS (
-                 SELECT $1::bigint AS actor_id
-                 UNION
-                 SELECT target_actor_id FROM follows
-                 WHERE follower_actor_id = $1 AND status = 'accepted'
-                   AND NOT actor_is_hidden_for_viewer($1, target_actor_id)
-             ),
-             candidate_ids AS (
-                 (
-                     SELECT p.id
-                     FROM targets t
-                     CROSS JOIN LATERAL (
-                         SELECT id FROM posts p
-                         WHERE p.actor_id = t.actor_id AND p.deleted_at IS NULL
-                           AND ($2::bigint IS NULL OR p.id < $2)
-                           AND ($3::bigint IS NULL OR p.id > $3)
-                           AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
-                           AND post_reply_target_followed($1, p.reply_to_post_id)
-                           AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
-                         ORDER BY p.id DESC LIMIT $4
-                     ) p
-                 )
-
-                 UNION
-
-                 (
-                     SELECT p.id
-                     FROM posts p
-                     WHERE p.is_local = true AND p.deleted_at IS NULL
-                       AND ($2::bigint IS NULL OR p.id < $2)
-                       AND ($3::bigint IS NULL OR p.id > $3)
-                       AND (p.visibility != 'unlisted' OR p.actor_id = $1)
-                       AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
-                       AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
-                       AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
-                     ORDER BY p.id DESC LIMIT $4
-                 )
-             )
-             SELECT ", crate::timeline_post_columns!(), "
-             FROM candidate_ids ci
-             JOIN posts p ON p.id = ci.id
-             ", crate::timeline_post_joins!(), "
-             ORDER BY p.id DESC LIMIT $4"),
+        // home_timeline と同じフォロー中の候補と、ローカル全体（`idx_posts_local_active`）の
+        // 候補をそれぞれ最大 limit 件取り、合わせて新しい順に limit 件にする（#78）。
+        let source = super::feed::FeedSource::Following {
+            viewer_actor_id: actor_id,
+            exclude_direct,
+        };
+        let page = super::feed::FeedPage {
+            limit,
+            until_id,
+            since_id,
+        };
+        let mut ids = super::feed::feed_candidate_ids(&self.pool, source, page).await?;
+        let local_ids: Vec<i64> = sqlx::query_scalar(
+            "SELECT p.id
+             FROM posts p
+             WHERE p.is_local = true AND p.deleted_at IS NULL
+               AND p.id < COALESCE($2::bigint, 9223372036854775807)
+               AND p.id > COALESCE($3::bigint, 0)
+               AND (p.visibility != 'unlisted' OR p.actor_id = $1)
+               AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+               AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
+               AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)
+             ORDER BY p.id DESC LIMIT $4",
         )
         .bind(actor_id)
         .bind(until_id)
@@ -998,7 +946,12 @@ impl PostRepository for PgPostRepository {
         .bind(limit)
         .bind(exclude_direct)
         .fetch_all(&self.pool)
-        .await
+        .await?;
+        ids.extend(local_ids);
+        ids.sort_unstable_by(|a, b| b.cmp(a));
+        ids.dedup();
+        ids.truncate(limit.max(0) as usize);
+        super::feed::fetch_feed_posts(&self.pool, &ids).await
     }
 
     async fn global_timeline(
@@ -1014,8 +967,8 @@ impl PostRepository for PgPostRepository {
             concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p ", crate::timeline_post_joins!(), "
              WHERE p.deleted_at IS NULL
-               AND ($2::bigint IS NULL OR p.id < $2)
-               AND ($3::bigint IS NULL OR p.id > $3)
+               AND p.id < COALESCE($2::bigint, 9223372036854775807)
+               AND p.id > COALESCE($3::bigint, 0)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
@@ -1065,8 +1018,8 @@ impl PostRepository for PgPostRepository {
             crate::timeline_post_joins!(),
             "
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
-               AND ($3::bigint IS NULL OR p.id < $3)
-               AND ($4::bigint IS NULL OR p.id > $4)
+               AND p.id < COALESCE($3::bigint, 9223372036854775807)
+               AND p.id > COALESCE($4::bigint, 0)
                AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, $6)
              ORDER BY p.id DESC
@@ -1096,8 +1049,8 @@ impl PostRepository for PgPostRepository {
              ", crate::timeline_post_joins!(), "
              WHERE p.deleted_at IS NULL
                AND p.actor_id != $1
-               AND ($3::bigint IS NULL OR p.id < $3)
-               AND ($4::bigint IS NULL OR p.id > $4)
+               AND p.id < COALESCE($3::bigint, 9223372036854775807)
+               AND p.id > COALESCE($4::bigint, 0)
                AND (
                  (p.visibility = 'direct' AND EXISTS (
                      SELECT 1 FROM post_recipients pr WHERE pr.post_id = p.id AND pr.actor_id = $1
