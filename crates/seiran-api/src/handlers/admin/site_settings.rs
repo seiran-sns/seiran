@@ -381,7 +381,9 @@ pub async fn update_site_settings(
     // 0は無制限。他の数値設定と違い0を許す。
     if let Some(v) = req.max_user_accounts.as_deref().filter(|v| !v.is_empty()) {
         if !matches!(v.parse::<i64>(), Ok(n) if n >= 0) {
-            return Err(ApiError::BadRequest("INVALID_MAX_USER_ACCOUNTS".to_string()));
+            return Err(ApiError::BadRequest(
+                "INVALID_MAX_USER_ACCOUNTS".to_string(),
+            ));
         }
     }
 

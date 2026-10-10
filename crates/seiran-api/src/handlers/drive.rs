@@ -709,7 +709,10 @@ async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
 /// （`POST /api/drive/files`・`drive/files/show` 用。新規アップロード時の
 /// `create_image_file`/`create_video_or_audio_file` はレスポンスをストレージ保存と
 /// 同じ手順内で組み立てるため、こちらは流用しない）。
-pub(crate) async fn to_drive_file_response(state: &AppState, record: &MediaFile) -> DriveFileResponse {
+pub(crate) async fn to_drive_file_response(
+    state: &AppState,
+    record: &MediaFile,
+) -> DriveFileResponse {
     let url = build_public_url(
         state.storage_providers.as_ref(),
         record.storage_provider_id,
@@ -717,7 +720,14 @@ pub(crate) async fn to_drive_file_response(state: &AppState, record: &MediaFile)
     )
     .await;
     let thumbnail_url = match &record.thumbnail_key {
-        Some(key) => Some(build_public_url(state.storage_providers.as_ref(), record.storage_provider_id, key).await),
+        Some(key) => Some(
+            build_public_url(
+                state.storage_providers.as_ref(),
+                record.storage_provider_id,
+                key,
+            )
+            .await,
+        ),
         None if record.mime_type.starts_with("image/") => Some(url.clone()),
         None => None,
     };
