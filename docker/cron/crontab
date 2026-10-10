@@ -1,0 +1,5 @@
+LANG=ja_JP.UTF-8
+
+# Hourly db backup
+# 同一ホストで動く他システムのバックアップ（毎時18分）と、CPU負荷・ディスクIOが重ならないよう時刻をずらしている。
+48 * * * * /seiran/scripts/backup-db.sh

@@ -48,6 +48,28 @@ services:
       interval: 5s
       retries: 20
 
+  # ─── db2 (リストア実験用のDB) ──────────────────────────────────────────────
+  # 稼働中の db に復元すると実ユーザーのデータを壊すので、restore-db.sh の復元先
+  # （DB_SERVICE=db2）に使う別DB。通常の `up -d` では起動せず、
+  # `COMPOSE_PROFILES=restore-test docker compose -f docker-compose.mono.yml up -d db2`
+  # で起動する。ホストへのポート公開はしない（db が 5432 を使っているため）。
+  db2:
+    profiles: ["restore-test"]
+    image: seiran-postgres:16-pgbigm
+    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm,pg_stat_statements"]
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db2-data:/var/lib/postgresql/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
   # ─── seiran-server (全ロールを1プロセスで実行) ─────────────────────────────
   # command 未指定 → Dockerfile の CMD ["seiran-server"] → role=all。
   seiran-server:
@@ -112,6 +134,25 @@ services:
     networks:
       - internal
 
+  # ─── cron (DBの定時バックアップ) ───────────────────────────────────────────
+  # docker/cron/crontab に従い scripts/backup-db.sh を実行する。スクリプトは
+  # ホストのDockerソケット経由で db コンテナの pg_dump を叩き、出力をR2へ転送する
+  # （クレデンシャルは .env の AWS_* / S3_ENDPOINT / BACKUP_OBJECT_S3URL）。
+  # aws-cli は `docker run` でホストのDockerデーモン側に起動されるので、このコンテナ自身は
+  # ネットワークに繋ぐ必要がない。compose ファイルは db サービスさえ解決できればよいので、スクリプトは
+  # split-role / mono のどちらの構成でも docker-compose.mono.yml を参照して動く。
+  cron:
+    build:
+      context: docker/cron
+    image: seiran-cron:latest
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/seiran:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
   # ─── Cloudflare Tunnel ────────────────────────────────────────────────────
   tunnel:
     image: cloudflare/cloudflared:latest
@@ -128,4 +169,5 @@ networks:
 
 volumes:
   db-data:
+  db2-data:
   config-data:

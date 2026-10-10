@@ -135,6 +135,25 @@ services:
       - internal
       - external
 
+  # ─── cron (DBの定時バックアップ) ───────────────────────────────────────────
+  # docker/cron/crontab に従い scripts/backup-db.sh を実行する。スクリプトは
+  # ホストのDockerソケット経由で db コンテナの pg_dump を叩き、出力をR2へ転送する
+  # （クレデンシャルは .env の AWS_* / S3_ENDPOINT / BACKUP_OBJECT_S3URL）。
+  # aws-cli は `docker run` でホストのDockerデーモン側に起動されるので、このコンテナ自身は
+  # ネットワークに繋ぐ必要がない。compose ファイルは db サービスさえ解決できればよいので、スクリプトは
+  # split-role / mono のどちらの構成でも docker-compose.mono.yml を参照して動く。
+  cron:
+    build:
+      context: docker/cron
+    image: seiran-cron:latest
+    restart: always
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/seiran:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
   # ─── Cloudflare Tunnel ────────────────────────────────────────────────────
   tunnel:
     image: cloudflare/cloudflared:latest
