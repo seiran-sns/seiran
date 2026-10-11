@@ -1,0 +1,90 @@
+# フロントエンドの静的ファイルを配り、バックエンドのパスを seiran-server へ転送する。
+# ${SEIRAN_API_UPSTREAM}・${SEIRAN_FEDERATION_UPSTREAM} は起動時にエントリポイントが埋める
+# （`all` ではどちらも同じコンテナ内の seiran-server）。
+
+upstream api {
+    server ${SEIRAN_API_UPSTREAM};
+}
+
+upstream federation {
+    server ${SEIRAN_FEDERATION_UPSTREAM};
+}
+
+server {
+    listen 80;
+    listen [::]:80;
+
+    root /usr/share/seiran/frontend;
+
+    # ─── ActivityPub / Fediverse 連合 ───────────────────────────────────────
+    location = /.well-known/webfinger { include /etc/nginx/seiran/proxy.conf; proxy_pass http://federation; }
+    location = /.well-known/nodeinfo  { include /etc/nginx/seiran/proxy.conf; proxy_pass http://federation; }
+    location ^~ /nodeinfo/            { include /etc/nginx/seiran/proxy.conf; proxy_pass http://federation; }
+    location = /inbox                 { include /etc/nginx/seiran/proxy.conf; proxy_pass http://federation; }
+    location ^~ /users/               { include /etc/nginx/seiran/proxy.conf; proxy_pass http://federation; }
+
+    # ─── AT Protocol（subscribeRepos は WebSocket）・DID 解決 ───────────────
+    location ^~ /xrpc/ {
+        include /etc/nginx/seiran/proxy.conf;
+        proxy_read_timeout 3600s;
+        proxy_pass http://api;
+    }
+    location = /.well-known/did.json      { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location = /.well-known/atproto-did   { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+
+    # ─── API ────────────────────────────────────────────────────────────────
+    # リアルタイム配信の WebSocket（Misskey 互換・Mastodon 互換）
+    location = /api/streaming {
+        include /etc/nginx/seiran/proxy.conf;
+        proxy_read_timeout 3600s;
+        proxy_pass http://api;
+    }
+    location = /api/v1/streaming {
+        include /etc/nginx/seiran/proxy.conf;
+        proxy_read_timeout 3600s;
+        proxy_pass http://api;
+    }
+    # ドライブ・Mastodon 互換のメディアのアップロードは動画・音声を考慮して 100MB まで
+    location ^~ /api/drive/ {
+        include /etc/nginx/seiran/proxy.conf;
+        client_max_body_size 100m;
+        proxy_pass http://api;
+    }
+    location ~ ^/api/v[12]/media$|^/api/v1/accounts/update_credentials$ {
+        include /etc/nginx/seiran/proxy.conf;
+        client_max_body_size 100m;
+        proxy_pass http://api;
+    }
+    location ^~ /api/ { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+
+    # Misskey 互換の画像プロキシ（`/proxy/:url*` のサブパスも含む）
+    location ^~ /proxy     { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    # MiAuth・Mastodon 互換 OAuth・Misskey 旧来のアプリ認証（承認画面は SPA の別パス）
+    location ^~ /miauth/   { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location ^~ /oauth/    { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location ^~ /auth/     { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    # サイトアイコン・PWA マニフェストはサイト設定から生成する
+    location = /favicon.ico           { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location = /manifest.webmanifest  { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location = /health                { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+
+    # ─── 投稿・リポスト・プロフィール ────────────────────────────────────────
+    # バックエンドが Accept で AP JSON-LD と OGP を差し込んだ SPA の HTML を出し分ける
+    # （crates/seiran-api/src/handlers/ogp.rs）。OGP の HTML の元になる index.html は
+    # バックエンドが `/` を取りに来る（FRONTEND_ORIGIN）。
+    location ^~ /notes/     { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location ^~ /announces/ { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+    location ^~ /@          { include /etc/nginx/seiran/proxy.conf; proxy_pass http://api; }
+
+    # ─── フロントエンド ─────────────────────────────────────────────────────
+    # ファイル名にハッシュが入るので、内容が変われば URL も変わる。
+    location ^~ /assets/ {
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        try_files $uri =404;
+    }
+    # SPA のルートは index.html を返す。更新後すぐ新しい版を読むよう、キャッシュさせない。
+    location / {
+        add_header Cache-Control "no-cache";
+        try_files $uri /index.html;
+    }
+}

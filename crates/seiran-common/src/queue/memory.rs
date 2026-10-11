@@ -15,6 +15,7 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{Mutex, Notify};
+use tokio_util::sync::CancellationToken;
 
 use crate::traits::{Job, JobQueue, QueuedJob};
 
@@ -78,7 +79,7 @@ impl InMemoryJobQueue {
     }
 
     /// キューからジョブを1件デキューします（非ブロッキング。空なら `None`）。
-    /// `JobQueue::dequeue_blocking` はこれをラップしてブロッキング動作にする。
+    /// `JobQueue::dequeue` はこれをラップして、積まれるまで待つ動作にする。
     pub async fn dequeue(&self) -> Option<Job> {
         let mut inner = self.inner.lock().await;
         inner.heap.pop().map(|pj| pj.job)
@@ -152,19 +153,22 @@ impl JobQueue for InMemoryJobQueue {
         Ok(())
     }
 
-    async fn dequeue_blocking(&self) -> QueuedJob {
+    async fn dequeue(&self, shutdown: &CancellationToken) -> Option<QueuedJob> {
         loop {
             {
                 let mut inner = self.inner.lock().await;
                 if let Some(pj) = inner.heap.pop() {
-                    return QueuedJob {
+                    return Some(QueuedJob {
                         job: pj.job,
                         priority: pj.priority,
                         attempt: pj.attempt,
-                    };
+                    });
                 }
             }
-            self.notify.notified().await;
+            tokio::select! {
+                _ = shutdown.cancelled() => return None,
+                _ = self.notify.notified() => {}
+            }
         }
     }
 }
@@ -172,6 +176,14 @@ impl JobQueue for InMemoryJobQueue {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn dequeue_returns_none_on_shutdown() {
+        let q = InMemoryJobQueue::new();
+        let shutdown = CancellationToken::new();
+        shutdown.cancel();
+        assert!(JobQueue::dequeue(&q, &shutdown).await.is_none());
+    }
 
     /// テスト用のダミージョブ。actor_id で個体を識別する。
     fn job(id: i64) -> Job {
@@ -265,10 +277,14 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dequeue_blocking_waits_then_returns_queued_job() {
+    async fn dequeue_waits_then_returns_queued_job() {
         let q = Arc::new(InMemoryJobQueue::new());
         let q2 = Arc::clone(&q);
-        let handle = tokio::spawn(async move { q2.dequeue_blocking().await });
+        let handle = tokio::spawn(async move {
+            JobQueue::dequeue(&*q2, &CancellationToken::new())
+                .await
+                .unwrap()
+        });
 
         // まだ何も積んでいないので即座には終わらないはず
         tokio::time::sleep(Duration::from_millis(20)).await;
@@ -277,7 +293,7 @@ mod tests {
         q.enqueue(job(42), 10).await.unwrap();
         let qj = tokio::time::timeout(Duration::from_millis(200), handle)
             .await
-            .expect("dequeue_blocking がタイムアウトした")
+            .expect("dequeue がタイムアウトした")
             .unwrap();
         assert_eq!(post_id_of(&qj.job), 42);
         assert_eq!(qj.priority, 10);
@@ -290,7 +306,9 @@ mod tests {
         q.enqueue_retry(job(7), 50, 3, Duration::from_millis(10))
             .await
             .unwrap();
-        let qj = q.dequeue_blocking().await;
+        let qj = JobQueue::dequeue(&q, &CancellationToken::new())
+            .await
+            .unwrap();
         assert_eq!(post_id_of(&qj.job), 7);
         assert_eq!(qj.priority, 50);
         assert_eq!(qj.attempt, 3);

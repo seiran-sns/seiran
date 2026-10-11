@@ -6,18 +6,20 @@ pub mod avatar;
 pub mod bridge_post;
 pub mod crypto;
 pub mod db;
+pub mod event_bus;
 pub mod follow_approval;
 pub mod follow_exec;
 pub mod follow_target;
 pub mod hashtag;
 pub mod id;
 pub mod jetstream_control;
-pub mod jetstream_leader;
 pub mod jobs;
 pub mod lang;
+pub mod leader;
 pub mod link_target;
 pub mod local_domain;
 pub mod mention;
+pub mod messaging;
 pub mod net;
 pub mod oembed_whitelist;
 pub mod queue;
@@ -44,10 +46,12 @@ pub use lang::{
     SUPPORTED_LANGUAGES,
 };
 pub use local_domain::{domain_candidate_from_host, resolve_local_domain, LocalDomain};
+pub use messaging::Messaging;
 pub use system_actor::{
     ensure_relay_agent_actor, ensure_system_proxy_actor, resolve_relay_agent_actor_id,
     resolve_system_proxy_actor_id,
 };
+pub use tokio_util::sync::CancellationToken;
 pub use username::{
     is_reserved_username, is_valid_local_username, strip_local_domain_suffix, PROXY_ACTOR_USERNAME,
     RESERVED_LOCAL_USERNAMES,
@@ -66,7 +70,7 @@ pub use auth::{AuthError, LocalAuthProvider, VerifiedAtpAccess, VerifiedAtpRefre
 pub use crypto::{decrypt as crypto_decrypt, encrypt as crypto_encrypt, CryptoError};
 pub use queue::worker::{
     priority as job_priority, DeliveryConfig, FollowExecConfig, InboxContext, JobContext,
-    DEFAULT_MAX_CONCURRENT_JOBS,
+    WorkerConfig, DEFAULT_MAX_CONCURRENT_JOBS,
 };
 pub use queue::{create_job_queue, InMemoryJobQueue, RedisJobQueue, WorkerEngine};
 pub use repository::{

@@ -30,7 +30,6 @@ use seiran_common::atp::{
     parse_bsky_embed_attachments, parse_bsky_embed_link_card, parse_bsky_embed_quote_uri,
 };
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
-use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
 use seiran_common::queue::worker::priority;
 use seiran_common::repository::{
     ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository,
@@ -40,7 +39,7 @@ use seiran_common::repository::{
 };
 use seiran_common::streaming::{ChannelScope, broadcast_reaction_update};
 use seiran_common::traits::{Job, JobQueue};
-use seiran_common::{StreamHub, generate_snowflake_id};
+use seiran_common::{CancellationToken, StreamHub, generate_snowflake_id};
 
 const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
 
@@ -57,94 +56,20 @@ const WANTED_DIDS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const JETSTREAM_CURSOR_KEY: &str = "jetstream_cursor";
 const JETSTREAM_CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// Jetstream接続の起動・停止を、Redisによるリーダー選出（`seiran_common::jetstream_leader`）
-/// の結果に応じて切り替える。`docker-compose.mono.yml`の`--scale seiran-server=N`（無停止
-/// バージョンアップ中の一時的な複数起動）や`firehose`ロールの複数インスタンス起動時に、
-/// Jetstream WebSocket接続が重複して張られるのを防ぐ（Doc6既知の課題）。
-///
-/// `redis_url`が無い場合、またはRedisとの通信に失敗し続ける場合は、ロールに応じて
-/// フェイルオープン/フェイルクローズする（`is_monolith`）。monolith（`all`ロール）は
-/// 複数起動時の非効率を許容する方針のため接続を維持し、split-role構成の`firehose`ロールは
-/// Redisが死ねばジョブキュー等の他機能も共倒れになるため接続を切る。
+/// Jetstream 接続を維持し続ける（エラー時は指数バックオフで再接続）。`stop` が発火したら
+/// カーソルを保存して戻る。複数プロセスのうち1つだけで動かす（`seiran_common::leader`）。
 pub async fn run(
     pool: PgPool,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
-    redis_url: Option<String>,
-    is_monolith: bool,
     job_queue: Arc<dyn JobQueue>,
-) {
-    let mut elector: Option<JetstreamLeaderElector> = None;
-    let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut poll = tokio::time::interval(jetstream_leader::LEASE_CHECK_INTERVAL);
-
-    loop {
-        poll.tick().await;
-
-        let should_run = match &redis_url {
-            None => is_monolith,
-            Some(url) => {
-                if elector.is_none() {
-                    match JetstreamLeaderElector::connect(url, jetstream_leader::DEFAULT_LEADER_KEY)
-                        .await
-                    {
-                        Ok(e) => elector = Some(e),
-                        Err(e) => tracing::error!("[Jetstream] Redis接続失敗: {}", e),
-                    }
-                }
-                match &elector {
-                    Some(e) => match e.try_acquire_or_renew().await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            tracing::error!(
-                                "[Jetstream] Redisリース確認失敗: {}。再接続を試みます。",
-                                e
-                            );
-                            elector = None;
-                            is_monolith
-                        }
-                    },
-                    None => is_monolith,
-                }
-            }
-        };
-
-        match (should_run, current_task.is_some()) {
-            (true, false) => {
-                tracing::info!(
-                    "[Jetstream] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。"
-                );
-                let pool = pool.clone();
-                let http = Arc::clone(&http);
-                let hub = Arc::clone(&stream_hub);
-                let queue = Arc::clone(&job_queue);
-                current_task = Some(tokio::spawn(run_jetstream_loop(pool, http, hub, queue)));
-            }
-            (false, true) => {
-                tracing::info!("[Jetstream] リーダーでなくなったため切断。");
-                if let Some(task) = current_task.take() {
-                    task.abort();
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-/// Jetstream接続を維持し続けるループ（エラー時は指数バックオフで再接続）。
-/// リーダー選出で「非リーダー」と判定されると、呼び出し元がこのタスクごと`abort`する。
-async fn run_jetstream_loop(
-    pool: PgPool,
-    http: Arc<reqwest::Client>,
-    stream_hub: Arc<StreamHub>,
-    job_queue: Arc<dyn JobQueue>,
+    stop: CancellationToken,
 ) {
     let mut backoff_secs = 2u64;
 
-    loop {
-        match connect_and_process(&pool, &http, &stream_hub, &job_queue).await {
+    while !stop.is_cancelled() {
+        match connect_and_process(&pool, &http, &stream_hub, &job_queue, &stop).await {
             Ok(()) => {
-                tracing::info!("[Jetstream] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
             }
             Err(e) => {
@@ -153,7 +78,10 @@ async fn run_jetstream_loop(
                     e,
                     backoff_secs
                 );
-                sleep(Duration::from_secs(backoff_secs)).await;
+                tokio::select! {
+                    _ = stop.cancelled() => {}
+                    _ = sleep(Duration::from_secs(backoff_secs)) => {}
+                }
                 backoff_secs = (backoff_secs * 2).min(120);
             }
         }
@@ -222,6 +150,7 @@ async fn connect_and_process(
     http: &Arc<reqwest::Client>,
     stream_hub: &Arc<StreamHub>,
     job_queue: &Arc<dyn JobQueue>,
+    stop: &CancellationToken,
 ) -> Result<(), String> {
     let cursor = load_jetstream_cursor(pool).await;
     let wanted_dids = load_wanted_dids(pool).await;
@@ -240,6 +169,7 @@ async fn connect_and_process(
     tracing::info!("[Jetstream] 接続成功。イベント受信中...");
 
     let mut last_saved_at = tokio::time::Instant::now() - JETSTREAM_CURSOR_SAVE_INTERVAL;
+    let mut last_time_us: Option<i64> = None;
     let mut wanted_dids_poll = tokio::time::interval(WANTED_DIDS_POLL_INTERVAL);
     wanted_dids_poll.tick().await; // 初回tickは即座に発火するので消費しておく
 
@@ -250,17 +180,27 @@ async fn connect_and_process(
                 let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
 
                 if let Message::Text(text) = msg {
-                    if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text)
+                    let time_us = serde_json::from_str::<JetstreamTimeUs>(&text).ok().map(|t| t.time_us);
+                    if let Some(time_us) = time_us
                         && last_saved_at.elapsed() >= JETSTREAM_CURSOR_SAVE_INTERVAL
                     {
-                        save_jetstream_cursor(pool, t.time_us).await;
+                        save_jetstream_cursor(pool, time_us).await;
                         last_saved_at = tokio::time::Instant::now();
                     }
 
                     if let Err(e) = process_message(&text, pool, http, stream_hub, job_queue).await {
                         tracing::error!("[Jetstream] メッセージ処理エラー（スキップ）: {}", e);
                     }
+                    last_time_us = time_us.or(last_time_us);
                 }
+            }
+            _ = stop.cancelled() => {
+                // 処理し終えたイベントまでを保存し、引き継いだプロセスがその続きから読む。
+                if let Some(time_us) = last_time_us {
+                    save_jetstream_cursor(pool, time_us).await;
+                }
+                tracing::info!("[Jetstream] 停止します。");
+                return Ok(());
             }
             _ = wanted_dids_poll.tick() => {
                 let current_touch = fetch_wanted_dids_touch(pool).await;

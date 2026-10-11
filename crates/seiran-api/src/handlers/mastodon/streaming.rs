@@ -309,6 +309,7 @@ async fn send_all(socket: &mut WebSocket, frames: Vec<Message>) -> bool {
 
 async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: Vec<Stream>) {
     let mut rx = state.stream_hub.subscribe();
+    let shutdown = state.shutdown.clone();
     let mut conn = Connection {
         state,
         actor_id,
@@ -328,6 +329,10 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
 
     loop {
         tokio::select! {
+            _ = shutdown.cancelled() => {
+                let _ = socket.send(crate::handlers::streaming::restart_close_message()).await;
+                break;
+            }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
                     if ev.recipients.contains(&actor_id) && !settle_armed && conn.wants_notifications() {

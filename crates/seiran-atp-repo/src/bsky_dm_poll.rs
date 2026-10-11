@@ -15,10 +15,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seiran_common::atp::sign_service_auth_jwt;
-use seiran_common::generate_snowflake_id;
 use seiran_common::repository::{DmRepository, PgDmRepository, dm};
 use seiran_common::streaming::StreamHub;
 use seiran_common::traits::JobQueue;
+use seiran_common::{CancellationToken, generate_snowflake_id};
 use sqlx::PgPool;
 
 use crate::firehose::resolve_or_upsert_bsky_actor;
@@ -38,14 +38,14 @@ pub async fn run(
     job_queue: Arc<dyn JobQueue>,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
+    stop: CancellationToken,
 ) {
-    let mut interval = tokio::time::interval(POLL_INTERVAL);
-    loop {
-        interval.tick().await;
+    seiran_common::leader::every(POLL_INTERVAL, stop, || async {
         if let Err(e) = poll_once(&pool, &job_queue, &http, &stream_hub).await {
             tracing::error!("[BskyDmPoll] ポーリング失敗: {}", e);
         }
-    }
+    })
+    .await;
 }
 
 async fn poll_once(

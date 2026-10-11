@@ -4,13 +4,16 @@
 //! 受け取るべきローカルアクターの WebSocket 接続へブロードキャストする。
 //! フィルタは各接続側で `recipients` を見て行う。
 //!
-//! mono バイナリでは api ロールと federation ロールが同一プロセスで動くため、
-//! この共有ハブ 1 つを両者の状態に注入して跨いで配信する。
+//! 1プロセスにハブは1つで、そのプロセスの全ロールが共有する。Redis があればハブ同士を
+//! Redis でつなぎ、どのプロセスで起きたイベントもすべての接続へ届ける（`event_bus`）。
 
 use std::collections::HashSet;
 use std::sync::Arc;
 
+use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
+
+use crate::event_bus::EventBus;
 
 use crate::repository::{DmRepository, FollowRepository, ReactionRepository};
 
@@ -55,6 +58,7 @@ impl ChannelKind {
 /// 新規ノートがどのタイムラインチャンネルに該当するかを表すメタデータ。publish時に1回
 /// 構築し、各WSコネクションが自分の購読チャンネル一覧に対して`matches`でO(1)照合する
 /// （コネクションごとのDB再問い合わせを発生させないため）。
+#[derive(Serialize, Deserialize)]
 pub struct ChannelScope {
     pub is_local: bool,
     /// `"public"` / `"unlisted"` / `"followers_only"` のいずれか（`"direct"`はここに来ない。
@@ -92,7 +96,7 @@ impl ChannelScope {
 
 /// 公開系タイムラインチャンネル向けの配信データ。`ChannelScope`と、各コネクションへ
 /// そのまま転送するノートJSONを保持する。
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ChannelBroadcast {
     pub scope: Arc<ChannelScope>,
     pub note_json: Arc<serde_json::Value>,
@@ -104,7 +108,7 @@ pub struct ChannelBroadcast {
 /// `broadcast_all` はどちらでもなく、ログイン中の全接続へ無条件配信する第三の方式
 /// （`recipients`のように宛先を事前に列挙できない・`channel`のように購読を要求するほどでは
 /// ない低頻度イベント向け、例: bio内リンクの非同期解決完了通知）。
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StreamEvent {
     pub recipients: Arc<HashSet<i64>>,
     /// クライアントへ送る JSON テキスト（例: `{"type":"note","body":{...}}`）。
@@ -113,9 +117,14 @@ pub struct StreamEvent {
     pub broadcast_all: bool,
 }
 
-/// プロセス内共有のブロードキャストハブ。
+/// Redis でプロセス間の配信をつなぐときのチャンネル名。
+const STREAM_EVENTS_CHANNEL: &str = "seiran:stream:events";
+/// 手元の購読者が読み遅れたときに保持しておくイベント数。
+const STREAM_EVENTS_CAPACITY: usize = 512;
+
+/// WebSocket 接続へイベントを配るハブ。
 pub struct StreamHub {
-    tx: broadcast::Sender<StreamEvent>,
+    bus: EventBus<StreamEvent>,
 }
 
 impl Default for StreamHub {
@@ -125,18 +134,28 @@ impl Default for StreamHub {
 }
 
 impl StreamHub {
+    /// このプロセスの中だけで配るハブ。
     pub fn new() -> Self {
-        let (tx, _) = broadcast::channel(512);
-        Self { tx }
+        Self {
+            bus: EventBus::local(STREAM_EVENTS_CAPACITY),
+        }
+    }
+
+    /// Redis を通して全プロセスの接続へ配るハブ。
+    pub async fn with_redis(client: &redis::Client) -> Result<Self, redis::RedisError> {
+        Ok(Self {
+            bus: EventBus::with_redis(STREAM_EVENTS_CAPACITY, client, STREAM_EVENTS_CHANNEL)
+                .await?,
+        })
     }
 
     pub fn subscribe(&self) -> broadcast::Receiver<StreamEvent> {
-        self.tx.subscribe()
+        self.bus.subscribe()
     }
 
     /// イベントを送出する（購読者がいなくてもエラーにしない）。
     pub fn publish(&self, ev: StreamEvent) {
-        let _ = self.tx.send(ev);
+        self.bus.publish(ev);
     }
 
     /// 任意種別のイベントを送出する。`{"type":<kind>,"body":<body>}` として配信する。

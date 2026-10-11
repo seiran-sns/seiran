@@ -7,8 +7,9 @@
 
 use std::sync::Arc;
 
-use seiran_common::StreamHub;
+use seiran_common::leader::{LeaderTask, run_as_leader};
 use seiran_common::traits::JobQueue;
+use seiran_common::{CancellationToken, StreamHub};
 use sqlx::PgPool;
 
 pub mod bsky_block_watch;
@@ -16,37 +17,84 @@ pub mod bsky_dm_poll;
 pub mod bsky_follower_poll;
 pub mod firehose;
 
-/// Firehose リスナーを起動する（常駐）。
+/// Jetstream 購読と Bsky のポーリングを動かし、`shutdown` が発火してすべて止まったら戻る。
 ///
-/// `redis_url`があれば、複数インスタンス起動時のJetstream接続排他制御（リーダー選出）を
-/// 行う。`is_monolith`はRedis未使用時・通信失敗時のフェイルオープン/フェイルクローズを
-/// 決める（`true`＝`all`ロール、`false`＝`firehose`単独ロール。Doc3 §14.2参照）。
+/// それぞれ複数のプロセスのうち1つだけが担当する（`seiran_common::leader`）。
+/// 担当を取れなかったプロセスは待機し、担当のプロセスが終了したら引き継ぐ。
 pub async fn run(
     pool: PgPool,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
-    redis_url: Option<String>,
-    is_monolith: bool,
     job_queue: Arc<dyn JobQueue>,
+    shutdown: CancellationToken,
 ) {
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
-    tokio::spawn(bsky_dm_poll::run(
-        pool.clone(),
-        Arc::clone(&job_queue),
-        Arc::clone(&http),
-        Arc::clone(&stream_hub),
-    ));
-    tokio::spawn(bsky_follower_poll::run(
-        pool.clone(),
-        Arc::clone(&http),
-        Arc::clone(&stream_hub),
-    ));
-    tokio::spawn(bsky_block_watch::run(
-        pool.clone(),
-        Arc::clone(&job_queue),
-        Arc::clone(&http),
-        redis_url.clone(),
-        is_monolith,
-    ));
-    firehose::run(pool, http, stream_hub, redis_url, is_monolith, job_queue).await;
+    let jetstream = {
+        let (pool, http, hub, queue) = (
+            pool.clone(),
+            Arc::clone(&http),
+            Arc::clone(&stream_hub),
+            Arc::clone(&job_queue),
+        );
+        run_as_leader(
+            pool.clone(),
+            LeaderTask::Jetstream,
+            shutdown.clone(),
+            move |stop| {
+                firehose::run(
+                    pool.clone(),
+                    Arc::clone(&http),
+                    Arc::clone(&hub),
+                    Arc::clone(&queue),
+                    stop,
+                )
+            },
+        )
+    };
+    let block_watch = {
+        let (pool, http, queue) = (pool.clone(), Arc::clone(&http), Arc::clone(&job_queue));
+        run_as_leader(
+            pool.clone(),
+            LeaderTask::BskyBlockWatch,
+            shutdown.clone(),
+            move |stop| {
+                bsky_block_watch::run(pool.clone(), Arc::clone(&queue), Arc::clone(&http), stop)
+            },
+        )
+    };
+    let dm_poll = {
+        let (pool, http, hub, queue) = (
+            pool.clone(),
+            Arc::clone(&http),
+            Arc::clone(&stream_hub),
+            Arc::clone(&job_queue),
+        );
+        run_as_leader(
+            pool.clone(),
+            LeaderTask::BskyDmPoll,
+            shutdown.clone(),
+            move |stop| {
+                bsky_dm_poll::run(
+                    pool.clone(),
+                    Arc::clone(&queue),
+                    Arc::clone(&http),
+                    Arc::clone(&hub),
+                    stop,
+                )
+            },
+        )
+    };
+    let follower_poll = {
+        let (pool, http, hub) = (pool.clone(), Arc::clone(&http), Arc::clone(&stream_hub));
+        run_as_leader(
+            pool.clone(),
+            LeaderTask::BskyFollowerPoll,
+            shutdown,
+            move |stop| {
+                bsky_follower_poll::run(pool.clone(), Arc::clone(&http), Arc::clone(&hub), stop)
+            },
+        )
+    };
+    tokio::join!(jetstream, block_watch, dm_poll, follower_poll);
+    tracing::info!("[seiran-atp-repo] 停止しました。");
 }

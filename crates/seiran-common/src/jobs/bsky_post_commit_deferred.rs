@@ -27,10 +27,8 @@ use std::sync::Arc;
 
 use chrono::Utc;
 use sqlx::PgPool;
-use tokio::sync::broadcast;
 
 use crate::atp::repo::{BskyEmbed, BskyPostReply, BskyRefRecord};
-use crate::atp::service::AtpCommitService;
 use crate::mention::convert_mentions_for_bsky;
 use crate::queue::worker::JobContext;
 use crate::{AUDIO_VIDEO_HEIGHT, AUDIO_VIDEO_WIDTH};
@@ -206,17 +204,10 @@ async fn process_locked(
         convert_mentions_for_bsky(&text, &cfg.local_domain, pool, ctx.ap_client.http.as_ref())
             .await;
 
-    // ATPコミット用のサービス。event_txはこのジョブ専用の使い捨てチャンネルで良い
-    // （account_withdraw_unfollow_all と同じ理由: subscribeReposのリアルタイム購読者には
-    // 届かないが、atp_repo_eventsテーブルへの記録自体は行われるため、他のRelayが
-    // 再購読すれば最終的に一貫する）。
-    let (event_tx, _rx) = broadcast::channel(16);
-    let atp_service = AtpCommitService::new(
-        pool.clone(),
-        Arc::new(event_tx),
-        Arc::clone(&ctx.ap_client.http),
-        cfg.local_domain.clone(),
-    );
+    let atp_service = ctx
+        .atp_service
+        .clone()
+        .ok_or("ATPコミットサービスが設定されていません")?;
 
     atp_service
         .commit_post(

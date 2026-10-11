@@ -19,7 +19,7 @@ use dashmap::DashMap;
 use sqlx::PgPool;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use tokio::sync::RwLock;
 use webauthn_rs::prelude::{Url, Webauthn, WebauthnBuilder};
 
 use seiran_common::repository::{
@@ -41,8 +41,8 @@ use seiran_common::repository::{
     RemoteInstanceMetaRepository, RepostMuteRepository, TotpRepository, UserRepository,
 };
 use seiran_common::{
-    job_priority, ApClient, ApDeliveryKind, AtpCommitEvent, AtpCommitService, Job, JobQueue,
-    LocalAuthProvider, MediaFileRepository, PgMediaFileRepository, PgSiteSettingsRepository,
+    job_priority, ApClient, ApDeliveryKind, AtpCommitService, Job, JobQueue, LocalAuthProvider,
+    MediaFileRepository, Messaging, PgMediaFileRepository, PgSiteSettingsRepository,
     PgStorageProviderRepository, S3StorageClient, Secrets, SiteSettingsRepository,
     StorageProviderRepository,
 };
@@ -117,6 +117,8 @@ pub struct AppState {
     pub search_store: Arc<InMemorySearchStore>,
     /// リアルタイム更新（#37）のストリーミングハブ。
     pub stream_hub: Arc<StreamHub>,
+    /// 発火したら WebSocket 接続を閉じる（graceful shutdown で接続が終わるのを待つため）。
+    pub shutdown: seiran_common::CancellationToken,
     /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
     pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
     /// `RemoteFollowListSync` 重複投入防止用クールダウン（#229）。
@@ -750,34 +752,23 @@ pub async fn init_state(
     secrets: Arc<Secrets>,
     http_client: Arc<reqwest::Client>,
     local_domain: seiran_common::LocalDomain,
-    job_queue: Arc<dyn JobQueue>,
-    // `Some` なら ATP コミットイベントを Redis Pub/Sub 経由でプロセス間配信する
-    // ブリッジを有効にする（`api` ロールを複数レプリカで水平スケールする場合に必要。
-    // モノリスモードや単一レプリカ運用では `None` でよい）。
-    atp_event_redis_url: Option<String>,
+    messaging: Messaging,
 ) -> AppState {
+    let Messaging {
+        job_queue,
+        stream_hub,
+        atp_events,
+        shutdown,
+    } = messaging;
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
     let ap_client = Arc::new(ApClient::new(Arc::clone(&http_client)));
 
-    let (atp_event_tx, _) = broadcast::channel::<AtpCommitEvent>(1024);
-    let atp_event_tx = Arc::new(atp_event_tx);
-
-    let mut atp_service = AtpCommitService::new(
+    let atp_service = Arc::new(AtpCommitService::new(
         pool.clone(),
-        Arc::clone(&atp_event_tx),
+        atp_events,
         Arc::clone(&http_client),
         local_domain.clone(),
-    );
-    if let Some(redis_url) = atp_event_redis_url {
-        match atp_service.with_redis_bridge(&redis_url).await {
-            Ok(()) => tracing::info!("[seiran-api] ATPコミットイベント: Redisプロセス間配信ブリッジ有効"),
-            Err(e) => tracing::error!(
-                "[seiran-api] ATPコミットイベントのRedisブリッジ有効化に失敗（プロセス内配信のみで続行）: {}",
-                e
-            ),
-        }
-    }
-    let atp_service = Arc::new(atp_service);
+    ));
 
     let cloudflare = match (
         std::env::var("CLOUDFLARE_API_TOKEN"),
@@ -922,7 +913,8 @@ pub async fn init_state(
         site_settings,
         oembed_whitelist,
         search_store: Arc::new(InMemorySearchStore::new()),
-        stream_hub: Arc::new(StreamHub::new()),
+        stream_hub,
+        shutdown,
         emoji_import_jobs: Arc::new(DashMap::new()),
         remote_follow_sync_recent: Arc::new(DashMap::new()),
         job_queue,

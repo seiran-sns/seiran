@@ -7,3 +7,6 @@ config/
 .git/
 *.md
 docs/
+**/node_modules/
+e2e/
+nohup.out

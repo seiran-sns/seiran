@@ -191,7 +191,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 ### 構成
 - `seiran-common::atp`
   - `repo.rs` — MST 構築、TID（rkey）生成、P-256 署名の commit、CARv1、各レコードの DAG-CBOR、`subscribeRepos` フレーム（`#commit`/`#identity`/`#account`/`#error`）
-  - `service.rs` — `AtpCommitService`。共通パイプライン `commit_record_inner` と `commit_post`（通常・引用・CW 共通、内容は `PostCommit`）/`commit_repost`/`commit_like`/`commit_follow`/`commit_graph_list(item)`/各種 delete/`commit_profile`
+  - `service.rs` — `AtpCommitService`。共通パイプライン `apply_write`（追加・更新は `commit_record_inner`、削除は `delete_atp_record_generic` から）と `commit_post`（通常・引用・CW 共通、内容は `PostCommit`）/`commit_repost`/`commit_like`/`commit_follow`/`commit_graph_list(item)`/各種 delete/`commit_profile`
   - `plc.rs` — `did:plc` genesis operation の生成・登録
   - `did_resolve.rs` — サービス間認証 JWT 検証用の DID 解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名 JWT（ES256、low-S 正規化必須）
@@ -212,13 +212,15 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 
 ATP ハンドルは常に小文字（`username::to_atp_username`）。`actors.username` は大文字を許すが、genesis の `alsoKnownAs`・TXT・`resolveHandle`/`atproto-did` の応答・`#identity` はすべて小文字化した値を使う。ホスト名は経路上で小文字化されるので、大文字混じりのハンドルを `alsoKnownAs` に載せると恒久的に `handle.invalid` になる。`find_by_username_domain`/`find_did_by_username_domain` は `LOWER()` で比較する。
 
-### MSTコミット・subscribeRepos（`commit_record_inner`）
+### MSTコミット・subscribeRepos（`apply_write`）
 1. アクターの `at_repo_cid`/`at_repo_rev`/`at_repo_data_cid` と署名鍵を取得
-2. 既存の全レコード（`posts` + `atp_records`）をロードし、新規レコードを加えて MST を再構築
+2. 既存の全レコード（`posts` + `atp_records`）をロードし、対象のキーを差し替えて（削除なら取り除いて）MST を再構築
 3. 新しい rev（TID）で commit を作り P-256 署名（low-S 正規化必須）
 4. 差分 CAR をエンコード
-5. トランザクション内で `atp_blocks`/`actors`/`atp_records`/`posts`/`atp_repo_events` を更新
-6. `subscribeRepos` フレームを zstd 圧縮して `atp_repo_events.frame_bytes` に保存し、commit 後に配信（複数レプリカでは Redis Pub/Sub 経由）
+5. `atp_blocks`/`actors`/`atp_records`/`posts`/`atp_repo_events` を更新
+6. `subscribeRepos` フレームを zstd 圧縮して `atp_repo_events.frame_bytes` に保存し、commit 後に配信（`AtpCommitEvent::bus`。`REDIS_URL` があれば全プロセスの接続へ、`docs/architecture.md` 3節）
+
+1〜6 は1つの SERIALIZABLE トランザクションで行う。同じアクターへのコミットが並行すると（同一プロセス内でも、無停止更新で新旧のプロセスが重なっている間でも）、両方が同じ prev から rev を作ってリポジトリが分岐する。SERIALIZABLE なら後から commit する方が `actors` の更新で直列化失敗（40001）になるので、直列化失敗とデッドロック（40P01）はトランザクションを頭から最大10回やり直す。ジョブ（`BskyPostCommitDeferred`・`AccountWithdrawUnfollowAll`）も api と同じ `AtpCommitService` を使い、コミットを subscribeRepos へ流す。
 
 `subscribeRepos` は `cursor` 指定時、`atp_repo_events` の未送信分を500件ずつ送り切ってからリアルタイム配信に移る。
 
@@ -289,7 +291,7 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 
 - **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合を30秒ごとに確認し、変化があれば再接続する。無関係な投稿を取り込まないための必須の絞り込み。
 - **凍結アクター**: 投稿の保存対象判定に `suspended_at IS NULL` を含め、リポスト・いいねも凍結済みなら破棄する。ATP には署名アクセス拒否に相当する仕組みが無いため、取り込み抑止が実質的な enforcement。
-- **リーダー選出**: 複数プロセスでの重複接続を避けるため Redis の `JetstreamLeaderElector` でリース制御する。モノリスは Redis 無しでも常時接続、split-role は Redis 障害時に接続しない（フェイルクローズ）。
+- **担当**: 複数のプロセスが動いていても1つだけが接続する（`seiran_common::leader`、advisory lock。`docs/architecture.md` 3節）。担当を降りるとき（停止・ロック接続の切断）は処理し終えたイベントまでのカーソルを保存し、引き継いだプロセスがその続きから読む。
 - **cursor**: 処理済みイベントの `time_us` を `site_settings` に5秒ごとに保存し、再接続時に引き継ぐ。
 - **投稿**: 同梱の `record.text`/`record.createdAt` をそのまま使う。`embed.images`/`video`/`recordWithMedia` は CDN URL を組み立てて添付保存する。`embed.external` のうち GIF ピッカー由来（Tenor/Klipy）は `t.gifs.bsky.app`/`k.gifs.bsky.app` の MP4（Klipy は WebM）URL に変換して添付にし、それ以外は `post_link_cards`（`position=0`）に保存する。`external` には iframe 情報が無いので、保存後に `Job::LinkCardEmbedResolve`（LOW）が oEmbed discovery で `embed_src`/`embed_type` を後から埋める。`record.facets` は6節の方式で処理する。
 - **GIFアニメ**: GIF ピッカー由来（上記）と、GIF の直接アップロード由来（動画パイプラインで MP4 化され `embed.video` に `presentation:"gif"` が付く）の2系統がある。どちらも `post_attachments.is_gif=TRUE` で保存し、フロントは自動再生・ミュート・ループ・コントロール無しで表示する。
@@ -705,7 +707,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 ## 8. 通知・リアルタイム配信
 
-`streaming::StreamHub`（プロセス内 `tokio::broadcast`、容量512）が `{"type":kind,"body":body}` を配信する。接続は `GET /api/streaming?token=<JWT>`。配信方式は2つ。
+`streaming::StreamHub`（`tokio::broadcast`、容量512。`REDIS_URL` があれば Redis Pub/Sub で全プロセスのハブをつなぎ、どのプロセスで起きたイベントもすべての接続へ届く。`docs/architecture.md` 3節）が `{"type":kind,"body":body}` を配信する。接続は `GET /api/streaming?token=<JWT>`。配信方式は2つ。
 
 - **`recipients` 方式**（通知・DM・`noteUpdated`・`pollUpdated`）: `StreamEvent.recipients` に自分の actor_id を含むイベントだけを各コネクションが転送する。購読操作は不要。
   - `pollUpdated`（`broadcast_poll_update`。ローカル投票と AP 受信の両方から送る）は `{"postId","poll":<posts.poll>}` を著者＋著者をフォロー中のローカルアクターへ送る（`broadcast_reaction_update` と同じ宛先）。`votedByMe` は閲覧者ごとに違うので含めない。フロントは `StreamingContext` が共有ストア `stores/pollVoteStore.ts` を直接更新し、表示中の全 NoteCard に反映する（自分の投票済み選択肢は保ったまま票数だけ差し替える）。
@@ -831,7 +833,7 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 ### 相手発ブロックの検知
 リモートユーザーが自分をブロックした場合も `blocks` に記録し、同じ制限を対称に効かせる。
 - **Fedi**: `Block` 受信で `(blocker=相手, blocked=ローカル)` を INSERT、`Undo(Block)` で DELETE。
-- **Bsky**: 「自分をブロックしている人」を返す API は無い（意図的に非公開）ので、`seiran-atp-repo::bsky_block_watch` が `app.bsky.graph.block` だけを対象にした絞り込み無しの Jetstream 接続（全世界で約2件/秒）を張り、`record.subject` がローカルユーザーの DID のものを記録する。Jetstream の `delete` には `subject` が無いので、create 時の `commit.rkey` を `blocks.atp_rkey` に保存し、`(blocker_actor_id, atp_rkey)` で逆引きして消す（`delete_by_blocker_and_rkey`）。投稿用の接続とは別のリーダー選出キーで動く。
+- **Bsky**: 「自分をブロックしている人」を返す API は無い（意図的に非公開）ので、`seiran-atp-repo::bsky_block_watch` が `app.bsky.graph.block` だけを対象にした絞り込み無しの Jetstream 接続（全世界で約2件/秒）を張り、`record.subject` がローカルユーザーの DID のものを記録する。Jetstream の `delete` には `subject` が無いので、create 時の `commit.rkey` を `blocks.atp_rkey` に保存し、`(blocker_actor_id, atp_rkey)` で逆引きして消す（`delete_by_blocker_and_rkey`）。投稿用の接続とは別に担当を決める（`LeaderTask::BskyBlockWatch`）。
 
 ### リアクション表示でのブロック・ミュート除外
 ミュート・ブロックしている相手のリアクションは、集計（`fetch_reactions_map`）と「誰が付けたか」一覧（`GET /api/notes/:id/reactions/:content/actors`、Misskey `notes/reactions`）から `actor_is_hidden_for_viewer` で除く（Misskey 互換クライアントも同じ API を見るので、フロントではなく API で除く）。WebSocket の `noteUpdated` の集計には適用しない（全員に同じ payload を送る設計で、閲覧者ごとに再計算すると重い）。そのため再取得まで件数が一時的にずれることがある。

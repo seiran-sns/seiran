@@ -72,6 +72,15 @@ async fn authorize_user_list(state: &AppState, actor_id: i64, list_id: i64) -> b
     }
 }
 
+/// サーバーの停止（無停止更新で旧プロセスを止めるとき）に送る Close フレーム。
+/// 1012（Service Restart）を受けたクライアントはすぐ再接続してよく、新しいプロセスにつながる。
+pub(crate) fn restart_close_message() -> Message {
+    Message::Close(Some(axum::extract::ws::CloseFrame {
+        code: axum::extract::ws::close_code::RESTART,
+        reason: "server restart".into(),
+    }))
+}
+
 async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
     let mut rx = state.stream_hub.subscribe();
     let mut ping = tokio::time::interval(Duration::from_secs(30));
@@ -80,6 +89,10 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
 
     loop {
         tokio::select! {
+            _ = state.shutdown.cancelled() => {
+                let _ = socket.send(restart_close_message()).await;
+                break;
+            }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
                     if (ev.broadcast_all || ev.recipients.contains(&actor_id))

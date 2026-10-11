@@ -9,28 +9,29 @@
 //! | `all`（既定） | api + federation を1ポートに合流、worker と firehose を同時起動 | `PORT`（既定 3000） |
 //! | `api` | REST API / 認証 / タイムライン / XRPC | `PORT`（既定 3000） |
 //! | `federation` | ActivityPub Inbox / WebFinger / Actor / Outbox | `FEDERATION_INBOX_PORT`（既定 3001） |
-//! | `worker` | 非同期ジョブ実行エンジン（DB 不要） | なし |
+//! | `worker` | 非同期ジョブ実行エンジン | なし |
 //! | `firehose` | Bluesky Firehose リスナー | なし |
 //!
 //! 大規模サーバーでは同じイメージを `--role` 違いで複数コンテナ起動し、
 //! ワーカー負荷分散などのスケールアウトを行う。
 
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use seiran_common::atp::{AtpCommitEvent, AtpCommitService};
+use seiran_common::atp::AtpCommitService;
 use seiran_common::repository::{
     InstanceDomainRepository, PgActorRepository, PgBlockRepository, PgFollowRepository,
     PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgNotificationRepository,
     PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository,
 };
 use seiran_common::{
-    ap::ApClient, create_job_queue, db::recommended_max_connections, get_db_pool,
-    resolve_local_domain, run_migrations, DeliveryConfig, FollowExecConfig, InboxContext, JobQueue,
-    LocalDomain, Secrets, SecretsFile, StreamHub, DEFAULT_MAX_CONCURRENT_JOBS,
+    ap::ApClient, db::recommended_max_connections, get_db_pool, resolve_local_domain,
+    run_migrations, CancellationToken, DeliveryConfig, FollowExecConfig, InboxContext, JobQueue,
+    LocalDomain, Messaging, Secrets, SecretsFile, StreamHub, WorkerConfig,
+    DEFAULT_MAX_CONCURRENT_JOBS,
 };
 use sqlx::PgPool;
-use tokio::sync::broadcast;
 
 /// `FollowExecConfig`（`Job::FollowImportProcess` ジョブ用）を組み立てる。standalone worker
 /// と `all` ロール埋め込み worker の両方から呼ばれる共通ヘルパー。
@@ -140,12 +141,46 @@ impl Role {
     }
 }
 
-async fn serve(app: axum::Router, port: u16) -> Result<(), Box<dyn std::error::Error>> {
+/// `shutdown` が発火したら新しい接続の受け付けを止め、処理中のリクエストが終わってから戻る。
+/// WebSocket はハンドラが同じ合図で閉じる（`AppState::shutdown`）。
+async fn serve(
+    app: axum::Router,
+    port: u16,
+    shutdown: CancellationToken,
+) -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("[seiran-server] リッスン開始: http://{}", addr);
-    axum::serve(listener, app).await?;
+    axum::serve(
+        listener,
+        app.into_make_service_with_connect_info::<SocketAddr>(),
+    )
+    .with_graceful_shutdown(shutdown.cancelled_owned())
+    .await?;
+    tracing::info!("[seiran-server] HTTP の受け付けを止めました。");
     Ok(())
+}
+
+/// SIGTERM（`docker stop`）か SIGINT（Ctrl-C）を受けたら `shutdown` を発火する。
+fn spawn_signal_handler(shutdown: CancellationToken) {
+    tokio::spawn(async move {
+        let mut sigterm =
+            match tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate()) {
+                Ok(sigterm) => sigterm,
+                Err(e) => {
+                    tracing::error!("[seiran-server] SIGTERM を待ち受けられません: {}", e);
+                    return;
+                }
+            };
+        tokio::select! {
+            _ = sigterm.recv() => {}
+            _ = tokio::signal::ctrl_c() => {}
+        }
+        tracing::info!(
+            "[seiran-server] 停止の合図を受けました。処理中の仕事を終えてから終了します。"
+        );
+        shutdown.cancel();
+    });
 }
 
 fn env_port(key: &str, default: u16) -> u16 {
@@ -221,8 +256,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let role = Role::resolve();
     tracing::info!("[seiran-server] ロール: {:?}", role);
 
+    let shutdown = CancellationToken::new();
+    spawn_signal_handler(shutdown.clone());
+    // ジョブキュー・リアルタイム配信・subscribeRepos のイベントをプロセス間でつなぐ。
+    // 無ければプロセス内で完結する（`all` を1つだけ動かす構成でのみ成り立つ）。
+    let redis_url = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
+
     if role == Role::Worker {
-        return run_standalone_worker().await;
+        return run_standalone_worker(redis_url.as_deref(), shutdown).await;
     }
 
     // ── 共有リソース（プロセス内で一度だけ生成し各ロールへ渡す）──
@@ -239,43 +280,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pool = connect_db(worker_extra).await?;
     let http_client = build_http_client()?;
     let local_domain = resolve_local_domain_from_env(&pool).await;
-    // `all` ロールは常に InMemory（同一プロセス内で api/federation/worker が動くため
-    // 外部ミドルウェア不要）。split-role（api/federation 単独起動）は REDIS_URL の
-    // 有無で Redis/InMemory を切り替える（create_job_queue のロジック参照）。
-    let job_queue = create_job_queue(role == Role::All).await;
-    // ATP コミットイベントの Redis プロセス間配信ブリッジも同じ方針: `all` は常に無効
-    // （`api` role を複数レプリカで水平スケールする場合のみ必要。単一プロセス内なら
-    // event_tx の直接配信で十分）。split-role の api ロールでは REDIS_URL があれば有効化する。
-    let atp_event_redis_url = if role == Role::All {
-        None
-    } else {
-        std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty())
-    };
-    // Jetstream接続の排他制御（複数インスタンス起動時のリーダー選出）専用のRedis URL。
-    // `atp_event_redis_url`と違い、`all`ロールでも複数起動（無停止バージョンアップ中の
-    // 一時的なスケールアウト等）を検知したいため、ロールに関わらずそのまま読む
-    // （Doc3 §14.2、Doc6既知の課題）。
-    let jetstream_redis_url = std::env::var("REDIS_URL").ok().filter(|s| !s.is_empty());
+    let messaging = Messaging::connect(redis_url.as_deref(), shutdown.clone()).await?;
 
     let shared = SharedResources {
         pool,
         secrets,
         http_client,
         local_domain,
-        job_queue,
-        atp_event_redis_url,
-        jetstream_redis_url,
+        messaging,
     };
     match role {
         Role::Firehose => {
-            // スタンドアロン firehose は WebSocket 配信先がないため空の StreamHub を使用
             seiran_atp_repo::run(
                 shared.pool,
                 shared.http_client,
-                Arc::new(StreamHub::new()),
-                shared.jetstream_redis_url,
-                false,
-                shared.job_queue,
+                shared.messaging.stream_hub,
+                shared.messaging.job_queue,
+                shutdown,
             )
             .await;
         }
@@ -285,27 +306,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 shared.secrets,
                 shared.http_client,
                 shared.local_domain,
-                shared.job_queue,
-                shared.atp_event_redis_url,
+                shared.messaging,
             )
             .await;
             seiran_api::spawn_startup_tasks(&state);
             seiran_api::spawn_gc_tasks(&state);
-            serve(seiran_api::router(state), env_port("PORT", 3000)).await?;
+            serve(seiran_api::router(state), env_port("PORT", 3000), shutdown).await?;
         }
         Role::Federation => {
-            // 単独 federation ロールでは WS 購読者（api）が居ないため新規ハブで可。
             let state = seiran_federation_inbox::init_state(
                 shared.pool,
                 &shared.secrets,
                 shared.http_client,
                 shared.local_domain,
-                Arc::new(StreamHub::new()),
-                shared.job_queue,
+                shared.messaging.stream_hub,
+                shared.messaging.job_queue,
             );
             serve(
                 seiran_federation_inbox::router(state),
                 env_port("FEDERATION_INBOX_PORT", 3001),
+                shutdown,
             )
             .await?;
         }
@@ -313,6 +333,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         Role::Worker => unreachable!("worker は先頭で分岐済み"),
     }
 
+    tracing::info!("[seiran-server] 終了します。");
     Ok(())
 }
 
@@ -322,9 +343,7 @@ struct SharedResources {
     secrets: Arc<Secrets>,
     http_client: Arc<reqwest::Client>,
     local_domain: LocalDomain,
-    job_queue: Arc<dyn JobQueue>,
-    atp_event_redis_url: Option<String>,
-    jetstream_redis_url: Option<String>,
+    messaging: Messaging,
 }
 
 /// standalone worker ロール。
@@ -332,7 +351,10 @@ struct SharedResources {
 /// worker も BskyVideoPoll 等 DB アクセスが必要なジョブを扱うため、単独起動時も
 /// DB に接続する。
 /// AP 配送ジョブ（ApDelivery）が署名に AP 鍵を使うため、シークレットも読み込む。
-async fn run_standalone_worker() -> Result<(), Box<dyn std::error::Error>> {
+async fn run_standalone_worker(
+    redis_url: Option<&str>,
+    shutdown: CancellationToken,
+) -> Result<(), Box<dyn std::error::Error>> {
     let secrets = SecretsFile::from_env().load_or_create()?;
     tracing::info!("[seiran-server] シークレット読み込み完了");
     // standalone worker はHTTPを持たず、WorkerEngineの同時実行数分だけDBを使う。
@@ -340,61 +362,60 @@ async fn run_standalone_worker() -> Result<(), Box<dyn std::error::Error>> {
     let http_client = build_http_client()?;
     let worker_local_domain = resolve_local_domain_from_env(&pool).await;
     let delivery = delivery_config(&worker_local_domain, &secrets);
-    // split-role（standalone worker）: REDIS_URL があれば api/federation プロセスと
-    // キューを共有できる。未設定なら自分専用の InMemory になる既知の制約（create_job_queue 参照）。
-    let queue = create_job_queue(false).await;
-    // standalone worker には WS 購読者もATPコミットイベントの他プロセス購読者も
-    // 居ないため、ここ専用の使い捨て event チャンネルで良い（`AtpCommitService`
-    // 自体はDBへのコミット・`atp_repo_events`記録は行う。リアルタイム配信不要な
-    // フォローインポートの用途では実害がない、`account_withdraw_unfollow_all` と同じ判断）。
-    let (follow_exec_atp_tx, _) = broadcast::channel::<AtpCommitEvent>(16);
-    let worker_atp_service = Arc::new(AtpCommitService::new(
+    // REDIS_URL があれば api/federation プロセスとキューを共有し、ここで起きたイベント
+    // （受信した投稿・コミット）も api プロセスの WebSocket 接続へ届く。
+    let messaging = Messaging::connect(redis_url, shutdown.clone()).await?;
+    let atp_service = Arc::new(AtpCommitService::new(
         pool.clone(),
-        Arc::new(follow_exec_atp_tx),
+        Arc::clone(&messaging.atp_events),
         Arc::clone(&http_client),
         worker_local_domain.clone(),
     ));
-    // standalone worker には WS 接続クライアントが居ないため空の StreamHub を使う
-    // （InboundActivityProcess の realtime 配信は no-op になる。Role::Firehose と同じ扱い）。
     let inbox = build_inbox_context(
         &pool,
         &worker_local_domain,
         secrets.ap_private_key_pem.clone(),
-        Arc::new(StreamHub::new()),
-        Arc::clone(&queue),
-        Arc::clone(&worker_atp_service),
+        Arc::clone(&messaging.stream_hub),
+        Arc::clone(&messaging.job_queue),
+        Arc::clone(&atp_service),
     );
     let follow_exec = build_follow_exec_config(
         &pool,
         &worker_local_domain,
         secrets.ap_private_key_pem.clone(),
-        Arc::new(StreamHub::new()),
-        worker_atp_service,
+        Arc::clone(&messaging.stream_hub),
+        Arc::clone(&atp_service),
     );
     seiran_federation_worker::run(
-        queue,
-        pool,
-        Arc::new(ApClient::new(http_client)),
-        delivery,
-        Some(inbox),
-        Some(follow_exec),
-        secrets.encryption_key_bytes(),
+        WorkerConfig {
+            queue: messaging.job_queue,
+            pool,
+            ap_client: Arc::new(ApClient::new(http_client)),
+            delivery,
+            inbox: Some(inbox),
+            follow_exec: Some(follow_exec),
+            atp_service,
+            encryption_key: secrets.encryption_key_bytes(),
+        },
+        shutdown,
     )
     .await;
+    tracing::info!("[seiran-server] 終了します。");
     Ok(())
 }
 
 /// `all` ロール: api + federation を1ポートに合流し、firehose と worker を同一プロセスで起動する。
+/// 停止の合図を受けたら、HTTP・worker・firehose がそれぞれ手持ちの処理を終えるのを待って戻る。
 async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Error>> {
     let SharedResources {
         pool,
         secrets,
         http_client,
         local_domain,
-        job_queue,
-        atp_event_redis_url,
-        jetstream_redis_url,
+        messaging,
     } = shared;
+    let shutdown = messaging.shutdown.clone();
+    let job_queue = Arc::clone(&messaging.job_queue);
 
     // api ロール
     let api_state = seiran_api::init_state(
@@ -402,15 +423,13 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
         Arc::clone(&secrets),
         Arc::clone(&http_client),
         local_domain.clone(),
-        Arc::clone(&job_queue),
-        atp_event_redis_url,
+        messaging,
     )
     .await;
     seiran_api::spawn_startup_tasks(&api_state);
     seiran_api::spawn_gc_tasks(&api_state);
 
-    // federation ロール（#37: ストリーミングハブを api と共有して跨いで配信。
-    // job_queue も api/worker と同一インスタンスを共有する）
+    // federation ロール（ストリーミングハブ・ジョブキューを api/worker と共有する）
     let inbox_state = seiran_federation_inbox::init_state(
         pool.clone(),
         &secrets,
@@ -421,22 +440,16 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
     );
 
     // firehose リスナーをバックグラウンド起動（stream_hub を共有して WebSocket 配信）
-    {
-        let pool = pool.clone();
-        let http = Arc::clone(&http_client);
-        let hub = Arc::clone(&api_state.stream_hub);
-        let queue = Arc::clone(&job_queue);
-        tokio::spawn(async move {
-            seiran_atp_repo::run(pool, http, hub, jetstream_redis_url, true, queue).await
-        });
-    }
+    let firehose = tokio::spawn(seiran_atp_repo::run(
+        pool.clone(),
+        Arc::clone(&http_client),
+        Arc::clone(&api_state.stream_hub),
+        Arc::clone(&job_queue),
+        shutdown.clone(),
+    ));
 
-    // worker をバックグラウンド起動（api ロールと同じ ApClient / JobQueue / DB プールを共有）
-    let worker_ap_client = Arc::clone(&api_state.ap_client);
-    let worker_delivery = delivery_config(&local_domain, &secrets);
-    // InboundActivityProcess 用: api ロールと同じ stream_hub を共有するため、
-    // 埋め込み worker で処理したインバウンド活動のリアルタイム通知も api の
-    // WebSocket クライアントへ届く。
+    // worker をバックグラウンド起動（api ロールと同じ ApClient / JobQueue / DB プール /
+    // StreamHub / AtpCommitService を共有し、ジョブで起きたイベントも WebSocket へ届く）
     let worker_inbox = build_inbox_context(
         &pool,
         &local_domain,
@@ -445,22 +458,19 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
         Arc::clone(&job_queue),
         Arc::clone(&api_state.atp_service),
     );
-    // api ロールと同じリポジトリ・AtpCommitService・StreamHub を共有するため、
-    // フォローインポートで成立したフォローの通知もリアルタイムに配信される。
-    let worker_follow_exec = api_state.follow_exec_config();
-    let worker_encryption_key = secrets.encryption_key_bytes();
-    tokio::spawn(async move {
-        seiran_federation_worker::run(
-            job_queue,
+    let worker = tokio::spawn(seiran_federation_worker::run(
+        WorkerConfig {
+            queue: job_queue,
             pool,
-            worker_ap_client,
-            worker_delivery,
-            Some(worker_inbox),
-            Some(worker_follow_exec),
-            worker_encryption_key,
-        )
-        .await
-    });
+            ap_client: Arc::clone(&api_state.ap_client),
+            delivery: delivery_config(&local_domain, &secrets),
+            inbox: Some(worker_inbox),
+            follow_exec: Some(api_state.follow_exec_config()),
+            atp_service: Arc::clone(&api_state.atp_service),
+            encryption_key: secrets.encryption_key_bytes(),
+        },
+        shutdown.clone(),
+    ));
 
     // パスが衝突しないため単一ポートに合流できる
     let app = seiran_api::router(api_state)
@@ -482,5 +492,7 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
                     tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
                 ),
         );
-    serve(app, env_port("PORT", 3000)).await
+    serve(app, env_port("PORT", 3000), shutdown).await?;
+    let _ = tokio::join!(worker, firehose);
+    Ok(())
 }

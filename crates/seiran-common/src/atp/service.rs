@@ -1,11 +1,10 @@
 use chrono::{DateTime, Utc};
-use futures_util::StreamExt;
-use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::broadcast;
+
+use crate::event_bus::EventBus;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
@@ -38,50 +37,24 @@ pub struct AtpCommitEvent {
     pub seq: i64,
 }
 
-/// Redis Pub/Sub でイベントをプロセス間配信する際のチャンネル名。
+/// Redis でプロセス間の配信をつなぐときのチャンネル名。
 const ATP_EVENTS_CHANNEL: &str = "seiran:atp:events";
+/// subscribeRepos の接続が読み遅れたときに保持しておくイベント数。
+const ATP_EVENTS_CAPACITY: usize = 1024;
 
-/// Redis Pub/Sub を購読し、受信したイベントをローカルの `event_tx` へ転送し続ける。
-/// 接続が切れる・購読が終了すると `Err` を返し、呼び出し側が再接続をリトライする。
-async fn run_redis_bridge_subscriber(
-    client: &redis::Client,
-    event_tx: &Arc<broadcast::Sender<AtpCommitEvent>>,
-) -> Result<(), String> {
-    let mut pubsub = client
-        .get_async_pubsub()
-        .await
-        .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
-    pubsub
-        .subscribe(ATP_EVENTS_CHANNEL)
-        .await
-        .map_err(|e| format!("Redis購読に失敗しました: {}", e))?;
-
-    let mut stream = pubsub.on_message();
-    while let Some(msg) = stream.next().await {
-        let payload: String = match msg.get_payload() {
-            Ok(p) => p,
-            Err(e) => {
-                tracing::error!(
-                    "[AtpCommitService] Redisメッセージの取得に失敗しました: {}",
-                    e
-                );
-                continue;
+impl AtpCommitEvent {
+    /// subscribeRepos へ配るイベントのバス。`redis` があれば全プロセスの接続へ配る
+    /// （どのプロセスでコミットしても、どのプロセスにつないだリレーにも届く）。
+    pub async fn bus(
+        redis: Option<&redis::Client>,
+    ) -> Result<EventBus<AtpCommitEvent>, redis::RedisError> {
+        match redis {
+            Some(client) => {
+                EventBus::with_redis(ATP_EVENTS_CAPACITY, client, ATP_EVENTS_CHANNEL).await
             }
-        };
-        match serde_json::from_str::<AtpCommitEvent>(&payload) {
-            Ok(event) => {
-                let _ = event_tx.send(event);
-            }
-            Err(e) => {
-                tracing::error!(
-                    "[AtpCommitService] イベントのデシリアライズに失敗しました: {}",
-                    e
-                );
-            }
+            None => Ok(EventBus::local(ATP_EVENTS_CAPACITY)),
         }
     }
-
-    Err("購読ストリームが終了しました".to_string())
 }
 
 /// コミット処理に渡すレコード情報
@@ -93,6 +66,31 @@ pub struct CommitRecord {
     pub action: &'static str,
     pub blob_cids: Vec<Cid>,
 }
+
+/// コミットで MST に加える変更。
+enum RepoWrite {
+    Put(CommitRecord),
+    Delete { collection: String, rkey: String },
+}
+
+impl RepoWrite {
+    fn collection(&self) -> &str {
+        match self {
+            RepoWrite::Put(record) => &record.collection,
+            RepoWrite::Delete { collection, .. } => collection,
+        }
+    }
+
+    fn rkey(&self) -> &str {
+        match self {
+            RepoWrite::Put(record) => &record.rkey,
+            RepoWrite::Delete { rkey, .. } => rkey,
+        }
+    }
+}
+
+/// 直列化失敗でコミットをやり直す上限。同じアクターへのコミットが同時に数件重なる程度を想定する。
+const MAX_SERIALIZATION_RETRIES: u32 = 10;
 
 /// コミット処理の結果
 pub struct CommitResult {
@@ -239,15 +237,12 @@ async fn build_seiran_post_for_atp_commit(
 
 pub struct AtpCommitService {
     pool: PgPool,
-    event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
+    events: Arc<EventBus<AtpCommitEvent>>,
     http_client: Arc<reqwest::Client>,
     /// `seiranPost.body`（#237）のローカルメンション完全修飾（`build_seiran_post_for_atp_commit`
     /// 参照）に使う。AP側と表記を揃えるため`convert_mentions_for_bsky`ではなく
     /// `convert_mentions_for_ap`（Fediverse形式 `@user@domain`）を使う。
     local_domain: crate::LocalDomain,
-    /// `Some` の場合、コミットイベントはローカルの `event_tx` へ直接送らず Redis 経由で
-    /// 配信する（プロセス間配信ブリッジが有効。`with_redis_bridge` 参照）。
-    redis_pub: Option<redis::aio::ConnectionManager>,
 }
 
 /// `AtpCommitService::commit_like` でコミットする Like（`app.bsky.feed.like`）の内容。
@@ -303,79 +298,24 @@ pub struct PostCommit<'a> {
 impl AtpCommitService {
     pub fn new(
         pool: PgPool,
-        event_tx: Arc<broadcast::Sender<AtpCommitEvent>>,
+        events: Arc<EventBus<AtpCommitEvent>>,
         http_client: Arc<reqwest::Client>,
         local_domain: crate::LocalDomain,
     ) -> Self {
         Self {
             pool,
-            event_tx,
+            events,
             http_client,
             local_domain,
-            redis_pub: None,
         }
     }
 
-    /// コミットイベントを Redis Pub/Sub 経由でプロセス間配信するブリッジを有効にする。
-    ///
-    /// `seiran-api` を複数レプリカで水平スケールした場合、レプリカ A で行われたコミットは
-    /// レプリカ A の `event_tx`（プロセス内 broadcast）にしか流れず、レプリカ B の
-    /// subscribeRepos WebSocket クライアントには届かない。このブリッジを有効にすると、
-    /// コミット時にローカル送信の代わりに Redis へ publish し、全プロセス（自分自身を含む）が
-    /// 購読タスク経由でそれぞれの `event_tx` に転送するため、どのレプリカに接続した
-    /// WebSocket クライアントにも届くようになる。
-    ///
-    /// モノリスモード（`--role all`）や単一レプリカ運用では不要（`event_tx` の直接送信で十分）。
-    pub async fn with_redis_bridge(&mut self, redis_url: &str) -> Result<(), String> {
-        let client =
-            redis::Client::open(redis_url).map_err(|e| format!("Redis接続URLが不正です: {}", e))?;
-        let publish_conn = redis::aio::ConnectionManager::new(client.clone())
-            .await
-            .map_err(|e| format!("Redis接続に失敗しました: {}", e))?;
-        self.redis_pub = Some(publish_conn);
-
-        let event_tx = Arc::clone(&self.event_tx);
-        tokio::spawn(async move {
-            loop {
-                match run_redis_bridge_subscriber(&client, &event_tx).await {
-                    Ok(()) => {}
-                    Err(e) => tracing::info!("[AtpCommitService] Redis購読が切断されました: {}", e),
-                }
-                tokio::time::sleep(Duration::from_secs(3)).await;
-                tracing::info!("[AtpCommitService] Redis購読を再接続します...");
-            }
-        });
-
-        Ok(())
+    pub fn events(&self) -> &Arc<EventBus<AtpCommitEvent>> {
+        &self.events
     }
 
-    pub fn event_tx(&self) -> &Arc<broadcast::Sender<AtpCommitEvent>> {
-        &self.event_tx
-    }
-
-    /// コミットイベントを配信する。Redis ブリッジが有効なら Redis へ publish し
-    /// （自プロセスへも購読タスク経由で戻ってくる）、無効ならローカル `event_tx` へ直接送る。
     fn publish_event(&self, event: AtpCommitEvent) {
-        let Some(conn) = self.redis_pub.clone() else {
-            let _ = self.event_tx.send(event);
-            return;
-        };
-        tokio::spawn(async move {
-            let mut conn = conn;
-            let payload = match serde_json::to_string(&event) {
-                Ok(p) => p,
-                Err(e) => {
-                    tracing::error!(
-                        "[AtpCommitService] イベントのシリアライズに失敗しました: {}",
-                        e
-                    );
-                    return;
-                }
-            };
-            if let Err(e) = conn.publish::<_, _, ()>(ATP_EVENTS_CHANNEL, payload).await {
-                tracing::error!("[AtpCommitService] Redis publish に失敗しました: {}", e);
-            }
-        });
+        self.events.publish(event);
     }
 
     fn spawn_request_crawl(&self) {
@@ -411,19 +351,22 @@ impl AtpCommitService {
     }
 
     /// 指定アクターの全 ATP レコードを MST 構築用エントリとしてロードする。
-    async fn load_atp_entries(&self, actor_id: i64) -> Result<Vec<(String, Cid)>, AtpCommitError> {
+    async fn load_atp_entries(
+        conn: &mut sqlx::PgConnection,
+        actor_id: i64,
+    ) -> Result<Vec<(String, Cid)>, AtpCommitError> {
         let post_rows = sqlx::query(
             "SELECT at_rkey, at_cid FROM posts
              WHERE actor_id = $1 AND at_rkey IS NOT NULL AND at_cid IS NOT NULL AND deleted_at IS NULL",
         )
         .bind(actor_id)
-        .fetch_all(&self.pool)
+        .fetch_all(&mut *conn)
         .await?;
 
         let record_rows =
             sqlx::query("SELECT collection, rkey, cid FROM atp_records WHERE actor_id = $1")
                 .bind(actor_id)
-                .fetch_all(&self.pool)
+                .fetch_all(&mut *conn)
                 .await?;
 
         let mut entries = Vec::new();
@@ -443,11 +386,8 @@ impl AtpCommitService {
         Ok(entries)
     }
 
-    /// 共通コミットパイプライン。
-    /// MST 構築 → commit 署名 → CAR 生成 → atp_blocks 保存 → actors 更新
-    /// → atp_records 保存 → atp_repo_events 記録 → WebSocket ブロードキャスト
-    ///
-    /// `post_id` を指定すると、同一トランザクション内で `posts.at_uri/at_cid/at_rkey` を更新する。
+    /// レコードを追加・更新するコミット。`post_id` を指定すると、同じトランザクションで
+    /// `posts.at_uri/at_cid/at_rkey` も更新する。
     async fn commit_record_inner(
         &self,
         actor_id: i64,
@@ -455,13 +395,74 @@ impl AtpCommitService {
         now: DateTime<Utc>,
         post_id: Option<i64>,
     ) -> Result<CommitResult, AtpCommitError> {
+        self.apply_write(actor_id, &RepoWrite::Put(record), now, post_id)
+            .await
+    }
+
+    /// 共通コミットパイプライン。リポジトリの先頭（`actors.at_repo_*`）とレコード一覧の
+    /// 読み取りから書き込みまでを1つの SERIALIZABLE トランザクションで行い、直列化失敗なら
+    /// 頭からやり直す。同じアクターへのコミットが並行すると（同一プロセス内でも、無停止更新で
+    /// 新旧2プロセスが重なっている間でも）、両方が同じ prev から rev を作ってリポジトリが分岐する。
+    async fn apply_write(
+        &self,
+        actor_id: i64,
+        write: &RepoWrite,
+        now: DateTime<Utc>,
+        post_id: Option<i64>,
+    ) -> Result<CommitResult, AtpCommitError> {
+        let mut attempt = 1;
+        loop {
+            match self.try_apply_write(actor_id, write, now, post_id).await {
+                Ok((result, frame)) => {
+                    if let Some(frame) = frame {
+                        self.publish_event(AtpCommitEvent {
+                            frame_bytes: frame,
+                            seq: result.seq,
+                        });
+                    }
+                    return Ok(result);
+                }
+                Err(AtpCommitError::Db(e))
+                    if crate::db::is_serialization_failure(&e)
+                        && attempt < MAX_SERIALIZATION_RETRIES =>
+                {
+                    tracing::warn!(
+                        "[atp] コミットが競合したためやり直します actor_id={} attempt={}/{}: {}",
+                        actor_id,
+                        attempt,
+                        MAX_SERIALIZATION_RETRIES,
+                        e
+                    );
+                    tokio::time::sleep(Duration::from_millis(20 * u64::from(attempt))).await;
+                    attempt += 1;
+                }
+                Err(e) => return Err(e),
+            }
+        }
+    }
+
+    /// MST 構築 → commit 署名 → CAR 生成 → atp_blocks 保存 → actors 更新
+    /// → atp_records 反映 → atp_repo_events 記録までを1トランザクションで行い、
+    /// コミット結果と subscribeRepos へ流すフレームを返す。
+    async fn try_apply_write(
+        &self,
+        actor_id: i64,
+        write: &RepoWrite,
+        now: DateTime<Utc>,
+        post_id: Option<i64>,
+    ) -> Result<(CommitResult, Option<Vec<u8>>), AtpCommitError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            .execute(&mut *tx)
+            .await?;
+
         // ① アクター情報取得
         let actor_row = sqlx::query(
             "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
-        .fetch_one(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
 
         let at_did: String = actor_row
@@ -479,14 +480,16 @@ impl AtpCommitService {
         // ② 署名鍵をロード
         let signing_key = signing_key_from_pem(&signing_key_pem)?;
 
-        // ③ 既存エントリをロードして新規レコードを追加・ソート
+        // ③ 既存エントリをロードして対象キーを差し替える
         // 同一キー（例: app.bsky.actor.profile/self の再コミット）が既に存在する場合は
         // 古いエントリを取り除いてから積む。取り除かずに push すると MST に同一キーが
         // 2つ入ってしまい、AppView がリジェクトする不正な木になる。
-        let mut entries = self.load_atp_entries(actor_id).await?;
-        let entry_key = format!("{}/{}", record.collection, record.rkey);
+        let mut entries = Self::load_atp_entries(&mut tx, actor_id).await?;
+        let entry_key = format!("{}/{}", write.collection(), write.rkey());
         entries.retain(|(k, _)| k != &entry_key);
-        entries.push((entry_key.clone(), record.cid));
+        if let RepoWrite::Put(record) = write {
+            entries.push((entry_key.clone(), record.cid));
+        }
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         // ④ MST 構築
@@ -503,17 +506,16 @@ impl AtpCommitService {
         let (commit_cid, commit_cbor) =
             create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
 
-        // ⑥ CAR エンコード
+        // ⑥ CAR エンコード（削除ではレコードのブロックを含まない）
         let mut new_blocks = mst_blocks;
-        new_blocks.push((record.cid, record.cbor));
+        if let RepoWrite::Put(record) = write {
+            new_blocks.push((record.cid, record.cbor.clone()));
+        }
         new_blocks.push((commit_cid, commit_cbor));
         let diff_car = encode_car(&commit_cid, &new_blocks)?;
 
         let commit_cid_str = cid_to_string(&commit_cid);
         let mst_root_cid_str = cid_to_string(&mst_root);
-        let record_cid_str = cid_to_string(&record.cid);
-
-        let mut tx = self.pool.begin().await?;
 
         // ⑦ atp_blocks INSERT
         insert_blocks(&mut tx, actor_id, &new_blocks).await?;
@@ -527,40 +529,73 @@ impl AtpCommitService {
             .execute(&mut *tx)
             .await?;
 
-        // ⑨ atp_records INSERT（投稿は posts テーブルで管理するためスキップ）
-        // app.bsky.feed.post を atp_records にも入れると load_atp_entries で
-        // posts テーブルとの二重取得になり MST に重複キーが生じて AppView に拒否される。
-        if record.collection != "app.bsky.feed.post" {
-            sqlx::query(
-                "INSERT INTO atp_records (actor_id, collection, rkey, cid) VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (actor_id, collection, rkey) DO UPDATE SET cid = EXCLUDED.cid",
-            )
-            .bind(actor_id)
-            .bind(record.collection)
-            .bind(&record.rkey)
-            .bind(&record_cid_str)
-            .execute(&mut *tx)
-            .await?;
-        }
-
-        // ⑨.5 posts テーブル更新（commit_post 専用: post_id が指定された場合のみ）
-        if let Some(pid) = post_id {
-            let at_uri = format!("at://{}/app.bsky.feed.post/{}", at_did, record.rkey);
-            sqlx::query("UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4")
-                .bind(&at_uri)
-                .bind(&record_cid_str)
-                .bind(&record.rkey)
-                .bind(pid)
+        // ⑨ atp_records 反映
+        let (ops_json, ws_ops, blob_cids) = match write {
+            RepoWrite::Put(record) => {
+                let record_cid_str = cid_to_string(&record.cid);
+                // 投稿は posts テーブルで管理するため atp_records に入れない。入れると
+                // load_atp_entries で posts テーブルとの二重取得になり MST に重複キーが生じて
+                // AppView に拒否される。
+                if record.collection != "app.bsky.feed.post" {
+                    sqlx::query(
+                        "INSERT INTO atp_records (actor_id, collection, rkey, cid) VALUES ($1, $2, $3, $4)
+                         ON CONFLICT (actor_id, collection, rkey) DO UPDATE SET cid = EXCLUDED.cid",
+                    )
+                    .bind(actor_id)
+                    .bind(&record.collection)
+                    .bind(&record.rkey)
+                    .bind(&record_cid_str)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                if let Some(pid) = post_id {
+                    let at_uri = format!("at://{}/app.bsky.feed.post/{}", at_did, record.rkey);
+                    sqlx::query(
+                        "UPDATE posts SET at_uri = $1, at_cid = $2, at_rkey = $3 WHERE id = $4",
+                    )
+                    .bind(&at_uri)
+                    .bind(&record_cid_str)
+                    .bind(&record.rkey)
+                    .bind(pid)
+                    .execute(&mut *tx)
+                    .await?;
+                }
+                (
+                    serde_json::json!([{
+                        "action": record.action,
+                        "path": entry_key,
+                        "cid": record_cid_str,
+                    }]),
+                    vec![CommitEvtOp {
+                        action: record.action.to_string(),
+                        path: entry_key,
+                        cid: Some(record.cid),
+                    }],
+                    record.blob_cids.as_slice(),
+                )
+            }
+            RepoWrite::Delete { collection, rkey } => {
+                sqlx::query(
+                    "DELETE FROM atp_records WHERE actor_id = $1 AND collection = $2 AND rkey = $3",
+                )
+                .bind(actor_id)
+                .bind(collection)
+                .bind(rkey)
                 .execute(&mut *tx)
                 .await?;
-        }
+                (
+                    serde_json::json!([{"action": "delete", "path": entry_key}]),
+                    vec![CommitEvtOp {
+                        action: "delete".to_string(),
+                        path: entry_key,
+                        cid: None,
+                    }],
+                    &[][..],
+                )
+            }
+        };
 
         // ⑩ atp_repo_events INSERT → seq 取得
-        let ops_json = serde_json::json!([{
-            "action": record.action,
-            "path": entry_key,
-            "cid": record_cid_str,
-        }]);
         let event_row = sqlx::query(
             "INSERT INTO atp_repo_events
              (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
@@ -582,11 +617,6 @@ impl AtpCommitService {
         // フレームを生成して zstd 圧縮し、同一 tx 内で frame_bytes を保存する。
         // tx.commit() 前に行うことで、フレームバイト列と他のレコードの atomicity を保つ。
         let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp {
-            action: record.action.to_string(),
-            path: entry_key,
-            cid: Some(record.cid),
-        }];
         let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
             seq,
             did: &at_did,
@@ -596,7 +626,7 @@ impl AtpCommitService {
             since: prev_rev.as_deref(),
             car_bytes: &diff_car,
             ops: &ws_ops,
-            blob_cids: &record.blob_cids,
+            blob_cids,
             time: &time_str,
             prev_data: prev_data_cid_parsed.as_ref(),
         })
@@ -613,20 +643,15 @@ impl AtpCommitService {
 
         tx.commit().await?;
 
-        // WebSocket ブロードキャスト
-        if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent {
-                frame_bytes: frame,
+        Ok((
+            CommitResult {
+                commit_cid,
+                rev: new_rev,
                 seq,
-            });
-        }
-
-        Ok(CommitResult {
-            commit_cid,
-            rev: new_rev,
-            seq,
-            at_did,
-        })
+                at_did,
+            },
+            frame_opt,
+        ))
     }
 
     /// 外部ATクライアントの `com.atproto.repo.createRecord`/`putRecord` 用。
@@ -1030,150 +1055,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        // ① アクター情報取得
-        let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
-             FROM actors WHERE id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let at_did: String = actor_row
-            .try_get::<Option<String>, _>("at_did")?
-            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
-        let signing_key_pem: String = actor_row
-            .try_get::<Option<String>, _>("at_signing_key_pem")?
-            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
-        let prev_commit_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
-        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
-        let prev_data_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
-
-        // ② 署名鍵をロード
-        let signing_key = signing_key_from_pem(&signing_key_pem)?;
-
-        // ③ 既存エントリをロードして対象レコードを除去
-        let mut entries = self.load_atp_entries(actor_id).await?;
-        let entry_key = format!("app.bsky.feed.repost/{}", rkey);
-        entries.retain(|(k, _)| k != &entry_key);
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        // ④ MST 構築
-        let (mst_root, mst_blocks) = build_mst(&entries)?;
-
-        // ⑤ commit 生成・P-256 署名
-        let new_rev = generate_tid();
-        let prev_cid_parsed = prev_commit_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let prev_data_cid_parsed = prev_data_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) =
-            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
-
-        // ⑥ CAR エンコード（削除レコードのブロックは含まない）
-        let mut new_blocks = mst_blocks;
-        new_blocks.push((commit_cid, commit_cbor));
-        let diff_car = encode_car(&commit_cid, &new_blocks)?;
-
-        let commit_cid_str = cid_to_string(&commit_cid);
-        let mst_root_cid_str = cid_to_string(&mst_root);
-
-        let mut tx = self.pool.begin().await?;
-
-        // ⑦ atp_blocks INSERT
-        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
-
-        // ⑧ actors UPDATE
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
-            .bind(&commit_cid_str)
-            .bind(&new_rev)
-            .bind(&mst_root_cid_str)
-            .bind(actor_id)
-            .execute(&mut *tx)
-            .await?;
-
-        // ⑨ atp_records DELETE
-        sqlx::query(
-            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.feed.repost' AND rkey = $2",
-        )
-        .bind(actor_id)
-        .bind(rkey)
-        .execute(&mut *tx)
-        .await?;
-
-        // ⑩ atp_repo_events INSERT
-        let ops_json = serde_json::json!([{
-            "action": "delete",
-            "path": entry_key,
-        }]);
-        let event_row = sqlx::query(
-            "INSERT INTO atp_repo_events
-             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id",
-        )
-        .bind(actor_id)
-        .bind(&at_did)
-        .bind(&commit_cid_str)
-        .bind(prev_commit_cid_str.as_deref())
-        .bind(&new_rev)
-        .bind(prev_rev.as_deref())
-        .bind(diff_car.as_slice())
-        .bind(&ops_json)
-        .fetch_one(&mut *tx)
-        .await?;
-        let seq: i64 = event_row.try_get("id")?;
-
-        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp {
-            action: "delete".to_string(),
-            path: entry_key,
-            cid: None,
-        }];
-        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
-            seq,
-            did: &at_did,
-            commit_cid: &commit_cid,
-            prev_cid: prev_cid_parsed.as_ref(),
-            rev: &new_rev,
-            since: prev_rev.as_deref(),
-            car_bytes: &diff_car,
-            ops: &ws_ops,
-            blob_cids: &[],
-            time: &time_str,
-            prev_data: prev_data_cid_parsed.as_ref(),
-        })
-        .ok();
-        if let Some(ref frame) = frame_opt {
-            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
-                    .bind(&compressed)
-                    .bind(seq)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-
-        tx.commit().await?;
-
-        if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent {
-                frame_bytes: frame,
-                seq,
-            });
-        }
-
-        tracing::info!(
-            "[atp] repost delete commit 完了: actor_id={}, rkey={}",
-            actor_id,
-            rkey
-        );
-        self.spawn_request_crawl();
-        Ok(())
+        self.delete_atp_record_generic(actor_id, "app.bsky.feed.repost", rkey, now)
+            .await
     }
 
     /// `app.bsky.feed.post` レコードを削除する。
@@ -1199,150 +1082,8 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        // ① アクター情報取得
-        let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
-             FROM actors WHERE id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let at_did: String = actor_row
-            .try_get::<Option<String>, _>("at_did")?
-            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
-        let signing_key_pem: String = actor_row
-            .try_get::<Option<String>, _>("at_signing_key_pem")?
-            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
-        let prev_commit_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
-        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
-        let prev_data_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
-
-        // ② 署名鍵をロード
-        let signing_key = signing_key_from_pem(&signing_key_pem)?;
-
-        // ③ 既存エントリをロードして対象レコードを除去
-        let mut entries = self.load_atp_entries(actor_id).await?;
-        let entry_key = format!("app.bsky.feed.like/{}", rkey);
-        entries.retain(|(k, _)| k != &entry_key);
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        // ④ MST 構築
-        let (mst_root, mst_blocks) = build_mst(&entries)?;
-
-        // ⑤ commit 生成・P-256 署名
-        let new_rev = generate_tid();
-        let prev_cid_parsed = prev_commit_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let prev_data_cid_parsed = prev_data_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) =
-            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
-
-        // ⑥ CAR エンコード（削除レコードのブロックは含まない）
-        let mut new_blocks = mst_blocks;
-        new_blocks.push((commit_cid, commit_cbor));
-        let diff_car = encode_car(&commit_cid, &new_blocks)?;
-
-        let commit_cid_str = cid_to_string(&commit_cid);
-        let mst_root_cid_str = cid_to_string(&mst_root);
-
-        let mut tx = self.pool.begin().await?;
-
-        // ⑦ atp_blocks INSERT
-        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
-
-        // ⑧ actors UPDATE
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
-            .bind(&commit_cid_str)
-            .bind(&new_rev)
-            .bind(&mst_root_cid_str)
-            .bind(actor_id)
-            .execute(&mut *tx)
-            .await?;
-
-        // ⑨ atp_records DELETE
-        sqlx::query(
-            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.feed.like' AND rkey = $2",
-        )
-        .bind(actor_id)
-        .bind(rkey)
-        .execute(&mut *tx)
-        .await?;
-
-        // ⑩ atp_repo_events INSERT
-        let ops_json = serde_json::json!([{
-            "action": "delete",
-            "path": entry_key,
-        }]);
-        let event_row = sqlx::query(
-            "INSERT INTO atp_repo_events
-             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id",
-        )
-        .bind(actor_id)
-        .bind(&at_did)
-        .bind(&commit_cid_str)
-        .bind(prev_commit_cid_str.as_deref())
-        .bind(&new_rev)
-        .bind(prev_rev.as_deref())
-        .bind(diff_car.as_slice())
-        .bind(&ops_json)
-        .fetch_one(&mut *tx)
-        .await?;
-        let seq: i64 = event_row.try_get("id")?;
-
-        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp {
-            action: "delete".to_string(),
-            path: entry_key,
-            cid: None,
-        }];
-        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
-            seq,
-            did: &at_did,
-            commit_cid: &commit_cid,
-            prev_cid: prev_cid_parsed.as_ref(),
-            rev: &new_rev,
-            since: prev_rev.as_deref(),
-            car_bytes: &diff_car,
-            ops: &ws_ops,
-            blob_cids: &[],
-            time: &time_str,
-            prev_data: prev_data_cid_parsed.as_ref(),
-        })
-        .ok();
-        if let Some(ref frame) = frame_opt {
-            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
-                    .bind(&compressed)
-                    .bind(seq)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-
-        tx.commit().await?;
-
-        if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent {
-                frame_bytes: frame,
-                seq,
-            });
-        }
-
-        tracing::info!(
-            "[atp] like delete commit 完了: actor_id={}, rkey={}",
-            actor_id,
-            rkey
-        );
-        self.spawn_request_crawl();
-        Ok(())
+        self.delete_atp_record_generic(actor_id, "app.bsky.feed.like", rkey, now)
+            .await
     }
 
     /// `app.bsky.graph.follow` レコードを削除コミットする（アンフォロー）。
@@ -1352,141 +1093,11 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
-             FROM actors WHERE id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let at_did: String = actor_row
-            .try_get::<Option<String>, _>("at_did")?
-            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
-        let signing_key_pem: String = actor_row
-            .try_get::<Option<String>, _>("at_signing_key_pem")?
-            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
-        let prev_commit_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
-        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
-        let prev_data_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
-
-        let signing_key = signing_key_from_pem(&signing_key_pem)?;
-
-        let mut entries = self.load_atp_entries(actor_id).await?;
-        let entry_key = format!("app.bsky.graph.follow/{}", rkey);
-        entries.retain(|(k, _)| k != &entry_key);
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        let (mst_root, mst_blocks) = build_mst(&entries)?;
-
-        let new_rev = generate_tid();
-        let prev_cid_parsed = prev_commit_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let prev_data_cid_parsed = prev_data_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) =
-            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
-
-        let mut new_blocks = mst_blocks;
-        new_blocks.push((commit_cid, commit_cbor));
-        let diff_car = encode_car(&commit_cid, &new_blocks)?;
-        let commit_cid_str = cid_to_string(&commit_cid);
-        let mst_root_cid_str = cid_to_string(&mst_root);
-
-        let mut tx = self.pool.begin().await?;
-
-        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
-
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
-            .bind(&commit_cid_str)
-            .bind(&new_rev)
-            .bind(&mst_root_cid_str)
-            .bind(actor_id)
-            .execute(&mut *tx)
-            .await?;
-
-        sqlx::query(
-            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.graph.follow' AND rkey = $2",
-        )
-        .bind(actor_id)
-        .bind(rkey)
-        .execute(&mut *tx)
-        .await?;
-
-        let ops_json = serde_json::json!([{"action": "delete", "path": entry_key}]);
-        let event_row = sqlx::query(
-            "INSERT INTO atp_repo_events
-             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id",
-        )
-        .bind(actor_id)
-        .bind(&at_did)
-        .bind(&commit_cid_str)
-        .bind(prev_commit_cid_str.as_deref())
-        .bind(&new_rev)
-        .bind(prev_rev.as_deref())
-        .bind(diff_car.as_slice())
-        .bind(&ops_json)
-        .fetch_one(&mut *tx)
-        .await?;
-        let seq: i64 = event_row.try_get("id")?;
-
-        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp {
-            action: "delete".to_string(),
-            path: entry_key,
-            cid: None,
-        }];
-        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
-            seq,
-            did: &at_did,
-            commit_cid: &commit_cid,
-            prev_cid: prev_cid_parsed.as_ref(),
-            rev: &new_rev,
-            since: prev_rev.as_deref(),
-            car_bytes: &diff_car,
-            ops: &ws_ops,
-            blob_cids: &[],
-            time: &time_str,
-            prev_data: prev_data_cid_parsed.as_ref(),
-        })
-        .ok();
-        if let Some(ref frame) = frame_opt {
-            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
-                    .bind(&compressed)
-                    .bind(seq)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-
-        tx.commit().await?;
-
-        if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent {
-                frame_bytes: frame,
-                seq,
-            });
-        }
-
-        tracing::info!(
-            "[atp] follow delete commit 完了: actor_id={}, rkey={}",
-            actor_id,
-            rkey
-        );
-        self.spawn_request_crawl();
-        Ok(())
+        self.delete_atp_record_generic(actor_id, "app.bsky.graph.follow", rkey, now)
+            .await
     }
 
-    /// 指定コレクション種別のレコードを MST から削除する汎用ヘルパー（リスト機能 #63）。
-    /// `delete_atp_repost`/`commit_delete_follow` と同型だが、`app.bsky.graph.list` /
-    /// `app.bsky.graph.listitem` の2種を1つの実装で賄うため collection を引数化する。
+    /// 指定コレクションのレコードを MST から削除する。
     pub async fn delete_atp_record_generic(
         &self,
         actor_id: i64,
@@ -1494,129 +1105,11 @@ impl AtpCommitService {
         rkey: &str,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
-        let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
-             FROM actors WHERE id = $1",
-        )
-        .bind(actor_id)
-        .fetch_one(&self.pool)
-        .await?;
-
-        let at_did: String = actor_row
-            .try_get::<Option<String>, _>("at_did")?
-            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
-        let signing_key_pem: String = actor_row
-            .try_get::<Option<String>, _>("at_signing_key_pem")?
-            .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
-        let prev_commit_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_cid")?;
-        let prev_rev: Option<String> = actor_row.try_get::<Option<String>, _>("at_repo_rev")?;
-        let prev_data_cid_str: Option<String> =
-            actor_row.try_get::<Option<String>, _>("at_repo_data_cid")?;
-
-        let signing_key = signing_key_from_pem(&signing_key_pem)?;
-
-        let mut entries = self.load_atp_entries(actor_id).await?;
-        let entry_key = format!("{}/{}", collection, rkey);
-        entries.retain(|(k, _)| k != &entry_key);
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        let (mst_root, mst_blocks) = build_mst(&entries)?;
-
-        let new_rev = generate_tid();
-        let prev_cid_parsed = prev_commit_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let prev_data_cid_parsed = prev_data_cid_str
-            .as_deref()
-            .and_then(|s| cid_from_str(s).ok());
-        let (commit_cid, commit_cbor) =
-            create_commit(&at_did, &new_rev, mst_root, prev_cid_parsed, &signing_key)?;
-
-        let mut new_blocks = mst_blocks;
-        new_blocks.push((commit_cid, commit_cbor));
-        let diff_car = encode_car(&commit_cid, &new_blocks)?;
-        let commit_cid_str = cid_to_string(&commit_cid);
-        let mst_root_cid_str = cid_to_string(&mst_root);
-
-        let mut tx = self.pool.begin().await?;
-
-        insert_blocks(&mut tx, actor_id, &new_blocks).await?;
-
-        sqlx::query("UPDATE actors SET at_repo_cid = $1, at_repo_rev = $2, at_repo_data_cid = $3 WHERE id = $4")
-            .bind(&commit_cid_str)
-            .bind(&new_rev)
-            .bind(&mst_root_cid_str)
-            .bind(actor_id)
-            .execute(&mut *tx)
-            .await?;
-
-        sqlx::query(
-            "DELETE FROM atp_records WHERE actor_id = $1 AND collection = $2 AND rkey = $3",
-        )
-        .bind(actor_id)
-        .bind(collection)
-        .bind(rkey)
-        .execute(&mut *tx)
-        .await?;
-
-        let ops_json = serde_json::json!([{"action": "delete", "path": entry_key}]);
-        let event_row = sqlx::query(
-            "INSERT INTO atp_repo_events
-             (actor_id, did, commit_cid, prev_cid, rev, since_rev, car_bytes, ops_json)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-             RETURNING id",
-        )
-        .bind(actor_id)
-        .bind(&at_did)
-        .bind(&commit_cid_str)
-        .bind(prev_commit_cid_str.as_deref())
-        .bind(&new_rev)
-        .bind(prev_rev.as_deref())
-        .bind(diff_car.as_slice())
-        .bind(&ops_json)
-        .fetch_one(&mut *tx)
-        .await?;
-        let seq: i64 = event_row.try_get("id")?;
-
-        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
-        let ws_ops = vec![CommitEvtOp {
-            action: "delete".to_string(),
-            path: entry_key,
-            cid: None,
-        }];
-        let frame_opt = build_commit_frame(&crate::atp::repo::CommitFrame {
-            seq,
-            did: &at_did,
-            commit_cid: &commit_cid,
-            prev_cid: prev_cid_parsed.as_ref(),
-            rev: &new_rev,
-            since: prev_rev.as_deref(),
-            car_bytes: &diff_car,
-            ops: &ws_ops,
-            blob_cids: &[],
-            time: &time_str,
-            prev_data: prev_data_cid_parsed.as_ref(),
-        })
-        .ok();
-        if let Some(ref frame) = frame_opt {
-            if let Ok(compressed) = zstd::encode_all(&frame[..], 3) {
-                sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
-                    .bind(&compressed)
-                    .bind(seq)
-                    .execute(&mut *tx)
-                    .await?;
-            }
-        }
-
-        tx.commit().await?;
-
-        if let Some(frame) = frame_opt {
-            self.publish_event(AtpCommitEvent {
-                frame_bytes: frame,
-                seq,
-            });
-        }
+        let write = RepoWrite::Delete {
+            collection: collection.to_string(),
+            rkey: rkey.to_string(),
+        };
+        self.apply_write(actor_id, &write, now, None).await?;
 
         tracing::info!(
             "[atp] {} delete commit 完了: actor_id={}, rkey={}",

@@ -34,7 +34,7 @@
 - [ ] 重複排除（シナリオ2マージ処理）のユニットテスト
 - [ ] 未来補正タイムスタンプ採番のテスト
 - [ ] 連合統合テスト（モックAP/ATPサーバー、他seiranハンドシェイク・特権同期）
-- [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore`、プロダクションビルド・デプロイ手順）
+- [ ] 高負荷・スケールアウト検証（`RedisJobQueue` + `RedisSessionStore`）
 - [ ] Bsky受信メンション通知のE2E — firehose は本物のJetstreamに接続する設計で、E2Eにイベント注入用モックが無い
 
 結合テスト: `crates/seiran-api/tests/*_integration.rs`（`#[ignore]`、実DBを使う。CI では E2E 用DBで実行）。
@@ -57,6 +57,7 @@
 - [x] **国際化** — 日英中（繁/簡）韓西独仏、エラーコードの多言語化。`docs/architecture.md` 8節
 - [x] **pg_bigm による本文検索** — `docs/database.md`
 - [x] **コード改善大会（2026-09-26）** — DRY・レースコンディション・SQL・責務分割・SSRF。規約は `docs/coding_rules.md` 2節
+- [x] **公開イメージと本番・単騎運用の無停止更新** — 単一イメージ（`SEIRAN_ROLE`）、Docker Hub・GHCR へのリリース、blue-green デプロイ、Redis によるプロセス間共有、常駐処理の担当決め、graceful shutdown。`docs/architecture.md` 3・3.1節
 
 ### 認証・アカウント
 

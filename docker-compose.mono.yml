@@ -70,6 +70,24 @@ services:
       interval: 5s
       retries: 20
 
+  # ─── Redis（ジョブキュー・リアルタイム配信をプロセス間で共有する）───────────────
+  # seiran-server を Redis 経由で動かすとき（.env の REDIS_URL）に使う。scripts/dev-up.sh は
+  # db と一緒に起動し、ホストで cargo run するバックエンドが 127.0.0.1:6379 に繋ぐ。
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: always
+    volumes:
+      - redis-data:/data
+    ports:
+      - "127.0.0.1:6379:6379"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
   # ─── seiran-server (全ロールを1プロセスで実行) ─────────────────────────────
   # command 未指定 → Dockerfile の CMD ["seiran-server"] → role=all。
   seiran-server:
@@ -169,5 +187,6 @@ networks:
 
 volumes:
   db-data:
+  redis-data:
   db2-data:
   config-data:

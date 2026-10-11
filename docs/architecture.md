@@ -28,6 +28,9 @@ workspace は6 crate。実行バイナリは `seiran-server` だけで、他は 
 - `auth/local.rs` — ローカル認証（Argon2 + JWT）
 - `secrets.rs` — `secrets.toml` の自動生成
 - `queue/` — `JobQueue` の InMemory/Redis 実装とワーカーエンジン
+- `messaging.rs` — プロセスの外とつながる配信路（ジョブキュー・`StreamHub`・subscribeRepos のイベント）と停止の合図（`Messaging`、3節）
+- `event_bus.rs` — プロセス間ブロードキャスト（Redis Pub/Sub、無ければプロセス内）
+- `leader.rs` — 常駐処理の担当決め（advisory lock）
 - `jobs/` — 各ジョブの実処理
 - `ap/` — AP クライアント・配送・WebFinger・outbox
 - `atp/` — MST/リポジトリ、PLC、DID 解決、サービス間認証
@@ -36,7 +39,7 @@ workspace は6 crate。実行バイナリは `seiran-server` だけで、他は 
 - `streaming.rs` — `StreamHub`（`recipients` 方式とチャンネル方式、`docs/protocols.md` 8節）
 - `net.rs` — SSRF 対策込みの HTTP 取得・連合用クライアント
 - `id.rs` — Snowflake ID
-- `jetstream_control.rs` / `jetstream_leader.rs` — Jetstream 接続のプロセス間調整
+- `jetstream_control.rs` — Jetstream の購読対象の変更通知
 
 ## 2.1 バージョン管理と互換性チェック
 
@@ -70,21 +73,46 @@ LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、�
 | `worker` | Worker | seiran-federation-worker | なし |
 | `firehose` / `atp-repo` | Firehose | seiran-atp-repo | なし |
 
-- **All**（`run_all`）: DB・シークレット・HTTP クライアント・`job_queue`（常に InMemory）を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。合流後のルーターに `tower_http::trace::TraceLayer` を1枚だけ被せ、全リクエストのメソッド・パス・レイテンシ・ステータスを INFO ログへ出す（サードパーティクライアントがどのパスを叩いて 404/401 になっているか事後に追えるようにするため。他にアクセスログが無い）。パスのみ記録し、`/api/streaming?token=...` 等クエリ文字列に含まれうる JWT はログに残さない。
-- **Api / Federation**: 専用ポートで待ち受ける。`REDIS_URL` があれば `RedisJobQueue`、無ければ `InMemoryJobQueue`（split-role でこれだと他プロセスにジョブが届かない）。
+- **All**（`run_all`）: DB・シークレット・HTTP クライアント・`Messaging` を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。合流後のルーターに `tower_http::trace::TraceLayer` を1枚だけ被せ、全リクエストのメソッド・パス・レイテンシ・ステータスを INFO ログへ出す（サードパーティクライアントがどのパスを叩いて 404/401 になっているか事後に追えるようにするため。他にアクセスログが無い）。パスのみ記録し、`/api/streaming?token=...` 等クエリ文字列に含まれうる JWT はログに残さない。
+- **Api / Federation**: 専用ポートで待ち受ける。
 - **Worker**（`run_standalone_worker`）: HTTP を持たずジョブを消費する。
-- **Firehose**: 購読者がいないので空の `StreamHub` を使う。
+- **Firehose**: Jetstream 購読と Bsky のポーリングだけを動かす。
+
+**プロセス間の共有（`Messaging`）**: ジョブキュー・`StreamHub`（WebSocket へのリアルタイム配信）・subscribeRepos のコミットイベントの3つは、`REDIS_URL` があればすべて Redis でプロセス間につなぎ、無ければプロセス内で完結させる。プロセス内で完結するのは `all` を1つだけ動かすときに限られる（split-role では worker が取り込んだ投稿が api の WebSocket に届かず、無停止更新では止める側の未処理ジョブが消える）。`REDIS_URL` を設定したのに繋がらないときは起動しない（黙ってプロセス内に切り替えると上の取りこぼしが起きるため）。配信は `event_bus::EventBus`: 送信を1本のタスクに通して Redis の Pub/Sub へ流し（同じプロセスから出たイベントの順序を保つ）、各プロセス（自分を含む）が購読して手元の購読者へ配る。Redis への送信に失敗したイベントは手元の購読者にだけ配る。
+
+**常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリングは、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。
+
+**停止（graceful shutdown）**: SIGTERM（`docker stop`）か SIGINT を受けると `Messaging::shutdown` を発火し、各部分が手持ちの処理を終えてから止まる。
+- HTTP: 新しい接続の受け付けを止め、処理中のリクエストが終わるのを待つ（`with_graceful_shutdown`）。WebSocket（Misskey 互換・Mastodon 互換のストリーミング、subscribeRepos）はハンドラが Close（1012 Service Restart）を送って閉じる。クライアントとリレーは再接続し、新しいプロセスにつながる。
+- ワーカー: 取り出しを止め、実行中のジョブが終わるのを最長60秒待つ。取り出していないジョブとリトライ待ちは Redis に残り、次のプロセスが処理する（InMemory では消える）。Redis の `BZPOPMIN` は途中で中断すると取り出し済みのジョブを失いうるので、1秒のタイムアウトで繰り返し、その合間にだけ停止を確かめる。
+- 常駐処理: 処理し終えたイベントまでのカーソルを保存し、ロックの接続を閉じて担当を降りる。
 
 DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended_max_connections(extra)` が「`available_parallelism()`（HTTP の同時処理の近似。axum/tokio は同時実行数を制限しないので CPU コア数で見積もる）＋ `extra` ＋ 5」を50でクランプして決める（PostgreSQL 既定の `max_connections` 100 を1ロールで圧迫しないため）。All と Worker はジョブワーカー（`DEFAULT_MAX_CONCURRENT_JOBS` = 32並列）を持つので `extra` に32を、他は0を渡す。
 
 同じイメージを `--role` 違いで複数コンテナに分けるか、1コンテナで `all` にするかは運用の選択で、コード上の分岐は `main.rs` の配線だけ。
 
+- `docker-compose.prod.yml`（本番・単騎運用）: 3.1節。
 - `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を共有する。`db` はコンテナ内DNSで足りるが、SSH トンネル経由の psql 用に `127.0.0.1:5432`（ループバックのみ）で公開する。
-- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` を nginx に反映）/ `tunnel`。Redis は無い。`scripts/dev-up.sh` は `db` だけをこれで起動し、backend はホストで `cargo run` して `127.0.0.1:5432` に繋ぐ。
+- `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` を nginx に反映）/ `redis` / `tunnel`。`scripts/dev-up.sh` は `db` と `redis` だけをこれで起動し、backend はホストで `cargo run` して `127.0.0.1:5432`・`127.0.0.1:6379`（`.env` の `REDIS_URL`）に繋ぐ。
 - `cron`（両 compose 共通）: `docker/cron/`（busybox crond）が `docker/cron/crontab` に従い `scripts/backup-db.sh` を毎時48分に実行する。Docker ソケット経由で `db` コンテナの `pg_dump -F custom` を実行し、aws-cli コンテナ（`docker run`）で R2 の `${BACKUP_OBJECT_S3URL}_latest` へ流し込む（引数 `SUFFIX` を渡すと `_latest` を `_${SUFFIX}` にもコピーする）。復元は `scripts/restore-db.sh [SUFFIX]`。同一ホストの他システムのバックアップと負荷が重ならないよう時刻をずらしてある。compose ファイルは `db` を解決できれば足りるので、スクリプトは split-role 構成でも `docker-compose.mono.yml` を参照する。
 - `db` は両方とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` に pg_bigm をソースビルド）で、`shared_preload_libraries=pg_bigm,pg_stat_statements` を渡す。`shared_preload_libraries` の変更は postmaster の再起動が要るので、コンテナ再作成までは `pg_stat_statements` ビューが使えない。 プランナ・JIT の設定（`random_page_cost`・`jit` 等）は既定値のまま使い、クエリ側で既定値のまま良いプランになる形にする（`database.md`「タイムラインの候補抽出」）。
-- `GET /health`（Api/All のみ、認証不要）: DB に `SELECT 1` できるかで 200/503 を返す外形監視用。
+- `GET /health`（Api/All のみ、認証不要）: DB に `SELECT 1` できるかで 200/503 を返す外形監視用。マイグレーションと `Messaging` の接続が済んでから待ち受けを始めるので、200 なら新しい版のプロセスがリクエストを受けられる（`deploy.sh` の切り替えの条件）。
 - `docker/Dockerfile`（seiran-server）は実プロセスを非 root（`seiran`、uid:gid 10001）で動かすが、イメージの `USER` は root のまま。`config-data`（`/app/config`）には root で書かれた既存ボリュームがマウントされうるが、Dockerfile の `chown` はイメージのレイヤーにしか効かず、空でないボリュームにはイメージの内容がコピーされないため。`docker/entrypoint.sh` が起動のたびに root で `/app/config` を `chown -R seiran:seiran` し、`gosu seiran` で降格して exec する（postgres 公式イメージと同じ構成）。他の書き込み先は `/tmp`（ffmpeg の一時ファイル）だけ。`docker/Dockerfile.frontend` は `node` ユーザーで、書き込みが無いので `USER` を固定している。`db`・`redis`・`nginx`・`cloudflared` は各イメージが自前で降格する。
+
+## 3.1 公開イメージと本番・単騎運用
+
+**公開イメージ**（`docker/seiran/Dockerfile`、Docker Hub `seiranorg/seiran` と `ghcr.io/seiran-sns/seiran`、linux/amd64）: seiran-server のリリースビルド、ビルド済みのフロントエンド（`/usr/share/seiran/frontend`）、それを配る nginx、ffmpeg を1つにまとめる。フロントとサーバーは同じコミットからビルドされるので版が常に一致する。役割は `SEIRAN_ROLE` で選ぶ（`docker/seiran/entrypoint.sh`、PID 1 は tini）。
+- `all`（既定）: nginx（:80）と `seiran-server --role all` を同じコンテナで動かす。nginx は静的ファイルを配り、バックエンドのパスを `127.0.0.1:3000` へ転送する（`docker/seiran/site.conf.template`）。OGP の元になる index.html は同じコンテナの nginx から取る（`FRONTEND_ORIGIN=http://127.0.0.1`）。どちらかのプロセスが止まったらもう片方も止めてコンテナごと終了し、再起動は compose に任せる。SIGTERM は両方へ伝える。
+- `frontend`: nginx だけ。振り分け先を `SEIRAN_API_UPSTREAM`・`SEIRAN_FEDERATION_UPSTREAM` で渡す（split-role の入口）。
+- `api` / `federation` / `worker` / `firehose`: seiran-server をその役割だけで動かす。
+
+**本番・単騎運用**（`docker-compose.prod.yml`）: `db` / `redis`（追記ログで永続化）/ `lb` / `seiran-blue` / `seiran-green` / `cron` / `tunnel`（公開ホスト名の向き先は `http://lb:80`）。`seiran-blue`・`seiran-green` は同じ定義（`all`）で、プロファイルに入れてあるので `docker compose up -d` だけでは起動しない。版は `.env` の `SEIRAN_VERSION`。
+- 更新は blue-green（`scripts/deploy.sh`）: 動いていない方の色を新しい版で起動し、`/health` が通ったら `lb`（標準の nginx。版の入れ替えでは作り直さない）の向き先 `docker/lb/active.conf` を書き換えて reload し、古い方を `docker stop` する。reload は graceful なので処理中のリクエストは古い方で終わり、新しいリクエストは新しい方にだけ流れる。新しい方が healthy にならなければ止めて終わり、動いている方には触れない。版を戻すのも `SEIRAN_VERSION` を戻して同じ手順。
+- 新旧が重なっている間は、ジョブキュー・リアルタイム配信・subscribeRepos を Redis で共有し、常駐処理は片方だけが動く（3節）。同じアクターの ATP コミットが両方で起きても SERIALIZABLE のトランザクションで直列化される（`docs/protocols.md` 6節）。
+- 新しい版は起動時にマイグレーションを適用し、古い版はそのスキーマのまま動き続ける。古い版が読み書きする列・テーブルを消したり名前を変えたりするマイグレーションは古い版を壊すので、2つの版に分ける（`docs/coding_rules.md`「マイグレーション」）。
+- `lb` は Docker の内部 DNS で毎回名前を引くので（`resolver 127.0.0.11`）、色のコンテナを作り直して IP が変わっても追従する。`active.conf` はファイルを置き換えて書くので、ファイル単体ではなくディレクトリごとマウントする。
+
+**リリース**（開発機、`scripts/release.sh`）: `Cargo.toml` の版（と `frontend/package.json` の一致）を確かめ、未コミットの変更が無く push 済みであることを確かめてから、イメージを両方のレジストリへ `<版>` と `latest`（版に接尾辞があるときは付けない）で push し、git タグ `v<版>` を付けて push する。
 
 ## 4. 認証
 
@@ -98,7 +126,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 - 各値・Turnstile 鍵・登録のIP制限（既定60分・5件）は `site_settings` で管理する。Turnstile を設定するとログイン・登録で Siteverify を必須にする。
 - **受付停止**（`site_settings.registration_closed`、既定 false）: 管理者が新規登録・転入を止めるスイッチ。ONの間、下記の各段階が `403 REGISTRATION_CLOSED` で拒否される（ユーザー数上限より優先して判定。`/api/meta` は `registrationClosed`、フロントの案内も同様に優先表示）。
 - **ユーザー数上限**（`site_settings.max_user_accounts`、既定100、0なら無制限）: Bluesky 公式が制限解除前の PDS に課す DID 数上限に合わせるためのもの。数えるのは退会済み・凍結済み・DID 転出済みを含む全ローカルアカウント（`actor::count_local_accounts`。公式がどの状態まで数えるか不明なため最も保守的に数える）。カウントが上限以上なら、新規登録の `register`・メール確認の `verify-email` と `verify-token`・転入の `migration/start` と `submit-plc-token`（不可逆な PLC 提出の前。提出済みの再入は通す）が `403 ACCOUNT_LIMIT_REACHED` で拒否される（受付停止と同じ段階）。`/api/meta` は `accountLimitReached`（Misskey 互換の `disableRegistration` と `features.registration`、Mastodon の `registrations` も連動）を返し、フロントの登録・転入フォームは入力欄の代わりに案内を表示する。初期管理者の `setup` は対象外。判定は登録の冒頭で行うだけなので、並列登録で上限をわずかに超えることはありうる。
-- クライアントIPは `ClientIp`（`cf-connecting-ip` → `x-real-ip` → `x-forwarded-for`、無ければ `None` で IP 系制限は素通り）。
+- クライアントIPは `ClientIp`。TCP の接続元（`ConnectInfo`）から出発し、接続元が信頼するプロキシ（`TRUSTED_PROXIES`、既定はループバックとプライベートアドレス）なら `X-Forwarded-For` を右から左へたどって、信頼するプロキシでない最初のアドレスをクライアントとする。XFF の各段は受け取ったプロキシが接続元を末尾に追記したものなので、信頼するプロキシが書いた右側だけが信用でき、それより左（クライアントが自由に書ける）は読まない。接続元が信頼するプロキシでなければヘッダーを一切見ない。`X-Real-IP`・`CF-Connecting-IP` はどの段で付いたかを確かめられないので見ない（Cloudflare のエッジも XFF の末尾に接続元を追記する）。たどり切っても信頼するプロキシしかいない（インフラ内から来た）リクエストと、接続元が分からないリクエストは `None` で、IP 系制限は素通り。nginx はどの段も `$proxy_add_x_forwarded_for` で追記するだけにする。
 - ロール別の上限（`rate_limit.rs` の `role_limit`、値は `site_settings`）: `user`/`emoji-editor` はメンション・返信・引用の宛先（DM除く）1時間30人、投稿1時間30通、新規フォロー24時間100人、リスト5本・各50人、検索1時間10回（スクロールのページングは数えない）、アップロード1ファイル10MB。`moderator` は投稿100通・フォロー300人・リスト30本/300人・検索50回・50MB。`admin` は対象外で API 全体の上限100MBだけ。
 
 **TOTP**: 有効なユーザーはパスワード検証後に5分有効な用途限定 JWT を受け取り、`POST /api/auth/totp/verify` で TOTP かリカバリーコードを検証して通常 JWT を得る。用途限定 JWT はクレーム形状が違い、一般 API には使えない。シークレットは AES-256-GCM で暗号化、リカバリーコードは Argon2 ハッシュのみ保存する。両方失ったら、用途限定 JWT から登録メールへ1時間有効な解除リンクを送り、ワンタイムトークンの消費時に TOTP 設定を消す。管理者はユーザー管理で TOTP 状態とパスキー数を見て、TOTP を強制解除できる。
@@ -122,7 +150,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 `seiran-common::traits` に `Job`（enum）と `JobQueue` trait（`enqueue`/`enqueue_retry`/`dequeue_blocking`）を定義する。`WorkerEngine` は trait だけに依存する。
 
-**バックエンド**（`create_job_queue(is_monolith)`）: `--role all` は常に `InMemoryJobQueue`。split-role は `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua による遅延リトライの昇格）、無ければ InMemory。
+**バックエンド**（`create_job_queue`、3節の `Messaging` が作る）: `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua による遅延リトライの昇格）、無ければ `InMemoryJobQueue`。
 
 **主なジョブ**:
 | Job | 用途 | 優先度 |
@@ -183,7 +211,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 - 1回で他のジョブを大量に積む重いジョブ（`RemoteFollowListSync` → 多数の `RemoteActorResolve`）を表示のたびに積むと、同じ優先度の他のジョブが進まなくなる。積む場所が1つなら、その層にプロセス内のクールダウン（`DashMap`）を置く（`AppState::remote_follow_sync_recent`、10分）。
 - 積む場所が API 層とワーカー層にまたがるなら、ジョブモジュール自体にプロセス内 `static` のクールダウンを置き、両方がそれを経由する（`remote_actor_resolve::should_enqueue`、1時間）。解決できない URI はDBに入らないので、これがネガティブキャッシュも兼ねる。
 
-**並列・排他制御**: ジョブ全体の同時実行数（`Semaphore`、既定32）、ドメイン単位の同時接続数（最大2、リモートから取得するジョブ用。`JobContext::get_domain_semaphore`）、アクター単位の直列化（ATP コミットの順序保証）、指数バックオフ＋ジッターのリトライ。AP 配送の inbox ファンアウトは `fan_out_activity` が `buffer_unordered` で最大8並列（追加の `tokio::spawn` はしない）。
+**並列・排他制御**: ジョブ全体の同時実行数（`Semaphore`、既定32）、ドメイン単位の同時接続数（最大2、リモートから取得するジョブ用。`JobContext::get_domain_semaphore`）、指数バックオフ＋ジッターのリトライ。ATP コミットの直列化はジョブ側ではなく `AtpCommitService` のトランザクションで行う（`docs/protocols.md` 6節）。AP 配送の inbox ファンアウトは `fan_out_activity` が `buffer_unordered` で最大8並列（追加の `tokio::spawn` はしない）。
 
 ## 6. 検索セッション管理
 
@@ -200,7 +228,7 @@ pub struct SearchSession {
 ```
 
 - 寿命はアクセスのたびに延びる10分。
-- `SessionStore` trait。実装は `InMemorySessionStore`（`dashmap`）のみ（Redis 版は未実装、`docs/roadmap.md`）。
+- `SessionStore` trait。実装は `InMemorySessionStore`（`dashmap`）のみ（Redis 版は未実装、`docs/roadmap.md`）。無停止更新で古いプロセスを止めると、そこにあった検索セッションは消え、続きの取得は新しい検索としてやり直しになる。
 
 **ブレンド**（ID ベースの Misskey 互換要求と AppView のカーソルを翻訳する）:
 1. **初回**: ローカルDB と AppView（`searchPosts`）を `tokio::join!` で30件ずつ取得し、AppView 分をDBに入れて統一IDを付けてから ID 降順でマージして上位30件を返す。残りはセッションのバッファへ。
@@ -325,7 +353,9 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 | ドメイン | 自ホストドメインは `instance_domain` テーブル（一度確定したら不変、`LocalDomain`/`InstanceDomainRepository`）から起動時に読む。未確定なら `LOCAL_DOMAIN` の値で確定させる。どちらも無い新規インストールでは、初回セットアップ（`POST /api/setup`）でリクエストの生の `Host` ヘッダーから確定する（`GET /api/setup/status` が候補 `domain_candidate` を返し、フロントが確認後そのまま送り返し、サーバーは送信時の `Host` と一致するか検証する。不一致は `DOMAIN_MISMATCH`）。`Host` が無い・`localhost`・IP 直打ちなら「シングルホストモード」（連合なし、DID を持たないローカルユーザー、`actors.domain='localhost'`） |
 | 起動ポート | `PORT`（既定3000）、`FEDERATION_INBOX_PORT`（既定3001） |
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定 `localhost`/5432。Docker では `DB_HOST=db`）、`DB_MAX_CONNECTIONS`（未設定ならロールごとに算出、3節）。完成済みの `DATABASE_URL` は使わない（`db::get_db_pool`） |
-| ジョブキュー | `REDIS_URL`（split-role 用。`--role all` では不要） |
+| プロセス間の共有 | `REDIS_URL`（ジョブキュー・リアルタイム配信・subscribeRepos。複数のプロセスが同時に動く構成で必須。`all` を1つだけ動かすなら不要。3節） |
+| クライアントIP | `TRUSTED_PROXIES`（カンマ区切りの CIDR、既定はループバックとプライベートアドレス。4節） |
+| 本番・単騎運用 | `SEIRAN_VERSION`（動かす版）、`SEIRAN_IMAGE`（既定 `seiranorg/seiran`）。3.1節 |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWT secret 等は `secrets.toml` で自動生成する |
 | DBバックアップ | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_DEFAULT_REGION`/`S3_ENDPOINT`（R2 の API トークン）、`BACKUP_OBJECT_S3URL`（`s3://<bucket>/<prefix>`）。`cron` サービスと `scripts/backup-db.sh` が `.env` から読む |
 | 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ハンドル検証の TXT 自動作成。未設定なら `.well-known` 方式のみ）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |

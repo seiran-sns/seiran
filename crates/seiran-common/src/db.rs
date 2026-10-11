@@ -73,3 +73,13 @@ pub async fn get_db_pool(default_max_connections: u32) -> Result<PgPool, sqlx::E
 pub async fn run_migrations(pool: &PgPool) -> Result<(), sqlx::migrate::MigrateError> {
     sqlx::migrate!("./migrations").run(pool).await
 }
+
+/// SERIALIZABLE トランザクションの直列化失敗（40001）またはデッドロック検出（40P01）。
+/// どちらもトランザクションを頭からやり直せば通りうる。
+pub fn is_serialization_failure(err: &sqlx::Error) -> bool {
+    matches!(
+        err,
+        sqlx::Error::Database(db_err)
+            if matches!(db_err.code().as_deref(), Some("40001") | Some("40P01"))
+    )
+}

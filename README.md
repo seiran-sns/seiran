@@ -61,6 +61,7 @@ npm run dev
 
 ### 本番構成
 
+- `docker-compose.prod.yml`: 公開イメージ（`seiranorg/seiran`）を1つ動かす本番・単騎運用。`.env` の `SEIRAN_VERSION` に版を書いて `scripts/deploy.sh` を実行すると、無停止で切り替わる
 - `docker-compose.mono.yml`: 単一コンテナで `seiran-server`（role=all）を起動する小規模構成
 - `docker-compose.yml`: `api` / `federation-inbox` / `worker` / `atp-repo` をロールごとに分離し、Redis でジョブキューを共有するスケールアウト構成
 

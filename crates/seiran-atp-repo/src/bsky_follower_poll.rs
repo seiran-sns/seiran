@@ -18,12 +18,12 @@ use std::time::Duration;
 
 use chrono::Utc;
 use seiran_common::atp::fetch_bsky_followers;
-use seiran_common::generate_snowflake_id;
 use seiran_common::repository::{
     ActorRepository, FollowRepository, NotificationKind, NotificationRepository, PgActorRepository,
     PgFollowRepository, PgNotificationRepository,
 };
 use seiran_common::streaming::StreamHub;
+use seiran_common::{CancellationToken, generate_snowflake_id};
 use sqlx::PgPool;
 
 /// 1ページあたりの取得件数（`getFollowers` の `limit`）。
@@ -42,12 +42,16 @@ fn poll_interval() -> Duration {
 }
 
 /// フォロワー検知ポーリングを常駐実行する。
-pub async fn run(pool: PgPool, http: Arc<reqwest::Client>, stream_hub: Arc<StreamHub>) {
-    let mut interval = tokio::time::interval(poll_interval());
-    loop {
-        interval.tick().await;
-        poll_once(&pool, &http, &stream_hub).await;
-    }
+pub async fn run(
+    pool: PgPool,
+    http: Arc<reqwest::Client>,
+    stream_hub: Arc<StreamHub>,
+    stop: CancellationToken,
+) {
+    seiran_common::leader::every(poll_interval(), stop, || {
+        poll_once(&pool, &http, &stream_hub)
+    })
+    .await;
 }
 
 async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub) {

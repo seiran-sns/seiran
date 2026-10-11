@@ -410,7 +410,7 @@ pub enum Job {
     BridgeUserLinkResolve { actor_id: i64 },
 }
 
-/// `JobQueue::dequeue_blocking` が返す、実行対象ジョブとそのメタデータ。
+/// `JobQueue::dequeue` が返す、実行対象ジョブとそのメタデータ。
 /// `priority`/`attempt` はリトライ時に同じ値で `enqueue_retry` へ引き継ぐために保持する。
 /// ジョブハンドラの実行結果エラー。一時的障害（ネットワーク断・タイムアウト等、
 /// リトライすれば成功し得る）と恒久的失敗（不正な入力・署名鍵未設定等、リトライしても
@@ -480,10 +480,11 @@ pub trait JobQueue: Send + Sync {
         delay: Duration,
     ) -> Result<(), String>;
 
-    /// 実行可能なジョブが出るまでブロックして 1 件取得する。
+    /// 実行可能なジョブが出るまで待って 1 件取得する。`shutdown` が発火したら `None` を返す。
+    /// 取り出し途中で中断してジョブを失うことはない（取り出したジョブは必ず返す）。
     /// WorkerEngine のメインループが呼ぶ。バックエンドを問わず同じインターフェースで
     /// 動くことで、WorkerEngine は InMemory / Redis のどちらでも同一コードで動作する。
-    async fn dequeue_blocking(&self) -> QueuedJob;
+    async fn dequeue(&self, shutdown: &tokio_util::sync::CancellationToken) -> Option<QueuedJob>;
 }
 
 #[cfg(test)]

@@ -56,6 +56,7 @@
 | 18 | `TimelinePost`を返すクエリのSELECT列・結合を手書きする、または`TimelinePost`に`#[sqlx(default)]`を足す | `concat!("SELECT ", timeline_post_columns!(), " FROM posts p ", timeline_post_joins!(), ...)`を使う（`repository/post.rs`）。`#[sqlx(default)]`は列の書き漏れを空値で黙認してしまう。可視性は必ずSQL関数`post_is_visible_to`で判定し、`visibility NOT IN (...)`等を手書きしない（`direct`の宛先判定を書き漏らすとDMが漏れる）。例外はホーム/ソーシャル/リストの候補抽出（`repository/feed.rs`）だけで、関数呼び出しの負荷を避けるため同じ判定を展開するマクロ（`post_visible_to_viewer_sql!`等）を使う。マクロも手書きの条件ではなく、関数との一致を結合テストが確認している |
 | 19 | `#[allow(clippy::too_many_arguments)]`で引数過多の指摘を黙らせる、または1つの関数に「A・B・Cの手順」を直書きする | 同時に渡される引数の束に名前を付けた構造体にする（例: `NewNotification`・`NewReaction`・`FediActorProfile`・`PostCommit`・`Page`）。長い関数は手順ごとの関数に分け、最上位には手順名の呼び出しだけを並べる（例: `handlers::notes::reactions::create_reaction_inner`） |
 | 20 | id カーソル（`until_id`/`since_id`）を`($2::bigint IS NULL OR p.id < $2)`と書く | `p.id < COALESCE($2::bigint, 9223372036854775807)` / `p.id > COALESCE($3::bigint, 0)`と書く。前者はgeneric plan（sqlxは接続ごとに文をキャッシュし、PostgreSQLは数回目からgeneric planに切り替えうる）でインデックスの範囲条件にならず、深いページングが全走査からの読み飛ばしになる。`crates/seiran-common/tests/sql_style.rs`が検出する |
+| 21 | 1つ前の版が読み書きしている列・テーブル・型を、1回のマイグレーションで消す・名前を変える・型を変える（マイグレーション） | 2つの版に分ける。先の版で新しい列を足して両方に書き、古い列を読まなくする。次の版で古い列を消す。無停止更新（`docs/architecture.md` 3.1節）では、新しい版が起動時にマイグレーションを適用したあとも、古い版がそのスキーマのまま切り替えまで動き続ける。`NOT NULL`の列を足すときは既定値を付ける（古い版のINSERTが通るように） |
 
 ---
 

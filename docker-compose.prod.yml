@@ -1,0 +1,145 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# 【本番・単騎運用】
+# 公開イメージ（seiranorg/seiran）を `all` の役割で1つ動かす。更新は blue-green で
+# 無停止に行う: 動いていない方の色を新しい版で起動し、ヘルスチェックが通ったら LB の
+# 向き先を切り替え、古い方を止める（scripts/deploy.sh）。新旧が重なっている間は、
+# ジョブキュー・リアルタイム配信を Redis で共有し、常駐処理は片方だけが動く
+# （docs/architecture.md 3.1節）。
+#
+# 初回・更新とも:
+#   1. .env の SEIRAN_VERSION に動かす版を書く
+#   2. scripts/deploy.sh
+#
+# seiran-blue / seiran-green はプロファイルに入れてあり、`docker compose up -d` だけでは
+# 起動しない（両方が動きっぱなしにならないように）。色の起動・停止は deploy.sh が行う。
+# ─────────────────────────────────────────────────────────────────────────────
+name: seiran-prod
+
+x-seiran: &seiran
+  image: ${SEIRAN_IMAGE:-seiranorg/seiran}:${SEIRAN_VERSION:?.env に SEIRAN_VERSION を書いてください}
+  restart: always
+  env_file: .env
+  environment:
+    SEIRAN_ROLE: all
+    PORT: "3000"
+    DB_HOST: db
+    DB_PORT: "5432"
+    REDIS_URL: redis://redis:6379
+    SEIRAN_CONFIG_DIR: /app/config
+    # OGP の HTML の元になる index.html を、同じコンテナの nginx から取る
+    FRONTEND_ORIGIN: http://127.0.0.1
+  volumes:
+    - config-data:/app/config
+  # 停止の合図から、実行中のジョブ（最長60秒）と常駐処理の片付けを待つ
+  stop_grace_period: 120s
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/health"]
+    interval: 5s
+    timeout: 3s
+    retries: 3
+    start_period: 300s
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+  networks:
+    - internal
+
+services:
+  # ─── PostgreSQL（pg_bigm 入り。docker/Dockerfile.postgres）─────────────────
+  db:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.postgres
+    image: seiran-postgres:16-pgbigm
+    command: ["postgres", "-c", "shared_preload_libraries=pg_bigm,pg_stat_statements"]
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    # SSH トンネル経由の psql 用（ループバックのみ）
+    ports:
+      - "127.0.0.1:${DB_PUBLISH_PORT:-5432}:5432"
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      retries: 20
+
+  # ─── Redis（ジョブキュー・リアルタイム配信を新旧のプロセスで共有する）─────────
+  # ジョブキューを失わないよう追記ログで永続化する。
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    restart: always
+    volumes:
+      - redis-data:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 20
+
+  # ─── LB（動いている方の色にだけ流す）──────────────────────────────────────
+  # 向き先は docker/lb/active.conf（deploy.sh が書き換えて nginx を reload する）。
+  # 版の入れ替えでは作り直さないので止まらない。active.conf はファイルを置き換えて
+  # 書き換えるので、ファイル単体ではなくディレクトリごとマウントする（ファイル単体だと
+  # コンテナからは置き換え前のファイルが見え続ける）。
+  lb:
+    image: nginx:1.27-alpine
+    restart: always
+    volumes:
+      - ./docker/lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./docker/lb:/etc/nginx/seiran:ro
+    networks:
+      - internal
+      - external
+
+  seiran-blue:
+    <<: *seiran
+    profiles: ["blue"]
+
+  seiran-green:
+    <<: *seiran
+    profiles: ["green"]
+
+  # ─── DBバックアップ（毎時 R2 へ。scripts/backup-db.sh）──────────────────────
+  cron:
+    build:
+      context: docker/cron
+    image: seiran-cron:latest
+    restart: always
+    environment:
+      COMPOSE_FILE: /seiran/docker-compose.prod.yml
+      COMPOSE_PROJECT_NAME: seiran-prod
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/seiran:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # ─── Cloudflare Tunnel（公開ホスト名の向き先は http://lb:80）────────────────
+  tunnel:
+    image: cloudflare/cloudflared:latest
+    restart: always
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN}
+    depends_on:
+      - lb
+    networks:
+      - external
+
+networks:
+  internal:
+  external:
+
+volumes:
+  db-data:
+  redis-data:
+  config-data:

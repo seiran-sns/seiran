@@ -17,9 +17,7 @@
 
 use serde_json::json;
 use std::sync::Arc;
-use tokio::sync::broadcast;
 
-use crate::atp::service::AtpCommitService;
 use crate::jetstream_control::touch_jetstream_wanted_dids;
 use crate::queue::worker::JobContext;
 use crate::repository::{ActorRepository, FollowRepository, PgActorRepository, PgFollowRepository};
@@ -66,17 +64,10 @@ async fn process_locked(
     let actors: Arc<dyn ActorRepository> = Arc::new(PgActorRepository::new(pool.clone()));
     let follows: Arc<dyn FollowRepository> = Arc::new(PgFollowRepository::new(pool.clone()));
 
-    // ATPコミット用のサービス。event_txはこのジョブ専用の使い捨てチャンネルで良い
-    // （subscribeReposのリアルタイム購読者には届かないが、atp_repo_eventsテーブルへの
-    // 記録自体は行われるため、他のRelayが再購読すれば最終的に一貫する。退会時の
-    // フォロー解除にリアルタイム性は必須ではないと判断）。
-    let (event_tx, _rx) = broadcast::channel(16);
-    let atp_service = AtpCommitService::new(
-        pool.clone(),
-        Arc::new(event_tx),
-        Arc::clone(&ctx.ap_client.http),
-        cfg.local_domain.clone(),
-    );
+    let atp_service = ctx
+        .atp_service
+        .clone()
+        .ok_or("ATPコミットサービスが設定されていません")?;
 
     let target_ids = follows
         .find_accepted_target_ids(actor_id)

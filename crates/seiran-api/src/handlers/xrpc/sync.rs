@@ -288,7 +288,7 @@ async fn handle_subscribe_repos(
     params: SubscribeReposParams,
     state: AppState,
 ) {
-    let mut rx = state.atp_service.event_tx().subscribe();
+    let mut rx = state.atp_service.events().subscribe();
 
     if let Some(mut cursor) = params.cursor {
         const BACKFILL_PAGE_SIZE: i64 = 500;
@@ -389,6 +389,11 @@ async fn handle_subscribe_repos(
 
     loop {
         tokio::select! {
+            _ = state.shutdown.cancelled() => {
+                // リレーは再接続して cursor から続きを読む（新しいプロセスにつながる）。
+                let _ = socket.send(crate::handlers::streaming::restart_close_message()).await;
+                break;
+            }
             _ = ping_interval.tick() => {
                 if socket.send(Message::Ping(vec![])).await.is_err() {
                     break;

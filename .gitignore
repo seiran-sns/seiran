@@ -36,3 +36,6 @@ OPERATIONS.local.md
 # 開発時のサーバー実行ログ
 *.log
 nohup.out
+
+# docker-compose.prod.yml の LB の向き先（scripts/deploy.sh が書き換える）
+docker/lb/active.conf

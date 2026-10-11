@@ -21,7 +21,7 @@ use sqlx::PgPool;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use seiran_common::jetstream_leader::{self, JetstreamLeaderElector};
+use seiran_common::CancellationToken;
 use seiran_common::repository::{
     ActorRepository, BlockRepository, PgActorRepository, PgBlockRepository,
     PgSiteSettingsRepository, SiteSettingsRepository,
@@ -33,85 +33,24 @@ use crate::firehose::resolve_or_upsert_bsky_actor;
 const JETSTREAM_BLOCK_URL: &str =
     "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.graph.block";
 
-/// post/like用（`jetstream_leader::DEFAULT_LEADER_KEY`）とは独立にリーダーを選出するための
-/// 専用リースキー。無絞り込み接続はコスト・特性が異なるため、post/like側の接続とは
-/// 別インスタンスがリーダーになってもよい設計にしている。
-const BLOCK_WATCH_LEADER_KEY: &str = "seiran:jetstream:leader:block_watch";
-
 /// cursor永続化キー（`site_settings`）。`firehose.rs`の`jetstream_cursor`と衝突しないよう
 /// 別キーにする。
 const BLOCK_CURSOR_KEY: &str = "jetstream_block_cursor";
 const CURSOR_SAVE_INTERVAL: Duration = Duration::from_secs(5);
 
-/// リーダー選出に応じて、無絞り込みJetstream接続の起動・停止を切り替える。
-/// `firehose.rs::run`と同じ制御パターン（`docs/protocols.md` 10節）。
+/// 無絞り込みの Jetstream 接続を維持し続ける（エラー時は指数バックオフで再接続）。
+/// `stop` が発火したらカーソルを保存して戻る。post/like 用の接続（`firehose.rs`）とは
+/// 別々に担当を決める（`seiran_common::leader`、`docs/protocols.md` 10節）。
 pub async fn run(
     pool: PgPool,
     job_queue: Arc<dyn JobQueue>,
     http: Arc<reqwest::Client>,
-    redis_url: Option<String>,
-    is_monolith: bool,
+    stop: CancellationToken,
 ) {
-    let mut elector: Option<JetstreamLeaderElector> = None;
-    let mut current_task: Option<tokio::task::JoinHandle<()>> = None;
-    let mut poll = tokio::time::interval(jetstream_leader::LEASE_CHECK_INTERVAL);
-
-    loop {
-        poll.tick().await;
-
-        let should_run = match &redis_url {
-            None => is_monolith,
-            Some(url) => {
-                if elector.is_none() {
-                    match JetstreamLeaderElector::connect(url, BLOCK_WATCH_LEADER_KEY).await {
-                        Ok(e) => elector = Some(e),
-                        Err(e) => tracing::error!("[Jetstream/BlockWatch] Redis接続失敗: {}", e),
-                    }
-                }
-                match &elector {
-                    Some(e) => match e.try_acquire_or_renew().await {
-                        Ok(v) => v,
-                        Err(e) => {
-                            tracing::error!(
-                                "[Jetstream/BlockWatch] Redisリース確認失敗: {}。再接続を試みます。",
-                                e
-                            );
-                            elector = None;
-                            is_monolith
-                        }
-                    },
-                    None => is_monolith,
-                }
-            }
-        };
-
-        match (should_run, current_task.is_some()) {
-            (true, false) => {
-                tracing::info!(
-                    "[Jetstream/BlockWatch] リーダーに昇格（またはRedis未使用の単独運用）。接続開始。"
-                );
-                let pool = pool.clone();
-                let queue = Arc::clone(&job_queue);
-                let http = Arc::clone(&http);
-                current_task = Some(tokio::spawn(run_loop(pool, queue, http)));
-            }
-            (false, true) => {
-                tracing::info!("[Jetstream/BlockWatch] リーダーでなくなったため切断。");
-                if let Some(task) = current_task.take() {
-                    task.abort();
-                }
-            }
-            _ => {}
-        }
-    }
-}
-
-async fn run_loop(pool: PgPool, job_queue: Arc<dyn JobQueue>, http: Arc<reqwest::Client>) {
     let mut backoff_secs = 2u64;
-    loop {
-        match connect_and_process(&pool, &job_queue, &http).await {
+    while !stop.is_cancelled() {
+        match connect_and_process(&pool, &job_queue, &http, &stop).await {
             Ok(()) => {
-                tracing::info!("[Jetstream/BlockWatch] 接続終了（正常）。再接続します。");
                 backoff_secs = 2;
             }
             Err(e) => {
@@ -120,7 +59,10 @@ async fn run_loop(pool: PgPool, job_queue: Arc<dyn JobQueue>, http: Arc<reqwest:
                     e,
                     backoff_secs
                 );
-                sleep(Duration::from_secs(backoff_secs)).await;
+                tokio::select! {
+                    _ = stop.cancelled() => {}
+                    _ = sleep(Duration::from_secs(backoff_secs)) => {}
+                }
                 backoff_secs = (backoff_secs * 2).min(120);
             }
         }
@@ -170,6 +112,7 @@ async fn connect_and_process(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &Arc<reqwest::Client>,
+    stop: &CancellationToken,
 ) -> Result<(), String> {
     let cursor = load_cursor(pool).await;
     let mut url = JETSTREAM_BLOCK_URL.to_string();
@@ -185,15 +128,31 @@ async fn connect_and_process(
     tracing::info!("[Jetstream/BlockWatch] 接続成功。イベント受信中...");
 
     let mut last_saved_at = tokio::time::Instant::now() - CURSOR_SAVE_INTERVAL;
+    let mut last_time_us: Option<i64> = None;
 
-    while let Some(msg) = ws_stream.next().await {
+    loop {
+        let msg = tokio::select! {
+            msg = ws_stream.next() => msg,
+            _ = stop.cancelled() => {
+                // 処理し終えたイベントまでを保存し、引き継いだプロセスがその続きから読む。
+                if let Some(time_us) = last_time_us {
+                    save_cursor(pool, time_us).await;
+                }
+                tracing::info!("[Jetstream/BlockWatch] 停止します。");
+                return Ok(());
+            }
+        };
+        let Some(msg) = msg else { break };
         let msg = msg.map_err(|e| format!("WebSocket 受信エラー: {}", e))?;
         let Message::Text(text) = msg else { continue };
 
-        if let Ok(t) = serde_json::from_str::<JetstreamTimeUs>(&text)
+        let time_us = serde_json::from_str::<JetstreamTimeUs>(&text)
+            .ok()
+            .map(|t| t.time_us);
+        if let Some(time_us) = time_us
             && last_saved_at.elapsed() >= CURSOR_SAVE_INTERVAL
         {
-            save_cursor(pool, t.time_us).await;
+            save_cursor(pool, time_us).await;
             last_saved_at = tokio::time::Instant::now();
         }
 
@@ -203,6 +162,7 @@ async fn connect_and_process(
                 e
             );
         }
+        last_time_us = time_us.or(last_time_us);
     }
 
     Ok(())

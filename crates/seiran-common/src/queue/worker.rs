@@ -20,6 +20,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Semaphore;
+use tokio_util::sync::CancellationToken;
 
 use crate::ap::ApClient;
 use crate::atp::AtpCommitService;
@@ -135,6 +136,9 @@ pub struct JobContext {
     pub oembed_whitelist: Option<Arc<crate::oembed_whitelist::OembedWhitelist>>,
     /// フォロー実行ジョブ（`Job::FollowImportProcess`）が使用
     pub follow_exec: Option<FollowExecConfig>,
+    /// ATP コミット（`Job::BskyPostCommitDeferred`・`Job::AccountWithdrawUnfollowAll`）に使う。
+    /// api と同じインスタンスを渡し、コミットを subscribeRepos の接続へ流す。
+    pub atp_service: Option<Arc<AtpCommitService>>,
     /// DB内機密フィールド（`storage_providers.secret_key`等）のAES-256-GCM復号鍵。
     /// 既存DID転入フロー（`Job::MigrationImportProcess`）がblob保存先ストレージ
     /// プロバイダーを選択する際に使用（`Secrets::encryption_key_bytes`と同じ値）。
@@ -156,6 +160,7 @@ impl JobContext {
             inbox: None,
             oembed_whitelist: None,
             follow_exec: None,
+            atp_service: None,
             encryption_key: None,
         }
     }
@@ -185,6 +190,11 @@ impl JobContext {
 
     pub fn with_follow_exec_config(mut self, follow_exec: FollowExecConfig) -> Self {
         self.follow_exec = Some(follow_exec);
+        self
+    }
+
+    pub fn with_atp_service(mut self, atp_service: Arc<AtpCommitService>) -> Self {
+        self.atp_service = Some(atp_service);
         self
     }
 
@@ -252,15 +262,17 @@ impl WorkerEngine {
         }
     }
 
-    pub fn new_with_db(
-        queue: Arc<dyn JobQueue>,
-        pool: sqlx::PgPool,
-        ap_client: Arc<ApClient>,
-        delivery: DeliveryConfig,
-        inbox: Option<InboxContext>,
-        follow_exec: Option<FollowExecConfig>,
-        encryption_key: Vec<u8>,
-    ) -> Self {
+    pub fn new_with_db(config: WorkerConfig) -> Self {
+        let WorkerConfig {
+            queue,
+            pool,
+            ap_client,
+            delivery,
+            inbox,
+            follow_exec,
+            atp_service,
+            encryption_key,
+        } = config;
         let oembed_whitelist = Arc::new(OembedWhitelist::new(Arc::new(
             PgSiteSettingsRepository::new(pool.clone()),
         )));
@@ -268,6 +280,7 @@ impl WorkerEngine {
             .with_db_pool(pool)
             .with_delivery_config(delivery)
             .with_oembed_whitelist(oembed_whitelist)
+            .with_atp_service(atp_service)
             .with_encryption_key(encryption_key);
         if let Some(inbox) = inbox {
             ctx_builder = ctx_builder.with_inbox_context(inbox);
@@ -289,9 +302,10 @@ impl WorkerEngine {
         self
     }
 
-    /// バックグラウンドワーカーループを起動します
-    /// このメソッドは `tokio::spawn` で呼び出してください
-    pub async fn run(self) {
+    /// `shutdown` が発火するまでジョブを取り出して実行し続ける。発火したら取り出しを止め、
+    /// 実行中のジョブが終わるのを（最長 `DRAIN_TIMEOUT`）待ってから戻る。
+    /// 取り出していないジョブはキューに残る（Redis なら次に起動したプロセスが処理する）。
+    pub async fn run(self, shutdown: CancellationToken) {
         tracing::info!(
             "[WorkerEngine] ジョブワーカー起動 (最大並列数: {})",
             self.max_concurrent
@@ -299,24 +313,53 @@ impl WorkerEngine {
         let semaphore = Arc::new(Semaphore::new(self.max_concurrent));
 
         loop {
-            let queued = self.queue.dequeue_blocking().await;
+            // 空きを確保してから取り出す。先に取り出すと、満杯の間に停止したとき
+            // 取り出したジョブを実行できないまま抱えることになる。
+            let permit = tokio::select! {
+                _ = shutdown.cancelled() => break,
+                permit = Arc::clone(&semaphore).acquire_owned() => {
+                    permit.expect("semaphore は閉じられない")
+                }
+            };
+            let Some(queued) = self.queue.dequeue(&shutdown).await else {
+                break;
+            };
             let ctx = self.ctx.clone();
             let queue = self.queue.clone();
-
-            // permit 取得をブロッキングで待つことで、実行中ジョブ数を上限内に保つ
-            // （キューが一斉に溜まっていた場合のサンダリングハード対策）。
-            let permit = Arc::clone(&semaphore)
-                .acquire_owned()
-                .await
-                .expect("semaphore は閉じられない");
-
             tokio::spawn(async move {
                 execute_with_retry(queued, ctx, queue).await;
                 drop(permit);
             });
         }
+
+        tracing::info!("[WorkerEngine] 取り出しを止めました。実行中のジョブの完了を待ちます。");
+        let all = u32::try_from(self.max_concurrent).unwrap_or(u32::MAX);
+        let drained = tokio::time::timeout(DRAIN_TIMEOUT, semaphore.acquire_many(all)).await;
+        match drained {
+            Ok(_) => tracing::info!("[WorkerEngine] 実行中のジョブがすべて終わりました。"),
+            Err(_) => tracing::warn!(
+                "[WorkerEngine] {}秒以内に終わらなかったジョブを打ち切ります。",
+                DRAIN_TIMEOUT.as_secs()
+            ),
+        }
     }
 }
+
+/// `WorkerEngine::new_with_db` に渡す、ジョブの実行に必要な共有インスタンス一式。
+pub struct WorkerConfig {
+    pub queue: Arc<dyn JobQueue>,
+    pub pool: PgPool,
+    /// 呼び出し元（`seiran-server`）が起動時に一度だけ生成した共有インスタンス。
+    pub ap_client: Arc<ApClient>,
+    pub delivery: DeliveryConfig,
+    pub inbox: Option<InboxContext>,
+    pub follow_exec: Option<FollowExecConfig>,
+    pub atp_service: Arc<AtpCommitService>,
+    pub encryption_key: Vec<u8>,
+}
+
+/// 停止時に実行中のジョブを待つ上限。コンテナの停止猶予（`stop_grace_period`）より短くする。
+const DRAIN_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// ジョブを実行し、失敗時は指数バックオフでリトライキューへ再投入します。
 async fn execute_with_retry(queued: QueuedJob, ctx: Arc<JobContext>, queue: Arc<dyn JobQueue>) {
@@ -928,9 +971,14 @@ mod tests {
             .await
             .unwrap();
 
-        let handle = tokio::spawn(engine.run());
+        let shutdown = CancellationToken::new();
+        let handle = tokio::spawn(engine.run(shutdown.clone()));
         // InboundActivityProcess は未実装スタブで即 Ok を返すので短時間で完了するはず
         tokio::time::sleep(Duration::from_millis(100)).await;
-        handle.abort();
+        shutdown.cancel();
+        tokio::time::timeout(Duration::from_secs(1), handle)
+            .await
+            .expect("停止の合図で戻らない")
+            .unwrap();
     }
 }

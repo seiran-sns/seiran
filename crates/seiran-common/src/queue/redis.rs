@@ -23,6 +23,7 @@ use redis::aio::{ConnectionManager, MultiplexedConnection};
 use redis::AsyncCommands;
 use serde::{Deserialize, Serialize};
 use tokio::sync::Mutex;
+use tokio_util::sync::CancellationToken;
 
 use crate::traits::{Job, JobQueue, QueuedJob};
 
@@ -191,8 +192,13 @@ impl JobQueue for RedisJobQueue {
         self.push_delayed(job, priority, attempt, delay).await
     }
 
-    async fn dequeue_blocking(&self) -> QueuedJob {
+    async fn dequeue(&self, shutdown: &CancellationToken) -> Option<QueuedJob> {
+        // BZPOPMIN の途中で future を捨てると、Redis 側では取り出し済みのジョブを失いうる。
+        // 短いタイムアウトで BZPOPMIN を繰り返し、その合間にだけ停止を確かめる。
         loop {
+            if shutdown.is_cancelled() {
+                return None;
+            }
             if let Err(e) = self.promote_due().await {
                 tracing::error!("[RedisJobQueue] 遅延ジョブの昇格に失敗しました: {}", e);
             }
@@ -219,11 +225,11 @@ impl JobQueue for RedisJobQueue {
 
             match serde_json::from_str::<Envelope>(&member) {
                 Ok(env) => {
-                    return QueuedJob {
+                    return Some(QueuedJob {
                         job: env.job,
                         priority: env.priority,
                         attempt: env.attempt,
-                    }
+                    })
                 }
                 Err(e) => {
                     tracing::error!(
@@ -256,8 +262,8 @@ impl JobQueue for Arc<RedisJobQueue> {
         (**self).enqueue_retry(job, priority, attempt, delay).await
     }
 
-    async fn dequeue_blocking(&self) -> QueuedJob {
-        (**self).dequeue_blocking().await
+    async fn dequeue(&self, shutdown: &CancellationToken) -> Option<QueuedJob> {
+        (**self).dequeue(shutdown).await
     }
 }
 
@@ -321,9 +327,10 @@ mod tests {
             return;
         };
         q.enqueue(job(9001), 10).await.unwrap();
-        let qj = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+        let qj = tokio::time::timeout(Duration::from_secs(3), q.dequeue(&CancellationToken::new()))
             .await
-            .expect("dequeue_blocking がタイムアウトした");
+            .expect("dequeue がタイムアウトした")
+            .unwrap();
         assert_eq!(actor_id_of(&qj.job), 9001);
         assert_eq!(qj.priority, 10);
         assert_eq!(qj.attempt, 0);
@@ -339,14 +346,17 @@ mod tests {
         q.enqueue(job(2), 100).await.unwrap();
         q.enqueue(job(3), 50).await.unwrap();
 
-        let a = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+        let a = tokio::time::timeout(Duration::from_secs(3), q.dequeue(&CancellationToken::new()))
             .await
+            .unwrap()
             .unwrap();
-        let b = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+        let b = tokio::time::timeout(Duration::from_secs(3), q.dequeue(&CancellationToken::new()))
             .await
+            .unwrap()
             .unwrap();
-        let c = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+        let c = tokio::time::timeout(Duration::from_secs(3), q.dequeue(&CancellationToken::new()))
             .await
+            .unwrap()
             .unwrap();
         assert_eq!(actor_id_of(&a.job), 2);
         assert_eq!(actor_id_of(&b.job), 3);
@@ -364,14 +374,18 @@ mod tests {
             .unwrap();
 
         // まだ delayed 側にあり、ready からは即座には取り出せないはず
-        let too_early =
-            tokio::time::timeout(Duration::from_millis(300), q.dequeue_blocking()).await;
+        let too_early = tokio::time::timeout(
+            Duration::from_millis(300),
+            q.dequeue(&CancellationToken::new()),
+        )
+        .await;
         assert!(too_early.is_err(), "delay 前に取り出せてしまった");
 
         // delay 経過後、promote_due のポーリングで ready へ昇格し取り出せる
-        let qj = tokio::time::timeout(Duration::from_secs(3), q.dequeue_blocking())
+        let qj = tokio::time::timeout(Duration::from_secs(3), q.dequeue(&CancellationToken::new()))
             .await
-            .expect("delay 後も dequeue_blocking がタイムアウトした");
+            .expect("delay 後も dequeue がタイムアウトした")
+            .unwrap();
         assert_eq!(actor_id_of(&qj.job), 42);
         assert_eq!(qj.priority, 50);
         assert_eq!(qj.attempt, 2);
