@@ -64,8 +64,8 @@ use axum::{
 };
 
 use seiran_common::repository::{
-    extract_shortcode_candidates, Actor, InsertFullParams, InsertRepostParams, NotificationKind,
-    TimelinePost,
+    extract_shortcode_candidates, with_poll_option_names, Actor, InsertFullParams,
+    InsertRepostParams, NotificationKind, TimelinePost,
 };
 use seiran_common::streaming::{
     broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update,

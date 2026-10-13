@@ -271,7 +271,7 @@ React 18 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<Brow
 - `components/note/` — `NoteCard`（タイムライン・詳細・プロフィール共通）、`PostComposer`、`ReactionChips`（チップのホバーでリアクター一覧をポップオーバー）、`ReactionPicker`、`HlsVideo`、`RichText` 等
   - `ReactionPicker` は `Modal` 内の `EmojiPickerPanel`。Unicode 絵文字データ（`unicode-emoji-json`）は `React.lazy` で遅延ロードする。カスタム絵文字は数千件になりうるので、`EmojiImage` は `hooks/useLazyVisible.ts`（root ごとに共有する `IntersectionObserver`）で視界外の `img` を描かず、グリッドは `PagedGrid` が200件ずつ段階的に描く。
   - 絵文字の検索索引（`lib/emojiAnnotations.ts`）は `emojibase-data` の生 JSON（1言語700〜800kB）を使わず、postinstall で `scripts/build-emoji-annotations.mjs` が生成する軽量 JSON（`src/generated/emoji-annotations/`、git 管理外、1言語170〜220kB）を言語ごとに動的 import する。
-  - `RichText` は Markdown リンク・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでリンク等に変換する（`[#foo](リモートURL)` も `/tags/foo` に読み替える）。`EmojiText` はショートコード置換だけ。
+  - `RichText` は Markdown リンク・生URL・`@mention`・`#ハッシュタグ`・絵文字ショートコードを1パスでリンク等に変換する（`[#foo](リモートURL)` も `/tags/foo` に読み替える）。`EmojiText` はショートコード置換だけで、アンケート選択肢の表示にも使う。選択肢中のショートコードは、ローカル投稿作成・AP 受信とも本文と同じ経路（`with_poll_option_names` で本文に連結して解決）で `emoji_map` に入る。
   - 引用（`quote`）は1段だけ埋め込まれ、本文直下の枠付きカードで描く。カードは返信マーカー・ユーザー・CW・本文・時刻・添付・アンケート・リアクションを再利用し、引用元自身の引用は「引用あり」とだけ出す。
 - `components/right/` — 右ペインのタブ内容（`NotificationsPanel`、`TrendsSearchPanel`、`FollowListPanel`、ポスト詳細の `AuthorPanel`・`ReplyThreadPanel`（`GET /api/notes/:id/replies` のフラット配列を `replyId`/`quoteId` でツリーにする）・`ReactionListPanel`・`RepostListPanel`（取り消し済みも含む）。`docs/ui_spec.md` 2.3節）
 - `components/admin/` — 管理画面

@@ -140,7 +140,9 @@ export function QuoteCard({ note }: { note: Note }) {
                 <div className={styles.quotePoll}>
                   {note.poll.options.map((option) => (
                     <div className={styles.pollOption} key={option.name}>
-                      <span>{option.name}</span>
+                      <span>
+                        <EmojiText text={option.name} emojis={note.emojis} />
+                      </span>
                       <span>{t("home:noteCard.votes", { count: option.votes })}</span>
                     </div>
                   ))}
@@ -579,7 +581,7 @@ function PostContent({
                           >
                             <span>
                               {sharedPollState?.votedByMe.includes(index) && "✓ "}
-                              {option.name}
+                              <EmojiText text={option.name} emojis={note.emojis} />
                             </span>
                             <span>
                               {t("home:noteCard.votes", { count: option.votes })}
@@ -601,7 +603,9 @@ function PostContent({
                                   )
                                 }
                               />
-                              <span>{option.name}</span>
+                              <span>
+                                <EmojiText text={option.name} emojis={note.emojis} />
+                              </span>
                             </label>
                           ) : (
                             <button
@@ -613,7 +617,7 @@ function PostContent({
                                 void submitPollVote([index]);
                               }}
                             >
-                              {option.name}
+                              <EmojiText text={option.name} emojis={note.emojis} />
                             </button>
                           ),
                         )}

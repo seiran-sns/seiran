@@ -49,7 +49,9 @@ export default function MessageContent({ note }: { note: Note }) {
             <div className={styles.poll}>
               {note.poll.options.map((option) => (
                 <div className={styles.pollOption} key={option.name}>
-                  <span>{option.name}</span>
+                  <span>
+                    <EmojiText text={option.name} emojis={note.emojis} />
+                  </span>
                   <span>{t("home:noteCard.votes", { count: option.votes })}</span>
                 </div>
               ))}

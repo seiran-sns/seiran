@@ -726,7 +726,8 @@ async fn persist_regular_post(
     let ap_object_id = format!("https://{}/notes/{}", state.local_domain, post_id);
     let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
 
-    let (local_emoji_map, response_emojis) = resolve_local_emoji_map(state, &text).await;
+    let (local_emoji_map, response_emojis) =
+        resolve_local_emoji_map(state, &with_poll_option_names(&text, poll_json.as_ref())).await;
 
     // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
     let (bsky_quote_embed, ap_quote) = match quote_of_id_i64 {

@@ -59,6 +59,22 @@ pub fn format_remote_reaction_content(shortcode: &str, host: &str) -> String {
 /// 本文中に現れる `:shortcode:` 構文の候補を、出現順・重複なしで抽出する（コロンを除いた形）。
 /// 実在確認は行わない（呼び出し元が `EmojiRepository::find_urls_by_shortcodes` 等で解決する）。
 /// 文字種は `parse_custom_emoji_shortcode` と揃える（英数字・アンダースコアのみ）。
+/// 本文にアンケート選択肢（`posts.poll`の`options[].name`）を改行区切りで連結する。
+/// 選択肢中のショートコードも本文と同じ経路で絵文字マップに解決させるため。
+pub fn with_poll_option_names(text: &str, poll: Option<&serde_json::Value>) -> String {
+    let mut joined = text.to_owned();
+    let options = poll.and_then(|p| p["options"].as_array());
+    for name in options
+        .into_iter()
+        .flatten()
+        .filter_map(|o| o["name"].as_str())
+    {
+        joined.push('\n');
+        joined.push_str(name);
+    }
+    joined
+}
+
 pub fn extract_shortcode_candidates(text: &str) -> Vec<String> {
     let mut result = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -343,6 +359,14 @@ mod tests {
             extract_shortcode_candidates(":a::b:"),
             vec!["a".to_string(), "b".to_string()]
         );
+    }
+
+    #[test]
+    fn with_poll_option_names_makes_option_shortcodes_candidates() {
+        let poll = serde_json::json!({"options": [{"name": ":a: yes"}, {"name": ":b:"}]});
+        let joined = with_poll_option_names("本文 :c:", Some(&poll));
+        assert_eq!(extract_shortcode_candidates(&joined), vec!["c", "a", "b"]);
+        assert_eq!(with_poll_option_names("本文", None), "本文");
     }
 
     #[test]

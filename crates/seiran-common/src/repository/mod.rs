@@ -86,7 +86,7 @@ pub use email_short_code::{EmailShortCodeRepository, PgEmailShortCodeRepository}
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{
     extract_shortcode_candidates, format_local_reaction_content, format_remote_reaction_content,
-    parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host,
+    parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host, with_poll_option_names,
 };
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};

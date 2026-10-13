@@ -13,6 +13,7 @@ use super::note_input::{
 };
 use super::reference::{resolve_ref, system_signing_key, ReferenceResolutionMode};
 use super::*;
+use crate::repository::emoji::with_poll_option_names;
 
 /// `save_ap_note_core`が新規INSERTした場合の結果。呼び出し側固有の後処理
 /// （通知生成はCreate直接受信のみ）に必要な値だけを束ねる。
@@ -357,7 +358,10 @@ async fn convert_note_content(
     // 省略する一方、object.id の正規 Note には完全な tag を載せる。本文に未解決の
     // shortcode がある場合だけ正規 Note を取得し、欠落した tag を補完する。
     // object.id は外部入力なので、解決済み投稿者actorと同一originの場合だけ取得する。
-    if has_unresolved_emoji_shortcodes(&tags, &body) && has_same_origin(note_id, actor_uri) {
+    // アンケート選択肢中のショートコードも本文と同様に解決する。
+    let emoji_source = with_poll_option_names(&body, normalize_ap_poll(note).as_ref());
+    if has_unresolved_emoji_shortcodes(&tags, &emoji_source) && has_same_origin(note_id, actor_uri)
+    {
         let signing_key = system_signing_key(inbox);
         match ap_client
             .fetch_object(note_id, (&signing_key.0, &signing_key.1))
@@ -386,7 +390,8 @@ async fn convert_note_content(
     }
     // 本文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（AP Note の tag 配列由来）。
     record_remote_emojis(inbox, &remote.domain, &tags).await;
-    let emoji_map = resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &body).await;
+    let emoji_map =
+        resolve_emoji_map_with_fallback(inbox, &remote.domain, &tags, &emoji_source).await;
     ConvertedNoteContent {
         tags,
         body,
