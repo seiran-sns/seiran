@@ -41,7 +41,11 @@ pub struct UpdateListRequest {
 #[derive(Deserialize)]
 pub struct AddMemberRequest {
     /// ローカルユーザー名 / `@alice@mastodon.social` / `https://...` / `did:plc:...`
-    pub target: String,
+    #[serde(default)]
+    pub target: Option<String>,
+    /// 解決済みのアクターID（Misskey 互換 API の `userId`）。`target` より優先する。
+    #[serde(default)]
+    pub actor_id: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -493,6 +497,28 @@ pub async fn get_list(
     .into_response()
 }
 
+async fn resolve_add_member_target(
+    state: &AppState,
+    req: &AddMemberRequest,
+) -> Result<seiran_common::repository::Actor, ApiError> {
+    if let Some(raw) = &req.actor_id {
+        let actor_id = parse_id(raw)?;
+        return state
+            .actors
+            .find_by_id(actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(format!("アクター取得失敗: {}", e)))?
+            .ok_or(ApiError::NotFound("ACTOR_NOT_FOUND"));
+    }
+    let target = req
+        .target
+        .as_deref()
+        .ok_or_else(|| ApiError::BadRequest("target か actorId が必要です".to_string()))?;
+    resolve_and_upsert_target(state, target)
+        .await
+        .map_err(|e| ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)))
+}
+
 pub async fn add_member(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -524,11 +550,9 @@ pub async fn add_member(
         }
     }
 
-    let target_actor = match resolve_and_upsert_target(&state, &req.target).await {
+    let target_actor = match resolve_add_member_target(&state, &req).await {
         Ok(a) => a,
-        Err(e) => {
-            return ApiError::BadRequest(format!("ターゲット解決失敗: {}", e)).into_response()
-        }
+        Err(e) => return e.into_response(),
     };
 
     // プロキシフォロー要否（参照カウント方式）: 追加前の時点でどのリストからも

@@ -744,6 +744,14 @@ fn misskey_routes() -> Router<AppState> {
             post(handlers::misskey::endpoints::users_lists_list),
         )
         .route(
+            "/api/users/lists/push",
+            post(handlers::misskey::endpoints::users_lists_push),
+        )
+        .route(
+            "/api/users/lists/pull",
+            post(handlers::misskey::endpoints::users_lists_pull),
+        )
+        .route(
             "/api/users/lists/show",
             post(handlers::misskey::endpoints::users_lists_show),
         )

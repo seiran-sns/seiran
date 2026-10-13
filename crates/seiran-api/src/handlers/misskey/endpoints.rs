@@ -59,6 +59,8 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "users/following",
         "users/gallery/posts",
         "users/lists/list",
+        "users/lists/pull",
+        "users/lists/push",
         "users/lists/show",
         "users/notes",
         "users/pages",
@@ -1302,6 +1304,52 @@ pub async fn users_lists_show(
         .pop()
         .map(Json)
         .ok_or(ApiError::NotFound("NO_SUCH_LIST"))
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsersListsMemberBody {
+    pub list_id: String,
+    pub user_id: String,
+}
+
+/// POST /api/users/lists/push — リストにユーザーを追加（Aria等のユーザーメニュー「リストに追加」）。
+/// カスタムAPI `POST /api/lists/:id/members`（`handlers::lists::add_member`）をそのまま使い、
+/// 成功レスポンスだけ`204 No Content`に整形する。
+pub async fn users_lists_push(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UsersListsMemberBody>,
+) -> Response {
+    let resp = crate::handlers::lists::add_member(
+        user,
+        State(state),
+        Path(body.list_id),
+        Json(crate::handlers::lists::AddMemberRequest {
+            target: None,
+            actor_id: Some(body.user_id),
+        }),
+    )
+    .await
+    .into_response();
+    as_no_content(resp)
+}
+
+/// POST /api/users/lists/pull — リストからユーザーを外す。
+/// カスタムAPI `DELETE /api/lists/:id/members/:actor_id`（`handlers::lists::remove_member`）を使う。
+pub async fn users_lists_pull(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UsersListsMemberBody>,
+) -> Response {
+    let resp = crate::handlers::lists::remove_member(
+        user,
+        State(state),
+        Path((body.list_id, body.user_id)),
+    )
+    .await
+    .into_response();
+    as_no_content(resp)
 }
 
 #[cfg(test)]
