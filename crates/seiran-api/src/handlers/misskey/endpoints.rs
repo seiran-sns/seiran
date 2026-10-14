@@ -72,7 +72,7 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-use seiran_common::repository::{Actor, FollowListRow, Page};
+use seiran_common::repository::{Actor, FollowListRow, NotificationFilter, Page};
 
 use crate::error::ApiError;
 use crate::handlers::follows::FollowTargetRequest;
@@ -219,6 +219,8 @@ pub struct NotificationsBody {
     pub mark_as_read: bool,
     pub include_types: Option<Vec<String>>,
     pub exclude_types: Option<Vec<String>>,
+    /// seiran 独自拡張: 通知の発生元ユーザー（`userId`）で絞り込む。`includeTypes` と AND。
+    pub user_ids: Option<Vec<String>>,
 }
 
 // ─── 共通ヘルパー ───────────────────────────────────────────────────────
@@ -695,30 +697,48 @@ pub async fn i_notifications(
     State(state): State<AppState>,
     Json(body): Json<NotificationsBody>,
 ) -> Result<Json<Vec<MisskeyNotification>>, ApiError> {
-    // includeTypes が空配列の場合は何もクエリしない（本家 Misskey の仕様）
-    if body.include_types.as_ref().is_some_and(|t| t.is_empty()) {
+    // includeTypes / userIds が空配列の場合は何もクエリしない（本家 Misskey の includeTypes の仕様に揃える）
+    if body.include_types.as_ref().is_some_and(|t| t.is_empty())
+        || body.user_ids.as_ref().is_some_and(|u| u.is_empty())
+    {
         return Ok(Json(vec![]));
     }
+
+    let to_kinds = |types: &Option<Vec<String>>| {
+        types.as_ref().map(|types| {
+            types
+                .iter()
+                .map(|t| super::convert::from_misskey_notification_type(t))
+                .collect::<Vec<_>>()
+        })
+    };
+    let notifier_actor_ids = body
+        .user_ids
+        .as_ref()
+        .map(|ids| {
+            ids.iter()
+                .map(|id| parse_id(id, "NO_SUCH_USER"))
+                .collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()?;
+    let filter = NotificationFilter {
+        include_kinds: to_kinds(&body.include_types),
+        exclude_kinds: to_kinds(&body.exclude_types),
+        notifier_actor_ids,
+    };
 
     let page = body.cursor.page(10);
     let rows = state
         .notifications
-        .list(user.actor_id, page.limit, page.until_id, page.since_id)
+        .list(
+            user.actor_id,
+            page.limit,
+            page.until_id,
+            page.since_id,
+            &filter,
+        )
         .await
         .map_err(internal)?;
-
-    let rows: Vec<_> = rows
-        .into_iter()
-        .filter(|r| {
-            body.include_types
-                .as_ref()
-                .is_none_or(|include| include.iter().any(|t| t == &r.kind))
-                && !body
-                    .exclude_types
-                    .as_ref()
-                    .is_some_and(|exclude| exclude.iter().any(|t| t == &r.kind))
-        })
-        .collect();
 
     if body.mark_as_read {
         if let Err(e) = state.notifications.mark_all_read(user.actor_id).await {

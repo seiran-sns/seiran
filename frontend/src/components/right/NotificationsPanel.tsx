@@ -19,6 +19,11 @@ import NoteHoverPreview from "../note/NoteHoverPreview";
 import UserContextMenu from "../note/UserContextMenu";
 import UserHoverArea from "../note/UserHoverArea";
 import UserLinkTag from "../note/UserLinkTag";
+import NotificationFilterBar, {
+  EMPTY_NOTIFICATION_FILTER,
+  NotificationFilterState,
+  toNotificationQuery,
+} from "./NotificationFilterBar";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 
@@ -180,8 +185,16 @@ export default function NotificationsPanel({
   const itemsRef = useRef<NotificationItem[]>([]);
 
   const onError = useCallback((e: unknown) => showError(getErrorMessage(e)), [showError]);
+  const [filter, setFilter] = useState<NotificationFilterState>(EMPTY_NOTIFICATION_FILTER);
+  const query = toNotificationQuery(filter);
+  const filterKey = JSON.stringify(query);
+  const filterActive = query.includeTypes !== undefined || query.userIds !== undefined;
+  // 以降のコールバックが最新の絞り込み条件を参照できるようにする（条件変更のたびに
+  // コールバックを作り直して購読し直さないため）。
+  const queryRef = useRef(query);
+  queryRef.current = query;
   const fetchPage = useCallback(
-    (untilId: string) => api.notifications.list({ limit: PAGE_SIZE, untilId, markAsRead: false }),
+    (untilId: string) => api.notifications.list({ limit: PAGE_SIZE, untilId, markAsRead: false, ...queryRef.current }),
     []
   );
   const { items, setItems, hasMore, setHasMore, loadingMore, loadMore } = useCursorPagination<NotificationItem>(
@@ -189,7 +202,8 @@ export default function NotificationsPanel({
     (n) => n.id,
     PAGE_SIZE,
     onError,
-    cache
+    cache,
+    filterKey
   );
   itemsRef.current = items;
   const sentinelRef = useInfiniteScrollSentinel<HTMLLIElement>(loadMore, hasMore);
@@ -212,17 +226,20 @@ export default function NotificationsPanel({
 
   // 指定ID（無ければ先頭ページ相当）より新しい通知を取得して先頭へ差し込み、既読マークする。
   // 初回マウント時（キャッシュ復元時の補完）とWS新着シグナル受信時の両方で共有する。
+  // 絞り込み中は、一覧に出ていない通知まで既読にしてしまわないよう既読化しない。
   const mergeSince = useCallback(
-    (sinceId: string | undefined) =>
-      api.notifications.list({ limit: PAGE_SIZE, sinceId, markAsRead: true }).then((rows) => {
+    (sinceId: string | undefined) => {
+      const markAsRead = queryRef.current.includeTypes === undefined && queryRef.current.userIds === undefined;
+      return api.notifications.list({ limit: PAGE_SIZE, sinceId, markAsRead, ...queryRef.current }).then((rows) => {
         if (rows.length === 0) return;
         setItems((prev) => {
           const seen = new Set(prev.map((p) => p.id));
           const fresh = rows.filter((r) => !seen.has(r.id));
           return fresh.length > 0 ? [...fresh, ...prev] : prev;
         });
-        markRead();
-      }),
+        if (markAsRead) markRead();
+      });
+    },
     [setItems, markRead]
   );
 
@@ -253,6 +270,29 @@ export default function NotificationsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 絞り込み条件が変わったら、その条件で先頭ページから取得し直す（初回は上のeffectが取得する）。
+  const loadedKeyRef = useRef(filterKey);
+  useEffect(() => {
+    if (loadedKeyRef.current === filterKey) return;
+    loadedKeyRef.current = filterKey;
+    let cancelled = false;
+    setLoadingInitial(true);
+    api.notifications
+      .list({ limit: PAGE_SIZE, markAsRead: !filterActive, ...queryRef.current })
+      .then((rows) => {
+        if (cancelled) return;
+        setItems(rows);
+        setHasMore(rows.length >= PAGE_SIZE);
+        if (!filterActive) markRead();
+      })
+      .catch((e) => !cancelled && onError(e))
+      .finally(() => !cancelled && setLoadingInitial(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterKey]);
+
   useEffect(
     () => registerNotifArrived(() => mergeSince(itemsRef.current[0]?.id).catch(onError)),
     [registerNotifArrived, mergeSince, onError]
@@ -264,9 +304,10 @@ export default function NotificationsPanel({
   // このeffectが読んでしまい、直前に復元/フェッチ中の正しいキャッシュを空データで
   // 上書きしてしまうのを避ける（HomePage側の同種コメント参照）。
   useEffect(() => {
-    if (loadingInitial || !onCacheChange) return;
+    // 絞り込み中の一覧は書き戻さない（キャッシュは絞り込み無しの一覧として復元されるため）。
+    if (loadingInitial || !onCacheChange || filterActive) return;
     onCacheChange({ items, hasMore });
-  }, [items, hasMore, loadingInitial, onCacheChange]);
+  }, [items, hasMore, loadingInitial, onCacheChange, filterActive]);
 
   // スクロール位置は継続的に（都度）呼び出し元へ書き戻す（HomePageのタイムラインと同じ方式）。
   // navigatingAwayRefが立った後（上記freezeScroll参照）は、DOM除去中のクランプ由来の
@@ -283,9 +324,12 @@ export default function NotificationsPanel({
     return () => target.removeEventListener("scroll", onScroll);
   }, [onScrollYChange, getScrollContainer]);
 
-  // 初回読み込みが終わり一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
+  // 初回読み込みが終わり一覧がDOMへ反映された後に、一度だけスクロール位置を復元する
+  // （絞り込みによる再読み込みでは復元しない）。
+  const scrollRestoredRef = useRef(false);
   useEffect(() => {
-    if (loadingInitial || scrollY === undefined) return;
+    if (loadingInitial || scrollY === undefined || scrollRestoredRef.current) return;
+    scrollRestoredRef.current = true;
     const el = getScrollContainer?.() ?? null;
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
@@ -296,22 +340,40 @@ export default function NotificationsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loadingInitial]);
 
+  const filterBar = <NotificationFilterBar filter={filter} onChange={setFilter} />;
+
   if (loadingInitial) {
-    return <div className={panel.placeholder}>{t("common:loading")}</div>;
+    return (
+      <>
+        {filterBar}
+        <div className={panel.placeholder}>{t("common:loading")}</div>
+      </>
+    );
   }
 
   if (items.length === 0) {
     return (
-      <div className={panel.placeholder}>
-        <TwemojiEmoji emoji="🔔" className={panel.placeholderIcon} />
-        {t("notifications:notificationsPanel.noNotifications")}
-        <br />
-        {t("notifications:notificationsPanel.noNotificationsDetail")}
-      </div>
+      <>
+        {filterBar}
+        <div className={panel.placeholder}>
+          <TwemojiEmoji emoji="🔔" className={panel.placeholderIcon} />
+          {filterActive ? (
+            t("notifications:notificationsPanel.noMatchingNotifications")
+          ) : (
+            <>
+              {t("notifications:notificationsPanel.noNotifications")}
+              <br />
+              {t("notifications:notificationsPanel.noNotificationsDetail")}
+            </>
+          )}
+        </div>
+      </>
     );
   }
 
   return (
+    <>
+    {filterBar}
     <ul
       className={styles.list}
       onClickCapture={(event) => {
@@ -409,5 +471,6 @@ export default function NotificationsPanel({
         </li>
       )}
     </ul>
+    </>
   );
 }

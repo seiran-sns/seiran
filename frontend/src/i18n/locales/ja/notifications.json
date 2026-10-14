@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "フォローしていた <userLink><emojiName/>{{handleSuffix}}</userLink> が <newUserLink>{{newHandle}}</newUserLink> に移転しました。すでにフォロー済みです",
     "genericText": "<userLink><emojiName/>{{handleSuffix}}</userLink> から通知",
     "noNotifications": "新しい通知はありません。",
-    "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。"
+    "noNotificationsDetail": "リプライ・リアクション・フォローがここにリアルタイム表示されます。",
+    "noMatchingNotifications": "条件に一致する通知はありません。"
+  },
+  "filter": {
+    "typeLabel": "通知種別で絞り込み",
+    "typePlaceholder": "通知種別",
+    "userLabel": "ユーザーで絞り込み",
+    "userPlaceholder": "ユーザー",
+    "types": {
+      "reaction": "リアクション",
+      "mention": "メンション",
+      "reply": "返信",
+      "renote": "リポスト",
+      "quote": "引用",
+      "follow": "フォロー",
+      "receiveFollowRequest": "フォローリクエスト",
+      "followRequestAccepted": "フォロー承認",
+      "moveRefollowed": "引っ越し（再フォロー）",
+      "moveAlreadyFollowing": "引っ越し（フォロー済み）"
+    },
+    "clear": "すべてクリア"
   }
 }

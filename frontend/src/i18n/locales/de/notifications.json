@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "<userLink><emojiName/>{{handleSuffix}}</userLink>, dem Sie folgten, ist zu <newUserLink>{{newHandle}}</newUserLink> umgezogen. Sie folgen bereits",
     "genericText": "Benachrichtigung von <userLink><emojiName/>{{handleSuffix}}</userLink>",
     "noNotifications": "Keine neuen Benachrichtigungen.",
-    "noNotificationsDetail": "Antworten, Reaktionen und Follower werden hier in Echtzeit angezeigt."
+    "noNotificationsDetail": "Antworten, Reaktionen und Follower werden hier in Echtzeit angezeigt.",
+    "noMatchingNotifications": "Keine Benachrichtigungen entsprechen dem Filter."
+  },
+  "filter": {
+    "typeLabel": "Nach Benachrichtigungstyp filtern",
+    "typePlaceholder": "Benachrichtigungstyp",
+    "userLabel": "Nach Benutzer filtern",
+    "userPlaceholder": "Benutzer",
+    "types": {
+      "reaction": "Reaktion",
+      "mention": "Erwähnung",
+      "reply": "Antwort",
+      "renote": "Repost",
+      "quote": "Zitat",
+      "follow": "Follow",
+      "receiveFollowRequest": "Follow-Anfrage",
+      "followRequestAccepted": "Follow akzeptiert",
+      "moveRefollowed": "Umzug (erneut gefolgt)",
+      "moveAlreadyFollowing": "Umzug (bereits gefolgt)"
+    },
+    "clear": "Alle zurücksetzen"
   }
 }

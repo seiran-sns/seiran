@@ -42,6 +42,15 @@ impl NotificationKind {
     }
 }
 
+/// 通知一覧の絞り込み条件。各項目は `None` なら絞り込まない。複数項目は AND で作用する。
+/// `kinds` は内部種別名（`NotificationKind::as_str`）で、`Some(空)` は何にも一致しない。
+#[derive(Debug, Clone, Default)]
+pub struct NotificationFilter {
+    pub include_kinds: Option<Vec<String>>,
+    pub exclude_kinds: Option<Vec<String>>,
+    pub notifier_actor_ids: Option<Vec<i64>>,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct NotificationRow {
     pub id: i64,
@@ -125,6 +134,7 @@ pub trait NotificationRepository: Send + Sync {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        filter: &NotificationFilter,
     ) -> Result<Vec<NotificationRow>, sqlx::Error>;
 
     /// 自分宛ての未読通知をすべて既読にする（Misskey `markAsRead` 相当）。
@@ -176,6 +186,7 @@ impl NotificationRepository for PgNotificationRepository {
         limit: i64,
         until_id: Option<i64>,
         since_id: Option<i64>,
+        filter: &NotificationFilter,
     ) -> Result<Vec<NotificationRow>, sqlx::Error> {
         sqlx::query_as::<_, NotificationRow>(
             "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, related_actor_id, is_read, created_at
@@ -184,12 +195,18 @@ impl NotificationRepository for PgNotificationRepository {
                AND id < COALESCE($2::bigint, 9223372036854775807)
                AND id > COALESCE($3::bigint, 0)
                AND (notifier_actor_id IS NULL OR NOT actor_is_hidden_for_viewer($1, notifier_actor_id))
+               AND ($5::text[] IS NULL OR type = ANY($5))
+               AND ($6::text[] IS NULL OR NOT (type = ANY($6)))
+               AND ($7::bigint[] IS NULL OR notifier_actor_id = ANY($7))
              ORDER BY id DESC LIMIT $4",
         )
         .bind(recipient_actor_id)
         .bind(until_id)
         .bind(since_id)
         .bind(limit)
+        .bind(filter.include_kinds.as_deref())
+        .bind(filter.exclude_kinds.as_deref())
+        .bind(filter.notifier_actor_ids.as_deref())
         .fetch_all(&self.pool)
         .await
     }

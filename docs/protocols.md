@@ -720,7 +720,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
   - 制限: ブロック/ミュートはチャンネル配信では考慮しない（コネクション数に比例するDBコストになる。通知は INSERT 時に判定する）。`userList` はメンバーシップだけで判定する（リストTLに閲覧者の概念が無いため。`direct` は除外）。
   - DM はチャンネルではなく `recipients` 方式（`publish_note`）で送る。
 
-`notifications` の種別は `Follow`/`Reaction`/`FollowRequest`/`FollowRequestAccepted`/`Mention`/`Reply`/`Repost`/`Quote`/`MoveRefollowed`/`MoveAlreadyFollowing`。`FollowRequest` は Misskey API では `receiveFollowRequest`、`Move*` は seiran 独自。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を作る。WebSocket は「新着がある」というシグナルだけに使い、実データは常に `POST /api/i/notifications`（`sinceId`）で取り直す（一覧とスキーマを揃えるため）。
+`notifications` の種別は `Follow`/`Reaction`/`FollowRequest`/`FollowRequestAccepted`/`Mention`/`Reply`/`Repost`/`Quote`/`MoveRefollowed`/`MoveAlreadyFollowing`。`FollowRequest` は Misskey API では `receiveFollowRequest`、`Move*` は seiran 独自。ローカルフォローは `follows` への新規挿入時だけ `Follow` 通知を作る。`POST /api/i/notifications` の `includeTypes`/`excludeTypes`（Misskey の種別名。内部名への変換は `from_misskey_notification_type`）と seiran 独自の `userIds`（通知の発生元）は SQL で絞り込む（ページ内で後から絞ると、1ページの件数が崩れて無限スクロールの終端判定が狂うため）。`includeTypes`・`userIds` が空配列なら何も返さず、指定した条件は AND で作用する。WebSocket は「新着がある」というシグナルだけに使い、実データは常に `POST /api/i/notifications`（`sinceId`）で取り直す（一覧とスキーマを揃えるため）。
 
 **`followAccepted`** は例外で、ペイロード（`actor.username`/`actor.domain`）をフロントが直接使う。Fedi フォロー（`follow_fedi`）は相手が承認制（`manuallyApprovesFollowers: true`）のときだけ `pending` で始め、それ以外は Misskey と同じく送信と同時に `accepted` にする（相手の Accept を待たない楽観的確定。Aria はフォロー操作の1秒後に一度だけ再取得するので、`pending` のままだとボタンが処理中に固まる）。承認制の相手の `pending` → `accepted` は、`StreamingContext` が `followAccepted` を受けて `stores/followStatusStore` を更新し、その相手を表示中のコンポーネント（フォローボタン・NoteCard のスイッチ）すべてに即座に反映する。
 

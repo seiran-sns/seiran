@@ -106,7 +106,7 @@ pub use media_file::{
 };
 pub use mute::{MuteRepository, MutedActorRow, PgMuteRepository};
 pub use notification::{
-    NewNotification, NotificationKind, NotificationRepository, NotificationRow,
+    NewNotification, NotificationFilter, NotificationKind, NotificationRepository, NotificationRow,
     PgNotificationRepository,
 };
 pub use password_reset::{PasswordResetRepository, PgPasswordResetRepository};

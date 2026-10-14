@@ -35,7 +35,13 @@ pub async fn list(
     let page = params.page.page(40, 80);
     let rows = state
         .notifications
-        .list(user.actor_id, page.limit, page.until_id, page.since_id)
+        .list(
+            user.actor_id,
+            page.limit,
+            page.until_id,
+            page.since_id,
+            &seiran_common::repository::NotificationFilter::default(),
+        )
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let ids: Vec<String> = rows.iter().map(|r| r.id.to_string()).collect();

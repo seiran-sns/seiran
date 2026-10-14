@@ -663,6 +663,15 @@ fn to_misskey_notification_type(kind: &str) -> String {
     }
 }
 
+/// Misskey の通知種別名を内部種別名へ戻す（`to_misskey_notification_type` の逆変換）。
+pub fn from_misskey_notification_type(kind: &str) -> String {
+    match kind {
+        "renote" => "repost".to_string(),
+        "receiveFollowRequest" => "followRequest".to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// 通知一覧（`POST /api/i/notifications`）を Misskey 形式へ変換する。
 /// `recipient_actor_id` は通知の宛先本人（ノートを包む際の `myReaction` 等の視点に使う）。
 pub async fn build_notifications(

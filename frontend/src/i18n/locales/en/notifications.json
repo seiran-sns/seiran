@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "<userLink><emojiName/>{{handleSuffix}}</userLink>, who you followed, has moved to <newUserLink>{{newHandle}}</newUserLink>. You're already following them",
     "genericText": "Notification from <userLink><emojiName/>{{handleSuffix}}</userLink>",
     "noNotifications": "No new notifications.",
-    "noNotificationsDetail": "Replies, reactions, and follows will appear here in real time."
+    "noNotificationsDetail": "Replies, reactions, and follows will appear here in real time.",
+    "noMatchingNotifications": "No notifications match the filter."
+  },
+  "filter": {
+    "typeLabel": "Filter by notification type",
+    "typePlaceholder": "Notification type",
+    "userLabel": "Filter by user",
+    "userPlaceholder": "User",
+    "types": {
+      "reaction": "Reaction",
+      "mention": "Mention",
+      "reply": "Reply",
+      "renote": "Repost",
+      "quote": "Quote",
+      "follow": "Follow",
+      "receiveFollowRequest": "Follow request",
+      "followRequestAccepted": "Follow accepted",
+      "moveRefollowed": "Moved (re-followed)",
+      "moveAlreadyFollowing": "Moved (already following)"
+    },
+    "clear": "Clear all"
   }
 }

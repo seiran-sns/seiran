@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "<userLink><emojiName/>{{handleSuffix}}</userLink>, que vous suiviez, a déménagé vers <newUserLink>{{newHandle}}</newUserLink>. Vous le suivez déjà",
     "genericText": "Notification de <userLink><emojiName/>{{handleSuffix}}</userLink>",
     "noNotifications": "Aucune nouvelle notification.",
-    "noNotificationsDetail": "Les réponses, réactions et suivis apparaîtront ici en temps réel."
+    "noNotificationsDetail": "Les réponses, réactions et suivis apparaîtront ici en temps réel.",
+    "noMatchingNotifications": "Aucune notification ne correspond au filtre."
+  },
+  "filter": {
+    "typeLabel": "Filtrer par type de notification",
+    "typePlaceholder": "Type de notification",
+    "userLabel": "Filtrer par utilisateur",
+    "userPlaceholder": "Utilisateur",
+    "types": {
+      "reaction": "Réaction",
+      "mention": "Mention",
+      "reply": "Réponse",
+      "renote": "Repost",
+      "quote": "Citation",
+      "follow": "Abonnement",
+      "receiveFollowRequest": "Demande d'abonnement",
+      "followRequestAccepted": "Abonnement accepté",
+      "moveRefollowed": "Déménagement (réabonné)",
+      "moveAlreadyFollowing": "Déménagement (déjà abonné)"
+    },
+    "clear": "Tout effacer"
   }
 }

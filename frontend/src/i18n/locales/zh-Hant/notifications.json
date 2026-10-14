@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "您追蹤的 <userLink><emojiName/>{{handleSuffix}}</userLink> 已遷移到 <newUserLink>{{newHandle}}</newUserLink>，您已經追蹤對方",
     "genericText": "來自 <userLink><emojiName/>{{handleSuffix}}</userLink> 的通知",
     "noNotifications": "沒有新的通知。",
-    "noNotificationsDetail": "回覆、反應和追蹤將即時顯示在這裡。"
+    "noNotificationsDetail": "回覆、反應和追蹤將即時顯示在這裡。",
+    "noMatchingNotifications": "沒有符合條件的通知。"
+  },
+  "filter": {
+    "typeLabel": "依通知類型篩選",
+    "typePlaceholder": "通知類型",
+    "userLabel": "依使用者篩選",
+    "userPlaceholder": "使用者",
+    "types": {
+      "reaction": "回應",
+      "mention": "提及",
+      "reply": "回覆",
+      "renote": "轉發",
+      "quote": "引用",
+      "follow": "追蹤",
+      "receiveFollowRequest": "追蹤請求",
+      "followRequestAccepted": "追蹤已核准",
+      "moveRefollowed": "遷移（重新追蹤）",
+      "moveAlreadyFollowing": "遷移（已追蹤）"
+    },
+    "clear": "全部清除"
   }
 }

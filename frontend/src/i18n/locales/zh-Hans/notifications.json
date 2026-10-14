@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "您关注的 <userLink><emojiName/>{{handleSuffix}}</userLink> 已迁移到 <newUserLink>{{newHandle}}</newUserLink>，您已经关注了对方",
     "genericText": "来自 <userLink><emojiName/>{{handleSuffix}}</userLink> 的通知",
     "noNotifications": "没有新的通知。",
-    "noNotificationsDetail": "回复、反应和关注将实时显示在此处。"
+    "noNotificationsDetail": "回复、反应和关注将实时显示在此处。",
+    "noMatchingNotifications": "没有符合条件的通知。"
+  },
+  "filter": {
+    "typeLabel": "按通知类型筛选",
+    "typePlaceholder": "通知类型",
+    "userLabel": "按用户筛选",
+    "userPlaceholder": "用户",
+    "types": {
+      "reaction": "回应",
+      "mention": "提及",
+      "reply": "回复",
+      "renote": "转发",
+      "quote": "引用",
+      "follow": "关注",
+      "receiveFollowRequest": "关注请求",
+      "followRequestAccepted": "关注已通过",
+      "moveRefollowed": "迁移（重新关注）",
+      "moveAlreadyFollowing": "迁移（已关注）"
+    },
+    "clear": "全部清除"
   }
 }

@@ -16,6 +16,26 @@
     "moveAlreadyFollowingText": "팔로우하던 <userLink><emojiName/>{{handleSuffix}}</userLink>님이 <newUserLink>{{newHandle}}</newUserLink>(으)로 이전했습니다. 이미 팔로우 중입니다",
     "genericText": "<userLink><emojiName/>{{handleSuffix}}</userLink>의 알림",
     "noNotifications": "새로운 알림이 없습니다.",
-    "noNotificationsDetail": "답글, 반응, 팔로우가 여기에 실시간으로 표시됩니다."
+    "noNotificationsDetail": "답글, 반응, 팔로우가 여기에 실시간으로 표시됩니다.",
+    "noMatchingNotifications": "조건에 맞는 알림이 없습니다."
+  },
+  "filter": {
+    "typeLabel": "알림 종류로 필터",
+    "typePlaceholder": "알림 종류",
+    "userLabel": "사용자로 필터",
+    "userPlaceholder": "사용자",
+    "types": {
+      "reaction": "리액션",
+      "mention": "멘션",
+      "reply": "답글",
+      "renote": "리포스트",
+      "quote": "인용",
+      "follow": "팔로우",
+      "receiveFollowRequest": "팔로우 요청",
+      "followRequestAccepted": "팔로우 수락",
+      "moveRefollowed": "이전(다시 팔로우)",
+      "moveAlreadyFollowing": "이전(이미 팔로우 중)"
+    },
+    "clear": "모두 지우기"
   }
 }

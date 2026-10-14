@@ -245,12 +245,18 @@ export const notifications = {
     untilId?: string;
     sinceId?: string;
     markAsRead?: boolean;
+    /** 通知種別（Misskey の種別名）で絞り込む。省略時は全種別。 */
+    includeTypes?: string[];
+    /** 通知の発生元ユーザーID（seiran 独自拡張）で絞り込む。`includeTypes` と AND。 */
+    userIds?: string[];
   }) {
     return request<NotificationItem[]>("POST", "/i/notifications", {
       limit: params?.limit,
       untilId: params?.untilId,
       sinceId: params?.sinceId,
       markAsRead: params?.markAsRead,
+      includeTypes: params?.includeTypes,
+      userIds: params?.userIds,
     });
   },
 };

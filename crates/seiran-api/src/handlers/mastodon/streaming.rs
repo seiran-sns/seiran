@@ -242,7 +242,13 @@ impl Connection {
         let Ok(rows) = self
             .state
             .notifications
-            .list(self.actor_id, 20, None, self.last_notification_id)
+            .list(
+                self.actor_id,
+                20,
+                None,
+                self.last_notification_id,
+                &seiran_common::repository::NotificationFilter::default(),
+            )
             .await
         else {
             return Vec::new();
