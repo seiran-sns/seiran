@@ -35,7 +35,6 @@
       "followRequestAccepted": "关注已通过",
       "moveRefollowed": "迁移（重新关注）",
       "moveAlreadyFollowing": "迁移（已关注）"
-    },
-    "clear": "全部清除"
+    }
   }
 }

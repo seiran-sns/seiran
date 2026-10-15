@@ -84,5 +84,27 @@
     },
     "withdrawing": "Tratamiento...",
     "withdrawSubmit": "Desactivar cuenta"
+  },
+  "feedFilter": {
+    "kindLabel": "Filtrar por tipo",
+    "kindPlaceholder": "Tipo",
+    "mediaLabel": "Filtrar por archivo adjunto",
+    "mediaPlaceholder": "Adjunto",
+    "kinds": {
+      "reaction": "Reacciones",
+      "normal": "Publicaciones normales",
+      "reply": "Respuestas",
+      "reply_to_me": "Respuestas a ti",
+      "quote": "Citas",
+      "quote_of_mine": "Citas de tus publicaciones",
+      "repost": "Reposts",
+      "repost_of_mine": "Reposts de tus publicaciones"
+    },
+    "media": {
+      "none": "Ninguno",
+      "image": "Imagen",
+      "video": "Vídeo",
+      "audio": "Audio"
+    }
   }
 }

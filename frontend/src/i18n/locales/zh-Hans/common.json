@@ -48,5 +48,8 @@
     "viewOriginal": "查看原始帖子",
     "bridgeUser": "这是一个桥接用户",
     "viewRealUser": "查看真实账号"
+  },
+  "filterField": {
+    "clear": "全部清除"
   }
 }

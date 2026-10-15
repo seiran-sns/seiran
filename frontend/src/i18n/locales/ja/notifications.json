@@ -35,7 +35,6 @@
       "followRequestAccepted": "フォロー承認",
       "moveRefollowed": "引っ越し（再フォロー）",
       "moveAlreadyFollowing": "引っ越し（フォロー済み）"
-    },
-    "clear": "すべてクリア"
+    }
   }
 }

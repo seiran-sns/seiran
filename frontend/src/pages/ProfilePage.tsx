@@ -18,6 +18,11 @@ import RichHtml from "../components/note/RichHtml";
 import ProfileBio from "../components/note/ProfileBio";
 import { toProfileHtml } from "../lib/profileHtml";
 import { useResolvedLinks } from "../hooks/useResolvedLinks";
+import ProfileFeedFilterBar, {
+  EMPTY_PROFILE_FEED_FILTER,
+  ProfileFeedFilterState,
+  toProfileFeedQuery,
+} from "../components/note/ProfileFeedFilterBar";
 import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
@@ -74,6 +79,14 @@ export default function ProfilePage() {
   // `until_id` カーソルで取得する。
   const actorIdRef = useRef<string | undefined>(undefined);
   const [postsLoading, setPostsLoading] = useState(false);
+  // アクティビティタブの絞り込み条件（種別・メディア添付）。プロフィールを切り替えたら捨てる。
+  const [feedFilter, setFeedFilter] = useState<ProfileFeedFilterState>(EMPTY_PROFILE_FEED_FILTER);
+  const feedQuery = toProfileFeedQuery(feedFilter);
+  const feedFilterKey = JSON.stringify(feedQuery);
+  const feedQueryRef = useRef(feedQuery);
+  feedQueryRef.current = feedQuery;
+  // 最後に取得した絞り込み条件。プロフィール切替で条件を捨てた分は再取得しない（下記effect参照）。
+  const loadedFeedKeyRef = useRef(feedFilterKey);
 
   const onError = useCallback(
     (e: unknown) => showError(getErrorMessage(e)),
@@ -86,12 +99,13 @@ export default function ProfilePage() {
       limit: PAGE_SIZE,
       until_id: untilId,
       exclude_direct: true,
+      ...feedQueryRef.current,
     });
   }, []);
   // 初回ページ取得（`actor_id` が無い＝DB未登録のリモートアクターは常に空）。
   const fetchInitialFeed = useCallback((actorId?: string): Promise<ProfileFeedItem[]> => {
     if (!actorId) return Promise.resolve([]);
-    return api.users.posts(actorId, { limit: PAGE_SIZE, exclude_direct: true });
+    return api.users.posts(actorId, { limit: PAGE_SIZE, exclude_direct: true, ...feedQueryRef.current });
   }, []);
   const {
     items: posts,
@@ -105,6 +119,8 @@ export default function ProfilePage() {
     (item) => (item.kind === "note" ? item.note.id : item.event.id),
     PAGE_SIZE,
     onError,
+    undefined,
+    feedFilterKey,
   );
 
   useEffect(() => {
@@ -114,6 +130,10 @@ export default function ProfilePage() {
     setError("");
     setRightTab(0);
     setNarrowTab(0);
+    setFeedFilter(EMPTY_PROFILE_FEED_FILTER);
+    feedQueryRef.current = {};
+    loadedFeedKeyRef.current = JSON.stringify({});
+    actorIdRef.current = undefined;
     setBlendedCounts({});
     api.users
       .profile(q)
@@ -165,6 +185,28 @@ export default function ProfilePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [q]);
+
+  // 絞り込み条件が変わったら、その条件で先頭ページから取得し直す（プロフィール取得前は何もしない）。
+  useEffect(() => {
+    if (loadedFeedKeyRef.current === feedFilterKey) return;
+    loadedFeedKeyRef.current = feedFilterKey;
+    const actorId = actorIdRef.current;
+    if (!actorId) return;
+    let cancelled = false;
+    setPostsLoading(true);
+    fetchInitialFeed(actorId)
+      .then((items) => {
+        if (cancelled) return;
+        setPosts(items);
+        setHasMore(items.length >= PAGE_SIZE);
+      })
+      .catch((e) => !cancelled && onError(e))
+      .finally(() => !cancelled && setPostsLoading(false));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [feedFilterKey]);
 
   const { user } = useAuth();
 
@@ -599,11 +641,9 @@ export default function ProfilePage() {
     </>
   );
 
-  const recentSection = profile && (
+  const feedSection = (
     <>
-      <div className={panel.rightHeader}>
-        {t("profile:profilePage.postsHeader")}
-      </div>
+      <ProfileFeedFilterBar filter={feedFilter} onChange={setFeedFilter} />
       <ProfileFeedList
         items={posts}
         loading={postsLoading}
@@ -612,6 +652,15 @@ export default function ProfilePage() {
         hasMore={hasMore}
         loadingMore={loadingMore}
       />
+    </>
+  );
+
+  const recentSection = profile && (
+    <>
+      <div className={panel.rightHeader}>
+        {t("profile:profilePage.postsHeader")}
+      </div>
+      {feedSection}
     </>
   );
 
@@ -628,16 +677,7 @@ export default function ProfilePage() {
         active={rightTab}
         onChange={setRightTab}
       />
-      {rightTab === 0 && (
-        <ProfileFeedList
-          items={posts}
-          loading={postsLoading}
-          emptyMessage={t("profile:profilePage.noPosts")}
-          onLoadMore={loadMorePosts}
-          hasMore={hasMore}
-          loadingMore={loadingMore}
-        />
-      )}
+      {rightTab === 0 && feedSection}
       {rightTab === 1 && (
         <FollowListPanel
           actorId={profile.actor_id}
@@ -680,16 +720,7 @@ export default function ProfilePage() {
           : []),
         {
           label: t("profile:profilePage.postsHeader"),
-          content: (
-            <ProfileFeedList
-              items={posts}
-              loading={postsLoading}
-              emptyMessage={t("profile:profilePage.noPosts")}
-              onLoadMore={loadMorePosts}
-              hasMore={hasMore}
-              loadingMore={loadingMore}
-            />
-          ),
+          content: feedSection,
         },
         ...(profile.actor_id
           ? [

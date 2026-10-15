@@ -35,7 +35,6 @@
       "followRequestAccepted": "Seguimiento aceptado",
       "moveRefollowed": "Mudanza (seguido de nuevo)",
       "moveAlreadyFollowing": "Mudanza (ya seguido)"
-    },
-    "clear": "Borrar todo"
+    }
   }
 }

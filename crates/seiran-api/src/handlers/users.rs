@@ -44,6 +44,23 @@ pub struct UserPostsQuery {
     /// `ProfileFeedItem[]`（`{"kind":"note"|"reaction","data":...}`）に変わる。
     #[serde(alias = "includeReactions", default)]
     pub include_reactions: bool,
+    /// 種別の絞り込み（カンマ区切り、OR）: `reaction`/`normal`/`reply`/`reply_to_me`/`quote`/
+    /// `quote_of_mine`/`repost`/`repost_of_mine`。省略時はすべて。
+    pub kinds: Option<String>,
+    /// 添付メディアの絞り込み（カンマ区切り、AND）: `none`/`image`/`video`/`audio`。
+    /// 投稿にだけ作用し、リアクションイベントの表示可否には影響しない。
+    pub media: Option<String>,
+}
+
+fn split_csv(raw: &Option<String>) -> Option<Vec<String>> {
+    let items: Vec<String> = raw
+        .as_deref()?
+        .split(',')
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_owned)
+        .collect();
+    (!items.is_empty()).then_some(items)
 }
 
 /// `GET /api/users/posts` — プロフィール画面の投稿一覧の追加ページ取得（無限スクロール、#64）。
@@ -81,23 +98,44 @@ pub async fn user_posts(
         None => None,
     };
 
-    let post_rows = match state
-        .posts
-        .timeline_by_actor(
-            actor_id,
-            my_actor_id,
-            limit,
-            until_id,
-            since_id,
-            params.exclude_direct,
-        )
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("[user_posts] 投稿取得失敗: {}", e);
-            return ApiError::Internal(e.to_string()).into_response();
+    // 種別を指定したときだけ、投稿・リアクションのどちらを取るかが決まる（`reaction` だけなら
+    // 投稿は取らず、投稿の種別だけならリアクションは取らない）。
+    let kinds = split_csv(&params.kinds);
+    let want_reactions = kinds
+        .as_ref()
+        .is_none_or(|k| k.iter().any(|x| x == "reaction"));
+    let want_posts = kinds
+        .as_ref()
+        .is_none_or(|k| k.iter().any(|x| x != "reaction"));
+    let filter = seiran_common::repository::ProfileFeedFilter {
+        kinds,
+        media: split_csv(&params.media),
+    };
+
+    let post_rows = if want_posts || !params.include_reactions {
+        match state
+            .posts
+            .timeline_by_actor_filtered(
+                actor_id,
+                my_actor_id,
+                seiran_common::repository::Page {
+                    limit,
+                    until_id,
+                    since_id,
+                },
+                params.exclude_direct,
+                &filter,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("[user_posts] 投稿取得失敗: {}", e);
+                return ApiError::Internal(e.to_string()).into_response();
+            }
         }
+    } else {
+        Vec::new()
     };
     let notes = build_note_responses(&state, post_rows, my_actor_id).await;
 
@@ -108,24 +146,28 @@ pub async fn user_posts(
     // プロフィール「投稿」タブの投稿＋リアクション混合フィード（ユーザープロフィールページ
     // 「投稿」タブ、絵文字リアクションイベント混合表示）。投稿とリアクションは別々に snowflake
     // ID 降順で取得し、id（=時系列）でマージして limit 件に切り詰める。
-    let reaction_rows = match state
-        .reactions
-        .reactions_by_actor_for_feed(
-            actor_id,
-            my_actor_id,
-            seiran_common::repository::Page {
-                limit,
-                until_id,
-                since_id,
-            },
-            params.exclude_direct,
-        )
-        .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            tracing::error!("[user_posts] リアクション取得失敗: {}", e);
-            return ApiError::Internal(e.to_string()).into_response();
+    let reaction_rows = if !want_reactions {
+        Vec::new()
+    } else {
+        match state
+            .reactions
+            .reactions_by_actor_for_feed(
+                actor_id,
+                my_actor_id,
+                seiran_common::repository::Page {
+                    limit,
+                    until_id,
+                    since_id,
+                },
+                params.exclude_direct,
+            )
+            .await
+        {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("[user_posts] リアクション取得失敗: {}", e);
+                return ApiError::Internal(e.to_string()).into_response();
+            }
         }
     };
 

@@ -44,6 +44,56 @@ impl ReferenceKind {
     }
 }
 
+/// プロフィール画面アクティビティタブの絞り込み条件。各項目は `None` なら絞り込まない。
+/// 2項目は AND で作用する。
+#[derive(Debug, Clone, Default)]
+pub struct ProfileFeedFilter {
+    /// 投稿の種別（OR）: `normal`（通常）/`reply`/`reply_to_me`（閲覧者の投稿への返信）/
+    /// `quote`/`quote_of_mine`（閲覧者の投稿の引用）/`repost`/`repost_of_mine`（閲覧者の投稿のリポスト）。
+    /// `reaction` は投稿ではないので、ここでは無視する（呼び出し側がリアクションの要否を決める）。
+    pub kinds: Option<Vec<String>>,
+    /// 添付メディア（AND）: `none`（添付なし）/`image`/`video`/`audio`。`none` と他は同時に指定しない。
+    /// リポストはラッパー投稿ではなく、リポストされている元の投稿の添付で判定する。
+    pub media: Option<Vec<String>>,
+}
+
+/// `ProfileFeedFilter` の SQL 断片（`$2`=閲覧者、`$7`=kinds、`$8`=media、投稿は `p`）。
+macro_rules! profile_feed_filter_sql {
+    () => {
+        "AND ($7::text[] IS NULL OR (
+                    ('normal' = ANY($7)
+                      AND p.reply_to_post_id IS NULL AND p.reply_to_ap_uri IS NULL
+                      AND p.quote_of_post_id IS NULL AND p.quote_of_ap_uri IS NULL
+                      AND p.repost_of_post_id IS NULL AND p.repost_of_ap_uri IS NULL)
+                    OR ('reply' = ANY($7)
+                      AND (p.reply_to_post_id IS NOT NULL OR p.reply_to_ap_uri IS NOT NULL))
+                    OR ('reply_to_me' = ANY($7) AND $2::bigint IS NOT NULL
+                      AND EXISTS (SELECT 1 FROM posts t WHERE t.id = p.reply_to_post_id AND t.actor_id = $2))
+                    OR ('quote' = ANY($7)
+                      AND (p.quote_of_post_id IS NOT NULL OR p.quote_of_ap_uri IS NOT NULL))
+                    OR ('quote_of_mine' = ANY($7) AND $2::bigint IS NOT NULL
+                      AND EXISTS (SELECT 1 FROM posts t WHERE t.id = p.quote_of_post_id AND t.actor_id = $2))
+                    OR ('repost' = ANY($7)
+                      AND (p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL))
+                    OR ('repost_of_mine' = ANY($7) AND $2::bigint IS NOT NULL
+                      AND EXISTS (SELECT 1 FROM posts t WHERE t.id = p.repost_of_post_id AND t.actor_id = $2))
+               ))
+               AND ($8::text[] IS NULL OR (
+                    (NOT ('none' = ANY($8))
+                      OR NOT EXISTS (SELECT 1 FROM post_attachments pa WHERE pa.post_id = COALESCE(p.repost_of_post_id, p.id)))
+                    AND (NOT ('image' = ANY($8)) OR EXISTS (
+                      SELECT 1 FROM post_attachments pa LEFT JOIN media_files mf ON mf.id = pa.media_file_id
+                      WHERE pa.post_id = COALESCE(p.repost_of_post_id, p.id) AND COALESCE(mf.mime_type, pa.remote_mime_type) LIKE 'image/%'))
+                    AND (NOT ('video' = ANY($8)) OR EXISTS (
+                      SELECT 1 FROM post_attachments pa LEFT JOIN media_files mf ON mf.id = pa.media_file_id
+                      WHERE pa.post_id = COALESCE(p.repost_of_post_id, p.id) AND COALESCE(mf.mime_type, pa.remote_mime_type) LIKE 'video/%'))
+                    AND (NOT ('audio' = ANY($8)) OR EXISTS (
+                      SELECT 1 FROM post_attachments pa LEFT JOIN media_files mf ON mf.id = pa.media_file_id
+                      WHERE pa.post_id = COALESCE(p.repost_of_post_id, p.id) AND COALESCE(mf.mime_type, pa.remote_mime_type) LIKE 'audio/%'))
+               ))"
+    };
+}
+
 /// `TimelinePost`の全列（`actor_suspended_at`を除く）を返すSELECT列リスト。posts を`p`、
 /// actors を`a`、アバター解決用の結合を`timeline_post_joins!()`の別名で参照する前提。
 /// `concat!`でSQLリテラルへ埋め込んで使う（`TimelinePost`を返す全クエリが必ずこれを使う）。
@@ -541,6 +591,17 @@ pub trait PostRepository: Send + Sync {
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
+    /// `timeline_by_actor` に `ProfileFeedFilter` の絞り込みを加えたもの（プロフィール画面の
+    /// アクティビティタブ用）。`viewer_actor_id` は「あなたへの返信」等の「あなた」にもなる。
+    async fn timeline_by_actor_filtered(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        page: super::Page,
+        exclude_direct: bool,
+        filter: &ProfileFeedFilter,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
     /// Misskey互換API `POST /api/notes/mentions`用。自分宛のメンションを取得する
     /// （本家の「`note.mentions`に自分が含まれる投稿」に相当する語彙が無いため、
     /// `notifications`テーブルの`type IN ('mention', 'reply')`と`post_recipients`
@@ -1009,6 +1070,29 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        let page = super::Page {
+            limit,
+            until_id,
+            since_id,
+        };
+        self.timeline_by_actor_filtered(
+            actor_id,
+            viewer_actor_id,
+            page,
+            exclude_direct,
+            &ProfileFeedFilter::default(),
+        )
+        .await
+    }
+
+    async fn timeline_by_actor_filtered(
+        &self,
+        actor_id: i64,
+        viewer_actor_id: Option<i64>,
+        page: super::Page,
+        exclude_direct: bool,
+        filter: &ProfileFeedFilter,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
         sqlx::query_as::<_, TimelinePost>(concat!(
             "SELECT ",
             crate::timeline_post_columns!(),
@@ -1022,15 +1106,20 @@ impl PostRepository for PgPostRepository {
                AND p.id > COALESCE($4::bigint, 0)
                AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, $6)
+               ",
+            profile_feed_filter_sql!(),
+            "
              ORDER BY p.id DESC
              LIMIT $5"
         ))
         .bind(actor_id)
         .bind(viewer_actor_id)
-        .bind(until_id)
-        .bind(since_id)
-        .bind(limit)
+        .bind(page.until_id)
+        .bind(page.since_id)
+        .bind(page.limit)
         .bind(exclude_direct)
+        .bind(filter.kinds.as_deref())
+        .bind(filter.media.as_deref())
         .fetch_all(&self.pool)
         .await
     }

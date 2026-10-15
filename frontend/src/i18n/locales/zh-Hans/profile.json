@@ -84,5 +84,27 @@
     },
     "withdrawing": "处理中...",
     "withdrawSubmit": "停用帐户"
+  },
+  "feedFilter": {
+    "kindLabel": "按类型筛选",
+    "kindPlaceholder": "类型",
+    "mediaLabel": "按媒体附件筛选",
+    "mediaPlaceholder": "媒体附件",
+    "kinds": {
+      "reaction": "回应",
+      "normal": "普通帖子",
+      "reply": "回复帖子",
+      "reply_to_me": "回复你的帖子",
+      "quote": "引用帖子",
+      "quote_of_mine": "引用你的帖子",
+      "repost": "转发",
+      "repost_of_mine": "转发你的帖子"
+    },
+    "media": {
+      "none": "无",
+      "image": "图片",
+      "video": "视频",
+      "audio": "音频"
+    }
   }
 }

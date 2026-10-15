@@ -48,5 +48,8 @@
     "viewOriginal": "Original-Beitrag anzeigen",
     "bridgeUser": "Dies ist ein Brücken-Benutzer",
     "viewRealUser": "Echtes Konto anzeigen"
+  },
+  "filterField": {
+    "clear": "Alle zurücksetzen"
   }
 }

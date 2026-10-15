@@ -35,7 +35,6 @@
       "followRequestAccepted": "Follow akzeptiert",
       "moveRefollowed": "Umzug (erneut gefolgt)",
       "moveAlreadyFollowing": "Umzug (bereits gefolgt)"
-    },
-    "clear": "Alle zurücksetzen"
+    }
   }
 }

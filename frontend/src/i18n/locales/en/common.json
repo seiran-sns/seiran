@@ -48,5 +48,8 @@
     "viewOriginal": "View original post",
     "bridgeUser": "This is a bridge user",
     "viewRealUser": "View real account"
+  },
+  "filterField": {
+    "clear": "Clear all"
   }
 }

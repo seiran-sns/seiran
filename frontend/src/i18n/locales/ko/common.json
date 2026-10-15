@@ -48,5 +48,8 @@
     "viewOriginal": "원본 게시물 보기",
     "bridgeUser": "브릿지 사용자입니다",
     "viewRealUser": "실제 계정 보기"
+  },
+  "filterField": {
+    "clear": "모두 지우기"
   }
 }

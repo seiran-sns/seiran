@@ -35,7 +35,6 @@
       "followRequestAccepted": "追蹤已核准",
       "moveRefollowed": "遷移（重新追蹤）",
       "moveAlreadyFollowing": "遷移（已追蹤）"
-    },
-    "clear": "全部清除"
+    }
   }
 }

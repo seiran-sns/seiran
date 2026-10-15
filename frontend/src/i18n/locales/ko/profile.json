@@ -84,5 +84,27 @@
     },
     "withdrawing": "처리 중...",
     "withdrawSubmit": "계정 비활성화"
+  },
+  "feedFilter": {
+    "kindLabel": "종류로 필터",
+    "kindPlaceholder": "종류",
+    "mediaLabel": "미디어 첨부로 필터",
+    "mediaPlaceholder": "미디어 첨부",
+    "kinds": {
+      "reaction": "리액션",
+      "normal": "일반 게시물",
+      "reply": "답글 게시물",
+      "reply_to_me": "나에게 온 답글",
+      "quote": "인용 게시물",
+      "quote_of_mine": "내 게시물의 인용",
+      "repost": "리포스트",
+      "repost_of_mine": "내 게시물의 리포스트"
+    },
+    "media": {
+      "none": "없음",
+      "image": "이미지",
+      "video": "동영상",
+      "audio": "오디오"
+    }
   }
 }

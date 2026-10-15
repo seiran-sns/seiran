@@ -116,7 +116,7 @@ pub use post::{
     find_post_ids_by_media_file_id, find_visible_by_ids as find_visible_posts_by_ids,
     DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
     PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
-    ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo, TimelinePost,
+    ProfileFeedFilter, ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{
     NewReaction, PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactionUpsert,

@@ -48,5 +48,8 @@
     "viewOriginal": "Ver publicación original",
     "bridgeUser": "Este es un usuario puente",
     "viewRealUser": "Ver cuenta real"
+  },
+  "filterField": {
+    "clear": "Borrar todo"
   }
 }

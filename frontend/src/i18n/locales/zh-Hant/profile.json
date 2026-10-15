@@ -84,5 +84,27 @@
     },
     "withdrawing": "處理中...",
     "withdrawSubmit": "停用帳戶"
+  },
+  "feedFilter": {
+    "kindLabel": "依類型篩選",
+    "kindPlaceholder": "類型",
+    "mediaLabel": "依媒體附件篩選",
+    "mediaPlaceholder": "媒體附件",
+    "kinds": {
+      "reaction": "回應",
+      "normal": "一般貼文",
+      "reply": "回覆貼文",
+      "reply_to_me": "回覆你的貼文",
+      "quote": "引用貼文",
+      "quote_of_mine": "引用你的貼文",
+      "repost": "轉發",
+      "repost_of_mine": "轉發你的貼文"
+    },
+    "media": {
+      "none": "無",
+      "image": "圖片",
+      "video": "影片",
+      "audio": "音訊"
+    }
   }
 }

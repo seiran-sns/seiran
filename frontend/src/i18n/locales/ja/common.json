@@ -48,5 +48,8 @@
     "viewOriginal": "元ポストを表示",
     "bridgeUser": "ブリッジユーザーです",
     "viewRealUser": "実ユーザーを表示"
+  },
+  "filterField": {
+    "clear": "すべてクリア"
   }
 }

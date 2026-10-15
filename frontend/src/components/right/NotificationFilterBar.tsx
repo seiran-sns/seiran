@@ -1,8 +1,8 @@
-import { ReactNode, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ActorSuggestion } from "../../api/client";
 import Avatar from "../note/Avatar";
 import UserIdPickerPanel from "../note/UserIdPickerPanel";
+import FilterField, { FilterBar, FilterCheckList } from "../common/FilterField";
 import styles from "./NotificationFilterBar.module.css";
 
 /** 絞り込める通知種別（`NotificationItem.type` の値。Misskey 本家の種別名）。 */
@@ -38,84 +38,6 @@ export function toNotificationQuery(filter: NotificationFilterState): {
   };
 }
 
-interface FilterFieldProps {
-  label: string;
-  placeholder: string;
-  tags: string[];
-  /** 指定を全部外す。タグがあるときだけ✕ボタンを出す。 */
-  onClear: () => void;
-  children: ReactNode;
-}
-
-/** テキストボックス風の表示欄。クリックで下にポップオーバー（選択UI）を開き、選択内容はタグ状に並べる。
- * はみ出した分は右端の「…」で省略する。 */
-function FilterField({ label, placeholder, tags, onClear, children }: FilterFieldProps) {
-  const { t } = useTranslation();
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement>(null);
-  const tagsRef = useRef<HTMLSpanElement>(null);
-  const [overflowing, setOverflowing] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (e: PointerEvent) => {
-      if (!wrapRef.current?.contains(e.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  useLayoutEffect(() => {
-    const el = tagsRef.current;
-    if (!el) return;
-    const measure = () => setOverflowing(el.scrollWidth > el.clientWidth);
-    measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [tags]);
-
-  return (
-    <div className={styles.field} ref={wrapRef}>
-      <button
-        type="button"
-        className={styles.box}
-        aria-label={label}
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >
-        {tags.length === 0 ? (
-          <span className={styles.placeholder}>{placeholder}</span>
-        ) : (
-          <>
-            <span className={styles.tags} ref={tagsRef}>
-              {tags.map((tag) => (
-                <span key={tag} className={styles.tag}>
-                  {tag}
-                </span>
-              ))}
-            </span>
-            {overflowing && <span className={styles.ellipsis}>…</span>}
-          </>
-        )}
-      </button>
-      {tags.length > 0 && (
-        <button type="button" className={styles.clear} aria-label={t("notifications:filter.clear")} onClick={onClear}>
-          ✕
-        </button>
-      )}
-      {open && <div className={styles.popover}>{children}</div>}
-    </div>
-  );
-}
-
 interface NotificationFilterBarProps {
   filter: NotificationFilterState;
   onChange: (filter: NotificationFilterState) => void;
@@ -142,23 +64,18 @@ export default function NotificationFilterBar({ filter, onChange }: Notification
     onChange({ ...filter, users: filter.users.filter((u) => u.actor_id !== actorId) });
 
   return (
-    <div className={styles.bar}>
+    <FilterBar>
       <FilterField
         label={t("notifications:filter.typeLabel")}
         placeholder={t("notifications:filter.typePlaceholder")}
         tags={filter.types.map(typeLabel)}
         onClear={() => onChange({ ...filter, types: [] })}
       >
-        <ul className={styles.typeList}>
-          {NOTIFICATION_TYPES.map((type) => (
-            <li key={type}>
-              <label className={styles.typeItem}>
-                <input type="checkbox" checked={filter.types.includes(type)} onChange={() => toggleType(type)} />
-                {typeLabel(type)}
-              </label>
-            </li>
-          ))}
-        </ul>
+        <FilterCheckList
+          options={NOTIFICATION_TYPES.map((type) => ({ value: type, label: typeLabel(type) }))}
+          selected={filter.types}
+          onToggle={toggleType}
+        />
       </FilterField>
       <FilterField
         label={t("notifications:filter.userLabel")}
@@ -187,6 +104,6 @@ export default function NotificationFilterBar({ filter, onChange }: Notification
           </ul>
         )}
       </FilterField>
-    </div>
+    </FilterBar>
   );
 }

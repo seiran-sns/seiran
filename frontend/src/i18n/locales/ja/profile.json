@@ -84,5 +84,27 @@
     },
     "withdrawing": "処理中...",
     "withdrawSubmit": "退会する"
+  },
+  "feedFilter": {
+    "kindLabel": "種別で絞り込み",
+    "kindPlaceholder": "種別",
+    "mediaLabel": "メディア添付で絞り込み",
+    "mediaPlaceholder": "メディア添付",
+    "kinds": {
+      "reaction": "リアクション",
+      "normal": "通常ポスト",
+      "reply": "返信ポスト",
+      "reply_to_me": "あなたへの返信",
+      "quote": "引用ポスト",
+      "quote_of_mine": "あなたの引用",
+      "repost": "リポスト",
+      "repost_of_mine": "あなたのリポスト"
+    },
+    "media": {
+      "none": "なし",
+      "image": "画像",
+      "video": "動画",
+      "audio": "音声"
+    }
   }
 }

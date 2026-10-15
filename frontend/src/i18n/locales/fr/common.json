@@ -48,5 +48,8 @@
     "viewOriginal": "Voir le post original",
     "bridgeUser": "Ceci est un utilisateur relais (bridge)",
     "viewRealUser": "Voir le compte réel"
+  },
+  "filterField": {
+    "clear": "Tout effacer"
   }
 }

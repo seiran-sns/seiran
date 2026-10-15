@@ -35,7 +35,6 @@
       "followRequestAccepted": "팔로우 수락",
       "moveRefollowed": "이전(다시 팔로우)",
       "moveAlreadyFollowing": "이전(이미 팔로우 중)"
-    },
-    "clear": "모두 지우기"
+    }
   }
 }

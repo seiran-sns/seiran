@@ -31,12 +31,18 @@ export const users = {
       until_id?: string;
       since_id?: string;
       exclude_direct?: boolean;
+      /** 種別の絞り込み（OR）。省略時はすべて。 */
+      kinds?: string[];
+      /** 添付メディアの絞り込み（AND）。投稿にだけ作用する。 */
+      media?: string[];
     },
   ): Promise<ProfileFeedItem[]> {
     const q = cursorParams(params);
     q.set("actor_id", actorId);
     if (params?.exclude_direct) q.set("exclude_direct", "true");
     q.set("include_reactions", "true");
+    if (params?.kinds?.length) q.set("kinds", params.kinds.join(","));
+    if (params?.media?.length) q.set("media", params.media.join(","));
     const rows = await request<RawProfileFeedItem[]>(
       "GET",
       `/users/posts?${q.toString()}`,

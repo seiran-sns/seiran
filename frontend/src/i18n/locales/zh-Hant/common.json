@@ -48,5 +48,8 @@
     "viewOriginal": "查看原始貼文",
     "bridgeUser": "這是一個橋接使用者",
     "viewRealUser": "查看真實帳號"
+  },
+  "filterField": {
+    "clear": "全部清除"
   }
 }
