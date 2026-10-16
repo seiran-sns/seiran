@@ -5,7 +5,7 @@ import { ReactionEvent } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
 import { profilePath } from "../../lib/format";
 import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
 import NoteHoverPreview from "./NoteHoverPreview";
@@ -51,9 +51,9 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
     <div className={styles.item} onClick={() => navigate(`/notes/${event.targetNoteId}`)}>
       <NoteHoverPreview noteId={event.targetNoteId} className={styles.previewWrap} side="left">
         {event.reactionEmojiUrl ? (
-          <img
+          <RemoteImg
             className={styles.iconImg}
-            src={mediaUrl(event.reactionEmojiUrl)}
+            src={event.reactionEmojiUrl}
             alt={event.reaction}
             title={event.reaction}
             loading="lazy"

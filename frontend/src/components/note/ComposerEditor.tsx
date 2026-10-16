@@ -14,7 +14,7 @@ import { ActorSuggestion, PublicEmoji, api } from "../../api/client";
 import { fetchCustomEmojis } from "../../lib/customEmojis";
 import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import { findTwemojiMatches } from "../../lib/twemoji";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import styles from "./ComposerEditor.module.css";
 
 /** `PostComposer` から絵文字ショートコード・ユーザーIDピッカーで選んだ値をカーソル位置へ
@@ -556,7 +556,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
                 ) : (
                   <>
                     {candidate.actor.avatar_url && (
-                      <img src={mediaUrl(candidate.actor.avatar_url)} alt="" />
+                      <RemoteImg src={candidate.actor.avatar_url} alt="" />
                     )}
                     <span>
                       {candidate.actor.display_name || candidate.actor.username}

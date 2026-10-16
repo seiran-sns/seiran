@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { configureInternalMediaOrigins, configureMediaProxy, mediaUrl } from "./mediaProxy";
+import { configureInternalMediaOrigins, configureMediaProxy, mediaSources, mediaUrl } from "./mediaProxy";
 
 describe("mediaUrl", () => {
   beforeEach(() => {
@@ -27,5 +27,28 @@ describe("mediaUrl", () => {
     expect(mediaUrl("https://remote.example/a.png")).toBe(
       "https://proxy.example/proxy?url=https%3A%2F%2Fremote.example%2Fa.png",
     );
+  });
+});
+
+describe("mediaSources", () => {
+  beforeEach(() => configureMediaProxy(""));
+
+  it("returns direct URL first by default and the proxy URL as fallback", () => {
+    expect(mediaSources("https://remote.example/a.png")).toEqual([
+      "https://remote.example/a.png",
+      "/proxy?url=https%3A%2F%2Fremote.example%2Fa.png",
+    ]);
+  });
+
+  it("puts the proxy first when preferred", () => {
+    expect(mediaSources("https://remote.example/a.png", "proxy")).toEqual([
+      "/proxy?url=https%3A%2F%2Fremote.example%2Fa.png",
+      "https://remote.example/a.png",
+    ]);
+  });
+
+  it("returns a single URL for same-origin media and nothing for empty input", () => {
+    expect(mediaSources("/media/a.png")).toEqual(["/media/a.png"]);
+    expect(mediaSources(null)).toEqual([]);
   });
 });

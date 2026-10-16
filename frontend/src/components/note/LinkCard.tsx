@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { LinkCard as LinkCardData } from "../../api/client";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import styles from "./LinkCard.module.css";
 
 interface LinkCardProps {
@@ -78,8 +78,8 @@ function GenericCard({ card }: { card: LinkCardData }) {
       onClick={(e) => e.stopPropagation()}
     >
       {card.thumbnailUrl && (
-        <img
-          src={mediaUrl(card.thumbnailUrl)}
+        <RemoteImg prefer="proxy"
+          src={card.thumbnailUrl}
           alt=""
           className={styles.genericThumb}
           loading="lazy"
@@ -143,8 +143,8 @@ function EmbedPlayerCard({
       }}
     >
       {card.thumbnailUrl ? (
-        <img
-          src={mediaUrl(card.thumbnailUrl)}
+        <RemoteImg prefer="proxy"
+          src={card.thumbnailUrl}
           alt=""
           className={styles.playerThumb}
           loading="lazy"
@@ -186,8 +186,8 @@ function TwitterCard({ card, tweetId }: { card: LinkCardData; tweetId: string })
         }}
       >
         {card.thumbnailUrl && (
-          <img
-            src={mediaUrl(card.thumbnailUrl)}
+          <RemoteImg prefer="proxy"
+            src={card.thumbnailUrl}
             alt=""
             className={styles.genericThumb}
             loading="lazy"

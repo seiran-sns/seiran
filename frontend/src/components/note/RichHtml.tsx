@@ -4,7 +4,7 @@ import { ResolvedLinkInfo } from "../../api/types";
 import { profilePath } from "../../lib/format";
 import { MENTION_SOURCE, SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import { renderTextWithTwemoji } from "../../lib/twemoji";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import Avatar from "./Avatar";
 import EmojiContextMenu from "./EmojiContextMenu";
 import UserLinkTag from "./UserLinkTag";
@@ -160,7 +160,7 @@ function renderTextNode(
       flushPlainText(match.index);
       parts.push(
         <EmojiContextMenu key={`${keyPrefix}-e${key++}`} shortcode={shortcode.slice(1, -1)} imageUrl={url}>
-          <img className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
+          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
         </EmojiContextMenu>
       );
       lastIndex = endIndex;
@@ -218,9 +218,9 @@ function renderNode(
 
   if (tag === "img") {
     return (
-      <img
+      <RemoteImg
         key={keyPrefix}
-        src={mediaUrl(el.getAttribute("src"))}
+        src={el.getAttribute("src")}
         alt={el.getAttribute("alt") ?? ""}
         width={el.getAttribute("width") ?? undefined}
         height={el.getAttribute("height") ?? undefined}

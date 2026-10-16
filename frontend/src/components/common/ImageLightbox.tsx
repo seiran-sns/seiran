@@ -2,6 +2,7 @@ import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from 
 import { useTranslation } from "react-i18next";
 import TwemojiEmoji from "./TwemojiEmoji";
 import styles from "./ImageLightbox.module.css";
+import RemoteImg from "./RemoteImg";
 
 interface ImageLightboxProps {
   /** 表示中の画像URL。null なら非表示。 */
@@ -319,7 +320,7 @@ export default function ImageLightbox({
         style={wrapStyle}
         ref={imageWrapRef}
       >
-        <img
+        <RemoteImg
           src={src}
           alt=""
           draggable={false}

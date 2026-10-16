@@ -33,7 +33,7 @@ import { useUserRelationshipMenu } from "../hooks/useUserRelationshipMenu";
 import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import { setRelationship } from "../stores/userRelationshipStore";
-import { mediaUrl } from "../utils/mediaProxy";
+import RemoteImg from "../components/common/RemoteImg";
 import panel from "../components/common/Panel.module.css";
 import TwemojiText from "../components/common/TwemojiText";
 import blueskyLogo from "../assets/bluesky-logo.svg";
@@ -411,7 +411,7 @@ export default function ProfilePage() {
                 <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />
               ) : (
                 remoteInfo.iconUrl && (
-                  <img src={mediaUrl(remoteInfo.iconUrl)} alt="" className={styles.remoteServerIcon} />
+                  <RemoteImg src={remoteInfo.iconUrl} alt="" className={styles.remoteServerIcon} />
                 )
               )}
               <span className={styles.remoteServerLabel}>{remoteInfo.label}</span>

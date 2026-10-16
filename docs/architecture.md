@@ -250,7 +250,7 @@ pub struct SearchSession {
 
 **画像アップロード**（`storage/image.rs::prepare_image()`）: 不要に劣化させないため候補を2つ作る。(1) `storage/exif.rs`（`img-parts`）で JPEG/PNG の Exif を Orientation だけに絞った無劣化の候補（画素は再エンコードしない）、(2) Orientation を画素に適用し `MediaKind` ごとの最大サイズにリサイズして WebP ロスレスにした候補。`media_store::store_image()` が両方の sha256+blurhash で重複を確認し、未登録なら小さい方を保存する。img-parts 非対応（静止画 WebP・AVIF・単一フレーム GIF 等）は (2) だけ。アニメーション画像（GIF/APNG/WebP）は元のバイト列を保存する。
 
-**リモートメディアプロキシ（`GET /proxy?url=...`）**: フロントは別オリジンのアバター・添付・サムネイル・絵文字をこれに変換する。同一オリジンと、`/api/meta` の `internalMediaOrigins`（有効なストレージの公開URL。R2 等は別サブドメインのことが多い）は直接参照する（25MiB の上限にかからないように）。
+**リモートメディアプロキシ（`GET /proxy?url=...`）**: フロントは別オリジンのアバター・添付・サムネイル・絵文字について、直リンクとこのプロキシ経由URLの両方を候補にして順に試す（`mediaSources`。SNS由来は直リンク優先、OGPサムネイルはプロキシ優先）。同一オリジンと、`/api/meta` の `internalMediaOrigins`（有効なストレージの公開URL。R2 等は別サブドメインのことが多い）は直接参照する（25MiB の上限にかからないように）。
 - HTTP(S) のみ、資格情報・fragment を拒否、DNS 解決した全IPについて非公開IPを拒否。リダイレクト先も毎回検証し、5回・25MiB・20秒まで。画像・動画・音声以外は中継しない。
 - 上流の `Content-Type` が許可リストに無い（`application/octet-stream` 等）ときは、アップロードと同じマジックバイト判定（`sniff_mime_type`）で判定し直し、それでも外れれば拒否する。
 - `site_settings.media_proxy_url` があれば、Misskey の `instance.mediaProxy` と同じく `/proxy` まで含む完全なエンドポイントとして `{mediaProxyUrl}?url=...` で使う。

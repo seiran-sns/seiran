@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ReactionActor, ReactionSummary } from "../../api/client";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 
 import UserItem from "../common/UserItem";
 import EmojiContextMenu from "./EmojiContextMenu";
@@ -141,10 +141,10 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
       >
         {r.emojiUrl && shortcode ? (
           <EmojiContextMenu shortcode={shortcode} imageUrl={r.emojiUrl}>
-            <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+            <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
           </EmojiContextMenu>
         ) : r.emojiUrl ? (
-          <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+          <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
         ) : (
           <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
         )}

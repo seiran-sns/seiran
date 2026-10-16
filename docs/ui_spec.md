@@ -127,11 +127,11 @@
   * 押すと展開してボタンは消え、畳み直しはできない。
   * フェードの終端色はカードの背景色（`--card-bg`、ライトテーマでは `transparent`）ではなく、実際に描画される不透明な色 `--card-bg-opaque`（ライトは `--bg`、ダークは `--card-bg`、`index.css`）を使う（透明同士だと効果が消える）。
 * WebSocket で出てきた新着も通常 API の完全なデータで補完するので、アンケート・添付・引用がリロード無しで出る。
-* リモートの添付・アバター・カスタム絵文字はメディアプロキシ経由で、同一オリジンの画像は直接出す（`docs/architecture.md` 7節）。
+* 外部メディアは直リンクとメディアプロキシ経由の両方を候補として持ち、読み込みに失敗したら次の候補へ切り替える（`RemoteImg`／`HlsVideo`／`mediaSources`）。直リンクはCORS・ホットリンク拒否・混在コンテンツで、プロキシは想定外形式の拒否・サイズ上限で、それぞれ別の理由で失敗するため。優先順は、SNSサーバー由来（アバター・カスタム絵文字・添付・リアクション絵文字）は一斉アクセスを想定済みなので直リンク優先、OGPサムネイル（`LinkCard`）の出元は想定していないのでプロキシ優先。同一オリジンの画像は候補1本で直接出す（`docs/architecture.md` 7節）。
 
 #### GIFアニメの自動再生表示
 * `NoteAttachment.isGif` が真の動画（GIF ピッカー由来、または `presentation:"gif"`）は `HlsVideo` を自動再生・ミュート・ループ・コントロール無し（`autoplay muted loop playsinline`）にする。通常の動画は `controls` 付きで、再生するまでポスター画像のまま。
-* HLS（`.m3u8`、Bsky 動画全般）はメディアプロキシを通さず動画CDN（`video.bsky.app`、CORS 許可済み）を直接参照する。プロキシは `application/vnd.apple.mpegurl` を許可せず、プロキシ経由だとプレイリスト内のセグメントの相対パスも解決できないため（`NoteAttachments.tsx`）。ポスターは通常の画像なのでプロキシ経由。
+* HLS（`.m3u8`、Bsky 動画全般）はメディアプロキシを通さず動画CDN（`video.bsky.app`、CORS 許可済み）を直接参照する。プロキシは `application/vnd.apple.mpegurl` を許可せず、プロキシ経由だとプレイリスト内のセグメントの相対パスも解決できないため（`NoteAttachments.tsx`）。ポスターは通常の画像なので他の添付と同じ候補順（直リンク優先）の先頭を使う。
 * HLS は `src` を JS で後からセットする（hls.js の `attachMedia`、Safari ネイティブは `video.src` 代入）ので、`autoPlay` 属性だけでは再生が始まらない。GIF 表示では、hls.js は `MANIFEST_PARSED`、ネイティブは `src` 代入の直後に `video.play()` を呼ぶ（`HlsVideo.tsx`）。
 * HLS 以外のリモート動画は、`<source>` をプロキシ経由・直URLの順に2本並べる。プロキシが容量上限（25MiB）等で失敗したらブラウザが直URLへフォールバックする。自インスタンスの動画は1本だけ。
 

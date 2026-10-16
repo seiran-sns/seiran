@@ -5,7 +5,8 @@ import ImageLightbox from "../common/ImageLightbox";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import HlsVideo from "./HlsVideo";
 import styles from "./NoteCard.module.css";
-import { mediaUrl } from "../../utils/mediaProxy";
+import { mediaSources } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 
 interface NoteAttachmentsProps {
   attachments?: NoteAttachment[];
@@ -142,8 +143,8 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
     const imageIndex = images.indexOf(att);
     return (
       <div key={index} className={cellClassName} style={radius}>
-        <img
-          src={mediaUrl(att.url)}
+        <RemoteImg
+          src={att.url}
           alt=""
           style={naturalSizeVars(att)}
           className={`${imgClassName} ${att.isSensitive && !isRevealed ? styles.attachBlurred : ""}`}
@@ -273,14 +274,13 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
           // （image/video/audio）に一致せず502になる上、プロキシ経由だとプレイリスト内の
           // セグメント相対パスもブラウザ側で正しく解決できない。Bsky動画CDNは
           // `access-control-allow-origin: *` を返しCORS制約が無いため、HLSのみ直接
-          // 参照する（通常のmp4/webm添付は引き続きプロキシを経由する）。
+          // 参照する（通常のmp4/webm添付は直リンク優先でプロキシ経由にフォールバックする）。
           return (
             <HlsVideo
               key={index}
-              src={isHls ? att.url : (mediaUrl(att.url) ?? att.url)}
-              fallbackSrc={isHls ? undefined : att.url}
+              sources={isHls ? [att.url] : mediaSources(att.url)}
               mimeType={att.mimeType}
-              poster={mediaUrl(att.thumbnailUrl)}
+              poster={mediaSources(att.thumbnailUrl)[0]}
               isHls={isHls}
               isGif={att.isGif}
               className={styles.attachMedia}
@@ -291,19 +291,18 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         return (
           <audio
             key={index}
-            src={mediaUrl(att.url)}
             controls
             className={styles.attachAudio}
             onClick={(e) => e.stopPropagation()}
-          />
+          >
+            {mediaSources(att.url).map((url) => (
+              <source key={url} src={url} />
+            ))}
+          </audio>
         );
       })}
       <ImageLightbox
-        src={
-          lightboxIndex === null
-            ? null
-            : (mediaUrl(images[lightboxIndex]?.url) ?? images[lightboxIndex]?.url ?? null)
-        }
+        src={lightboxIndex === null ? null : (images[lightboxIndex]?.url ?? null)}
         sensitive={lightboxIndex === null ? false : images[lightboxIndex]?.isSensitive}
         onClose={() => setLightboxIndex(null)}
         onPrevious={

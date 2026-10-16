@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, Note, ReactionActor } from "../../api/client";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import UserItem from "../common/UserItem";
 import EmojiContextMenu from "../note/EmojiContextMenu";
 import { parseCustomEmojiShortcode } from "../../lib/customEmojis";
@@ -64,10 +64,10 @@ export default function ReactionListPanel({ note }: ReactionListPanelProps) {
             <div className={styles.groupHeader}>
               {r.emojiUrl && shortcode ? (
                 <EmojiContextMenu shortcode={shortcode} imageUrl={r.emojiUrl}>
-                  <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+                  <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
                 </EmojiContextMenu>
               ) : r.emojiUrl ? (
-                <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+                <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
               ) : (
                 <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
               )}

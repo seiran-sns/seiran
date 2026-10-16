@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import { HASHTAG_LINK_TEXT_RE, RICH_TEXT_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import { renderTextWithTwemoji } from "../../lib/twemoji";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import EmojiContextMenu from "./EmojiContextMenu";
 import styles from "./RichText.module.css";
 
@@ -121,7 +121,7 @@ export default function RichText({ text, emojis }: RichTextProps) {
       if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
       parts.push(
         <EmojiContextMenu key={key++} shortcode={shortcode.slice(1, -1)} imageUrl={url}>
-          <img className={styles.emojiImg} src={mediaUrl(url)} alt={shortcode} title={shortcode} loading="lazy" />
+          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
         </EmojiContextMenu>
       );
     }

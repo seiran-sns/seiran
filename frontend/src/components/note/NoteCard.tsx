@@ -38,7 +38,7 @@ import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import styles from "./NoteCard.module.css";
 
 interface NoteCardProps {
@@ -494,7 +494,7 @@ function PostContent({
                     <img src={blueskyLogo} alt="" className={styles.remoteServerIcon} />
                   ) : (
                     remoteInfo.iconUrl && (
-                      <img src={mediaUrl(remoteInfo.iconUrl)} alt="" className={styles.remoteServerIcon} />
+                      <RemoteImg src={remoteInfo.iconUrl} alt="" className={styles.remoteServerIcon} />
                     )
                   )}
                   <span className={styles.remoteServerLabel}>{remoteInfo.label}</span>

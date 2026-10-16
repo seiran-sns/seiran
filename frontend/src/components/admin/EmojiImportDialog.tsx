@@ -2,7 +2,7 @@ import { FormEvent, useState } from "react";
 import { useTranslation } from "react-i18next";
 import Modal from "../common/Modal";
 import { api, CustomEmoji, getErrorMessage } from "../../api/client";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import styles from "../../pages/Admin.module.css";
 
 interface EmojiImportDialogProps {
@@ -80,7 +80,7 @@ export default function EmojiImportDialog({
       <form onSubmit={submit}>
         {error && <p className={styles.error}>{error}</p>}
         <div className={styles.actions} style={{ marginBottom: 12 }}>
-          <img src={mediaUrl(imageUrl)} alt={shortcode} style={{ height: 32, width: 32, objectFit: "contain" }} />
+          <RemoteImg src={imageUrl} alt={shortcode} style={{ height: 32, width: 32, objectFit: "contain" }} />
           <div>
             <div className={styles.label} style={{ marginBottom: 0 }}>
               {t("admin:emojiImportDialog.shortcodeLabel")}

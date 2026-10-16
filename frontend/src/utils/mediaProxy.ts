@@ -47,3 +47,20 @@ export function mediaUrl(raw?: string | null): string | undefined {
     return raw;
   }
 }
+
+/** 外部メディアを試す優先順位。`direct`は元URL優先、`proxy`はメディアプロキシ経由優先。 */
+export type MediaPrefer = "direct" | "proxy";
+
+/**
+ * 外部メディアの候補URLを優先順に返す。直リンクもプロキシ経由も失敗しうる
+ * （直: CORS・ホットリンク拒否・混在コンテンツ、プロキシ: 想定外形式の拒否・サイズ上限）ため、
+ * 両方を順に試せるよう並べる。同一オリジン等でプロキシを通さないURLは1本だけ返す。
+ * `prefer`は、配信元がタイムラインからの一斉アクセスを想定しているか（SNSサーバーの
+ * アイコン・絵文字・添付は想定済みなので`direct`、OGPサムネイルの出元は未想定なので`proxy`）で選ぶ。
+ */
+export function mediaSources(raw?: string | null, prefer: MediaPrefer = "direct"): string[] {
+  if (!raw) return [];
+  const proxied = mediaUrl(raw);
+  if (!proxied || proxied === raw) return [raw];
+  return prefer === "proxy" ? [proxied, raw] : [raw, proxied];
+}

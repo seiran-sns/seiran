@@ -11,7 +11,7 @@ import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel
 import { profilePath } from "../../lib/format";
 import { parseReactionContent } from "../../lib/customEmojis";
 import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import panel from "../common/Panel.module.css";
 import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
@@ -410,7 +410,7 @@ export default function NotificationsPanel({
         const content = (
           <>
             {iconUrl ? (
-              <img className={styles.iconImg} src={mediaUrl(iconUrl)} alt={icon} title={icon} loading="lazy" />
+              <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
             ) : (
               <TwemojiEmoji emoji={icon} className={styles.icon} />
             )}

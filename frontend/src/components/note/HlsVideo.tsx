@@ -2,11 +2,9 @@ import { useEffect, useRef } from "react";
 import Hls from "hls.js";
 
 interface HlsVideoProps {
-  src: string;
-  /** メディアプロキシを経由しない直URL。src(プロキシ経由)と異なる場合のみ、
-   * <source>を2本並べてプロキシ→直の順にブラウザへフォールバックさせる
-   * （プロキシのサイズ上限等で失敗した際に直アクセスへ自動的に切り替わる）。 */
-  fallbackSrc?: string;
+  /** 優先順の候補URL（`mediaSources`）。複数ある場合は<source>を並べ、先頭が失敗したら
+   * ブラウザが次へフォールバックする。HLSは先頭1本だけを使う。 */
+  sources: string[];
   mimeType?: string;
   poster?: string;
   className?: string;
@@ -31,8 +29,7 @@ interface HlsVideoProps {
  * ネイティブHLSにフォールバックする。
  */
 export default function HlsVideo({
-  src,
-  fallbackSrc,
+  sources,
   mimeType,
   poster,
   className,
@@ -41,6 +38,7 @@ export default function HlsVideo({
   onClick,
 }: HlsVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
+  const src = sources[0];
 
   useEffect(() => {
     const video = videoRef.current;
@@ -69,7 +67,7 @@ export default function HlsVideo({
     }
   }, [src, isHls, isGif]);
 
-  const hasFallback = !isHls && !!fallbackSrc && fallbackSrc !== src;
+  const hasFallback = !isHls && sources.length > 1;
 
   return (
     <video
@@ -85,10 +83,7 @@ export default function HlsVideo({
       onClick={onClick}
     >
       {hasFallback && (
-        <>
-          <source src={src} type={mimeType} />
-          <source src={fallbackSrc} type={mimeType} />
-        </>
+        sources.map((url) => <source key={url} src={url} type={mimeType} />)
       )}
     </video>
   );

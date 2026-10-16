@@ -1,7 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, CustomEmoji, DriveFile, EmojiImportJob, RemoteEmoji, getErrorMessage } from "../../api/client";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import EmojiImportDialog from "./EmojiImportDialog";
 import panel from "../common/Panel.module.css";
 import TwemojiText from "../common/TwemojiText";
@@ -396,8 +396,8 @@ export default function EmojisPanel() {
             ) : (
               remoteEmojis.map((em) => (
                 <div key={em.id} className={styles.row}>
-                  <img
-                    src={mediaUrl(em.imageUrl)}
+                  <RemoteImg
+                    src={em.imageUrl}
                     alt={em.shortcode}
                     style={{ height: 28, width: 28, objectFit: "contain" }}
                   />

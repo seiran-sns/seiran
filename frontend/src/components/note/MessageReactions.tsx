@@ -1,5 +1,5 @@
 import { ReactionSummary } from "../../api/client";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./MessageReactions.module.css";
 
@@ -13,7 +13,7 @@ export default function MessageReactions({ reactions }: { reactions?: ReactionSu
         Array.from({ length: r.count }, (_, i) => (
           <span className={styles.icon} key={`${r.emoji}-${i}`}>
             {r.emojiUrl ? (
-              <img className={styles.emojiImg} src={mediaUrl(r.emojiUrl)} alt={r.emoji} loading="lazy" />
+              <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
             ) : (
               <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
             )}

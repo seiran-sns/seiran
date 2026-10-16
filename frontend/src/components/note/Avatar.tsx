@@ -1,6 +1,6 @@
 import { useState } from "react";
 import styles from "./Avatar.module.css";
-import { mediaUrl } from "../../utils/mediaProxy";
+import RemoteImg from "../common/RemoteImg";
 
 interface AvatarProps {
   url?: string;
@@ -17,8 +17,8 @@ export default function Avatar({ url, name, size = 40 }: AvatarProps) {
 
   if (url && !failed) {
     return (
-      <img
-        src={mediaUrl(url)}
+      <RemoteImg
+        src={url}
         alt=""
         className={styles.img}
         style={{ width: size, height: size }}
