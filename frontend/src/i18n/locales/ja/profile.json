@@ -4,6 +4,8 @@
     "pairedBadge": "魂の結合済み",
     "pairedBadgeTitle": "リモート seiran ユーザーと魂の結合済み",
     "suspendedBadge": "凍結中",
+    "blueskyPreparingBadge": "Bluesky 準備中",
+    "blueskyPreparingTitle": "Bluesky 側のハンドル（DNS TXT レコード）の公開待ちです。公開されると Bluesky から見えるようになります",
     "editProfileButton": "プロフィールを編集",
     "followingBadge": "フォロー中",
     "unfollowingButton": "解除中...",

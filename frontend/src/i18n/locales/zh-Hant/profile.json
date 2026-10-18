@@ -4,6 +4,8 @@
     "pairedBadge": "靈魂繫結",
     "pairedBadgeTitle": "透過靈魂繫結與遠端青嵐使用者連接",
     "suspendedBadge": "已停權",
+    "blueskyPreparingBadge": "Bluesky 準備中",
+    "blueskyPreparingTitle": "正在等待 Bluesky 帳號名稱（DNS TXT 記錄）發布。發布後即可在 Bluesky 上看到此帳號",
     "editProfileButton": "編輯個人檔案",
     "followingBadge": "追蹤中",
     "unfollowingButton": "正在取消追蹤...",

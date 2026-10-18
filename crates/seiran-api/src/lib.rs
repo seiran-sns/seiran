@@ -4,7 +4,6 @@
 //! ここでは AppState 構築（[`init_state`]）・ルーター構築（[`router`]）・
 //! 起動時タスク（[`spawn_startup_tasks`]）を公開し、実際の serve は呼び出し側が行う。
 
-pub mod cloudflare;
 pub mod error;
 pub mod handlers;
 pub mod mailer;
@@ -113,6 +112,8 @@ pub struct AppState {
     pub site_settings: Arc<dyn SiteSettingsRepository>,
     /// URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン判定。TTLキャッシュ済み。
     pub oembed_whitelist: Arc<seiran_common::oembed_whitelist::OembedWhitelist>,
+    /// 新規ローカルアカウントの DID 発行（「DNS TXT 登録完了待ち」の進行）。
+    pub did_provisioner: Arc<seiran_common::did_provision::DidProvisioner>,
     pub search_store: Arc<InMemorySearchStore>,
     /// リアルタイム更新（#37）のストリーミングハブ。
     pub stream_hub: Arc<StreamHub>,
@@ -162,24 +163,13 @@ pub struct AppState {
 const REMOTE_FOLLOW_SYNC_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl AppState {
-    /// 管理画面設定（`cloudflare_api_token` / `cloudflare_zone_id`）から Cloudflare DNS クライアントを作る。
-    /// 設定の変更を再起動なしで反映するため、呼び出しごとに読む。どちらかが空なら `None`
-    /// （ハンドル検証は HTTP `/.well-known/atproto-did` のみになる）。
-    pub async fn cloudflare(&self) -> Option<Arc<cloudflare::CloudflareClient>> {
-        let settings = match self.site_settings.get_all().await {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!("[cloudflare] 設定の取得に失敗: {}", e);
-                return None;
-            }
-        };
-        let value = |key: &str| settings.get(key).map(|v| v.trim()).filter(|v| !v.is_empty());
-        let (token, zone_id) = (value("cloudflare_api_token")?, value("cloudflare_zone_id")?);
-        Some(Arc::new(cloudflare::CloudflareClient::new(
-            Arc::clone(&self.http_client),
-            token.to_string(),
-            zone_id.to_string(),
-        )))
+    /// 管理画面設定から作る Cloudflare DNS クライアント（`seiran_common::cloudflare::client_from_settings`）。
+    pub async fn cloudflare(&self) -> Option<Arc<seiran_common::cloudflare::CloudflareClient>> {
+        seiran_common::cloudflare::client_from_settings(
+            self.site_settings.as_ref(),
+            &self.http_client,
+        )
+        .await
     }
 
     /// `seiran_common::follow_exec::execute_follow` に渡す設定を組み立てる。
@@ -799,6 +789,15 @@ pub async fn init_state(
     let oembed_whitelist = Arc::new(seiran_common::oembed_whitelist::OembedWhitelist::new(
         site_settings.clone(),
     ));
+    let did_provisioner = Arc::new(seiran_common::did_provision::DidProvisioner {
+        pool: pool.clone(),
+        http: Arc::clone(&http_client),
+        atp_service: Arc::clone(&atp_service),
+        site_settings: site_settings.clone(),
+        local_domain: local_domain.clone(),
+        server_rotation_key_pem: secrets.atproto_private_key_pem.clone(),
+        job_queue: Arc::clone(&job_queue),
+    });
     let instance_domain: Arc<dyn InstanceDomainRepository> =
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
     let remote_instance_meta: Arc<dyn RemoteInstanceMetaRepository> =
@@ -912,6 +911,7 @@ pub async fn init_state(
         media_files,
         site_settings,
         oembed_whitelist,
+        did_provisioner,
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub,
         shutdown,

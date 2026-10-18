@@ -15,6 +15,7 @@ async-trait = "0.1"
 argon2 = "0.5"
 jsonwebtoken = "9"
 reqwest = { version = "0.12", features = ["json"] }
+hickory-resolver = "0.26.3"
 bytes = "1"
 base64 = "0.22"
 toml = "1.1.2"

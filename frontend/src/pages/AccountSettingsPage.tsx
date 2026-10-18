@@ -2,6 +2,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { QRCodeSVG } from "qrcode.react";
 import { api, getErrorMessage, type PasskeySummary } from "../api/client";
+import type { UserProfile } from "../api/types";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import panel from "../components/common/Panel.module.css";
@@ -13,6 +14,7 @@ export default function AccountSettingsPage() {
   const { user, logout } = useAuth();
 
   const [did, setDid] = useState<string | undefined>(undefined);
+  const [didStatus, setDidStatus] = useState<UserProfile["did_status"]>(undefined);
   const [loading, setLoading] = useState(true);
 
   // 二段階認証（TOTP）
@@ -57,7 +59,11 @@ export default function AccountSettingsPage() {
     let cancelled = false;
     api.users
       .profile(user.username)
-      .then((p) => !cancelled && setDid(p.at_did))
+      .then((p) => {
+        if (cancelled) return;
+        setDid(p.at_did);
+        setDidStatus(p.did_status);
+      })
       .finally(() => !cancelled && setLoading(false));
     api.account.totp.status().then(({ enabled }) => !cancelled && setTotpEnabled(enabled));
     api.account.passkeys.list().then((items) => !cancelled && setPasskeys(items));
@@ -216,11 +222,19 @@ export default function AccountSettingsPage() {
             <span className={styles.identityLabel}>{t("account:accountSettings.emailLabel")}</span>
             <span className={styles.identityValue}>{user?.email}</span>
           </div>
-          {did && (
+          {(did || didStatus) && (
             <div className={styles.identityRow}>
               <span className={styles.identityLabel}>DID</span>
-              <span className={styles.identityValue}>{did}</span>
+              <span className={styles.identityValue}>
+                {did ??
+                  (didStatus === "pending_dns"
+                    ? t("account:accountSettings.didPendingDns")
+                    : t("account:accountSettings.didNone"))}
+              </span>
             </div>
+          )}
+          {!did && didStatus === "pending_dns" && (
+            <p className={styles.identityHint}>{t("account:accountSettings.didPendingDnsHint")}</p>
           )}
         </div>
       )}

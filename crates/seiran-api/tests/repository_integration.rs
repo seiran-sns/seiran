@@ -472,6 +472,7 @@ async fn concurrent_signups_with_same_username_leave_no_orphan_users() {
                         birth_date: None,
                     },
                     None,
+                    None,
                 )
                 .await
                 .is_ok()

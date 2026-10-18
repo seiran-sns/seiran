@@ -526,3 +526,127 @@ pub async fn incomplete_status_for_user(
     .fetch_optional(pool)
     .await
 }
+
+// ─── DNS TXT 登録完了待ち（`awaiting_dns_txt`、`crate::did_provision::migration`） ───
+
+/// `awaiting_dns_txt` の転入で、PLC 送信までに必要な保存値と TXT の進み具合。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct MigrationDnsStage {
+    pub id: i64,
+    pub staged_plc_operation: Option<serde_json::Value>,
+    pub staged_signing_key_pem: Option<String>,
+    pub staged_rotation_key_pem: Option<String>,
+    pub cf_txt_record_id: Option<String>,
+    pub txt_visible_at: Option<DateTime<Utc>>,
+}
+
+/// `awaiting_plc_token` から `awaiting_dns_txt` へ進め、署名済みの PLC 操作と新しい鍵を保存する。
+/// 状態が `awaiting_plc_token` でなければ何もせず `false`。
+pub async fn stage_plc_operation(
+    pool: &PgPool,
+    id: i64,
+    operation: &serde_json::Value,
+    signing_key_pem: &str,
+    rotation_key_pem: &str,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests
+         SET status = 'awaiting_dns_txt', staged_plc_operation = $2,
+             staged_signing_key_pem = $3, staged_rotation_key_pem = $4,
+             cf_txt_record_id = NULL, txt_visible_at = NULL, last_error = NULL,
+             updated_at = NOW()
+         WHERE id = $1 AND status = 'awaiting_plc_token'",
+    )
+    .bind(id)
+    .bind(operation)
+    .bind(signing_key_pem)
+    .bind(rotation_key_pem)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}
+
+/// 処理中でない `awaiting_dns_txt` の転入の id（古い順）。
+pub async fn list_dns_wait_ids(pool: &PgPool) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM at_migration_requests
+         WHERE status = 'awaiting_dns_txt'
+           AND (dns_locked_until IS NULL OR dns_locked_until < NOW())
+         ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// `awaiting_dns_txt` の転入を `lease_secs` 秒だけ自分の処理中にして返す。他が処理中・
+/// 状態が違えば `None`。
+pub async fn claim_dns_wait(
+    pool: &PgPool,
+    id: i64,
+    lease_secs: i64,
+) -> Result<Option<MigrationDnsStage>, sqlx::Error> {
+    sqlx::query_as(
+        "UPDATE at_migration_requests
+         SET dns_locked_until = NOW() + make_interval(secs => $2)
+         WHERE id = $1 AND status = 'awaiting_dns_txt'
+           AND (dns_locked_until IS NULL OR dns_locked_until < NOW())
+         RETURNING id, staged_plc_operation, staged_signing_key_pem, staged_rotation_key_pem,
+                   cf_txt_record_id, txt_visible_at",
+    )
+    .bind(id)
+    .bind(lease_secs as f64)
+    .fetch_optional(pool)
+    .await
+}
+
+pub async fn release_dns_wait(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE at_migration_requests SET dns_locked_until = NULL WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn set_dns_txt_record_id(
+    pool: &PgPool,
+    id: i64,
+    record_id: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE at_migration_requests SET cf_txt_record_id = $2 WHERE id = $1")
+        .bind(id)
+        .bind(record_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+pub async fn mark_dns_txt_visible(pool: &PgPool, id: i64) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_requests SET txt_visible_at = NOW()
+         WHERE id = $1 AND txt_visible_at IS NULL",
+    )
+    .bind(id)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 状態が `from` のときだけ `to` へ移し、移したら `true`。PLC 送信の直前（`awaiting_dns_txt` →
+/// `submitting_plc`）と打ち切りが競合しても、片方だけが成立するようにする。
+pub async fn transition_status(
+    pool: &PgPool,
+    id: i64,
+    from: &str,
+    to: &str,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests SET status = $3::at_migration_status, updated_at = NOW()
+         WHERE id = $1 AND status = $2::at_migration_status",
+    )
+    .bind(id)
+    .bind(from)
+    .bind(to)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}

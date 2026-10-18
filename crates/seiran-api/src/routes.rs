@@ -278,6 +278,10 @@ fn auth_account_routes() -> Router<AppState> {
             "/api/migration/:id/status",
             get(handlers::migration::get_status),
         )
+        .route(
+            "/api/migration/:id/session",
+            post(handlers::migration::session),
+        )
         .route("/api/migration/:id/retry", post(handlers::migration::retry))
         .route(
             "/api/migration/:id/abandon",

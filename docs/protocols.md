@@ -203,10 +203,17 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 **CORS**: `router` の `CorsLayer` は、パスが `/xrpc/` か `/.well-known/` で始まれば全オリジンを許可する。XRPC は bsky.app 等の外部クライアントがブラウザから直接叩く公開 API だから（公式 PDS も `Access-Control-Allow-Origin: *`）。`/api/*` は `FRONTEND_ORIGIN` と自ドメインのみ。`allow_headers` は `Any`: bsky.app は `atproto-proxy`/`x-bsky-topics` 等のカスタムヘッダーをメソッドごとに送ってくるため、列挙すると増えるたびにプリフライトで弾かれる。`allow_credentials` を付けていない（Cookie 不使用）ので `Any` で安全。
 
 ### DID解決・PLC登録・ハンドル検証（アカウント登録時）
-1. P-256 鍵を生成し、`did:plc:xxx` をローカル計算で確定
-2. Cloudflare API で `_atproto.{username}.{domain}` TXT をセット（`site_settings` の `cloudflare_api_token`/`cloudflare_zone_id` が両方あるときだけ。管理画面で設定し、呼び出しごとに読むので再起動なしで反映される。未設定なら `.well-known` 方式のみ）
-3. `plc.directory` へ genesis operation を POST
-4. 失敗したら新しい鍵で最大3回リトライ
+登録リクエストでは DID をローカル計算で確定し、アカウントを「DNS TXT 登録完了待ち」（`pending_did_provisions`、`actors.at_did` は NULL）として作る。以降は `seiran_common::did_provision` が1段ずつ進める。登録リクエストの最後に1段だけ進め、残りは登録直後のバックグラウンドタスク（`kick`、1秒ごと、最長3分）が定時処理の間隔を待たずに進める。それでも終わらない分（Cloudflare の障害中など）と、プロセスの再起動で途切れた分は、firehose ロールの定時処理（`seiran_atp_repo::did_provision_poll`、2秒ごと、`leader` で1プロセスだけ）が進める。両者が同じ行を同時に進めないよう、行のリース（`locked_until`）で排他する。公開確認に使う権威 NS の一覧は Cloudflare API のレート制限を避けるためゾーンごとに10分キャッシュする。
+
+1. P-256 鍵を生成し、`did:plc:xxx` と署名済み genesis op をローカル計算で確定して保存
+2. Cloudflare API で `_atproto.{username}.{domain}` TXT を作成（`site_settings` の `cloudflare_api_token`/`cloudflare_zone_id` が両方あるときだけ。管理画面で設定し、呼び出しごとに読むので再起動なしで反映される）
+3. ゾーンの全権威 NS（Cloudflare API の `name_servers`）が TXT を返すのを確認し、確認から2秒置く
+4. `plc.directory` へ genesis operation を送り、DID と鍵を `actors` に移して、初期レコード（profile・chat declaration・seiran actor declaration）と `#identity` を出す
+5. PLC 送信が失敗したら鍵ごと作り直して 2 からやり直す
+
+Cloudflare が未設定なら（途中で設定が消された場合も）2・3 を飛ばして 4 へ進むので、登録リクエストの中で DID 確定まで終わる。
+
+TXT の公開を待つのは、API の成功から権威 NS に見えるまで数秒かかり、その間に最初の firehose イベントが出ると Relay/AppView が NXDOMAIN を受けてハンドルを無効（`handle.invalid`）と記録するから。AppView は commit でもハンドルを解決し、一度無効になると commit では1時間再検証しないため、`#identity` だけ遅らせても足りず、最初のイベントより前（PLC 送信の時点）から待つ。公開までの時間に上限は無いので、登録リクエストでは待たない。確認は権威 NS へキャッシュ無しで直接問い合わせる（公開リゾルバーに聞くと公開前の NXDOMAIN をキャッシュさせる）。既存 DID の転入も、署名済みの PLC 操作を保存して `awaiting_dns_txt` で同じように待ってから PLC 送信へ進む（`seiran_common::did_provision::migration`、`docs/account_migration.md` 3節）。
 
 `com.atproto.identity.resolveHandle` は `{username}.{local_domain}` なら `actors.at_did` から即答し、それ以外は `resolve_external_handle` が DNS TXT（`_atproto.{handle}`、Cloudflare DoH）と `https://{handle}/.well-known/atproto-did` を並行で試す（各5秒、両方失敗で404）。bsky.app はログイン中の PDS に任意ハンドルの解決を投げるため、自ドメイン外を拒否するとクライアント側が壊れる。
 

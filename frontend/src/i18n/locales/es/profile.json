@@ -4,6 +4,8 @@
     "pairedBadge": "Atado al alma",
     "pairedBadgeTitle": "Vinculado con un usuario remoto de Seiran mediante vinculación de almas.",
     "suspendedBadge": "Suspendida",
+    "blueskyPreparingBadge": "Bluesky pendiente",
+    "blueskyPreparingTitle": "Esperando a que se publique el identificador de Bluesky (registro DNS TXT). La cuenta será visible en Bluesky cuando se publique",
     "editProfileButton": "Editar perfil",
     "followingBadge": "Siguiente",
     "unfollowingButton": "Dejar de seguir...",

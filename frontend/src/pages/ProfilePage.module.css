@@ -141,6 +141,22 @@
   vertical-align: middle;
 }
 
+.acctPreparing {
+  color: var(--text-faint);
+}
+
+.preparingBadge {
+  display: inline-block;
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-dim);
+  border: 1px solid var(--text-faint);
+  border-radius: 20px;
+  padding: 1px 8px;
+  vertical-align: middle;
+}
+
 .followCounts {
   display: flex;
   gap: 16px;

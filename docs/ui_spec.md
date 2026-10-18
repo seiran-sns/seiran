@@ -86,7 +86,7 @@
   * 判定は WebFinger ではなく（`acct:` 形式にしか使えない）、AP の Content-Negotiation での直接取得か Bsky AppView で非同期に行い、`link_resolutions` に陽性・陰性ともキャッシュする（陰性は48時間で再調査）。未キャッシュの URL があれば `Job::LinkResolve` を積み、完了は WebSocket の `linkResolved`（ログイン中のクライアントに `broadcast_all`）で通知して表示を切り替える。
   * `RichHtml` は既存の `<a>` だけでなく地の文の裸URL・メンション記法もリンク化する（Misskey 等は profile_fields のメンションを `<a>` にせず送ってくる）。`<a>` の内側では二重リンクを避けて検出しない。`<a>` のテキストが `@user@host` 形状で `href` と食い違う場合は、テキストの解決結果を優先する（リモートがメンションを誤った URL で送ってくることがある）。
 * **背景画像（バナー）:** `banner_url` があればアイコンの上に 16:5 で出し、顔アイコンを背景画像の内側左下寄りに重ねる。無ければアイコンのみ。
-* **アカウントID:** ローカルと `remote_seiran` は Fedi 形式（`@username@domain`）と Bsky 形式（`@username.domain`、`remote_seiran` は `at_handle`。未解決なら Bsky 行を省略）の両方を2行で出す。リモート（fedi/`remote_seiran`/bsky）は NoteCard と共通のサーバー名表示（`lib/format.ts` の `remoteServerBadgeInfo`）も出す。凍結中のアクターは Fedi 形式の行の後に【凍結中】を出す（`is_suspended`）。
+* **アカウントID:** ローカルと `remote_seiran` は Fedi 形式（`@username@domain`）と Bsky 形式（`@username.domain`、`remote_seiran` は `at_handle`。未解決なら Bsky 行を省略）の両方を2行で出す。リモート（fedi/`remote_seiran`/bsky）は NoteCard と共通のサーバー名表示（`lib/format.ts` の `remoteServerBadgeInfo`）も出す。凍結中のアクターは Fedi 形式の行の後に【凍結中】を出す（`is_suspended`）。ローカルユーザーの Bsky 行はプロフィール API の `did_status` で出し分ける: `active` はそのまま、`pending_dns`（DNS TXT 登録完了待ち。Cloudflare の障害中などは長引く）は薄い文字に【Bluesky 準備中】のバッジを付けて誰にでも見せる（まだ Bluesky から見えないことを示す）、`none`（シングルホストモードで DID を作らない）は Bsky の ID が存在しないので行ごと出さない。
 * **右ペイン:** タブ式（【アクティビティ】【フォロー中】【フォロワー】）。
   * 【アクティビティ】（既定）: 投稿とリアクションのイベントを時系列で混ぜて出す（`ProfileFeedList`、`GET /api/users/posts?includeReactions=true`）。投稿は通常の `NoteCard`。リアクションは通知と同じ体裁の `ReactionEventCard` で「[リアクション画像] [対象ポストの投稿者]のポストにリアクションしました」の1行（「誰が」は本人なので書かない）、クリックで対象ポストへ。カーソルは投稿・リアクション共通の `until_id`（同じ Snowflake 名前空間）。
     * **絞り込み**: 一覧の最上部に、通知の絞り込みと同じ見た目の欄（`ProfileFeedFilterBar`、部品は `common/FilterField`）を横に2つ並べる。初期状態はどちらも未指定で、指定すると欄内にタグ状に並び（はみ出しは「…」）、✕で全クリアできる。2つの条件は AND。条件を変えるたびにその条件で先頭ページから取得し直し、プロフィールを切り替えると捨てる。
@@ -261,7 +261,7 @@
 ### 2.7 【設定画面】（`/settings` 以下）表示時（#55）
 右ペインは使わず中央ペインのみ。
 * **`/settings`**: アカウント・プロフィール・ミュート/ブロック・プライバシー・リスト・表示・アプリトークンへの導線。「承認待ちフォロー」は `is_locked` が有効な間だけ出し、件数を赤バッジで出す（左ペインの「設定」にも同じバッジ、`StreamingContext` の `followRequestCount`）。
-* **`/settings/account`**: メールアドレス・DID の表示、メールアドレス変更（新アドレスに確認メールを送り、`/verify-email-change?token=...` で確定）、パスワード変更（現在のパスワード必須）、TOTP とパスキーの設定、退会。
+* **`/settings/account`**: メールアドレス・DID の表示（DID 未発行なら `did_status` に応じて「準備中（DNS TXT レコードの公開待ち）」と長引くことがある旨の説明、または「なし」）、メールアドレス変更（新アドレスに確認メールを送り、`/verify-email-change?token=...` で確定）、パスワード変更（現在のパスワード必須）、TOTP とパスキーの設定、退会。
   * TOTP は QR かシークレットを認証アプリに登録し、初回の6桁コードで有効化した後、二度と出ない10件のリカバリーコードを見せる。通常の無効化は現在のパスワードが要る。両方失ったらログインの2段階目から登録メールへ解除リンクを送り、`/totp-disable?token=...` で解除する。
   * パスキーは名前を付けて複数登録・個別削除できる。ログイン画面の「パスキーを使う」だけで、ID 入力なしにログインできる。
 * **`/settings/profile`**（`ProfileEditPage`）: 表示名・Bio・プロフィール項目・アイコン・背景画像・「別のアカウント」の編集。

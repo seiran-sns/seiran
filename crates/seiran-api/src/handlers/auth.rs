@@ -6,7 +6,7 @@ use axum::{
 use seiran_common::repository::NewLocalActor;
 use serde::{Deserialize, Serialize};
 
-use seiran_common::atp::signing_key_from_pem;
+use seiran_common::did_provision::PreparedDid;
 use seiran_common::{generate_snowflake_id, LocalAuthProvider};
 
 use crate::error::ApiError;
@@ -318,104 +318,18 @@ fn parse_birthday(birthday: Option<&str>) -> Result<Option<chrono::NaiveDate>, A
         .transpose()
 }
 
-/// 新規ローカルアカウントの ATP 識別情報（PLC genesis で確定した DID と鍵）。自ホスト
-/// ドメインが未確定（シングルホストモード）の間は PLC genesis を行わず全て`None`。
-#[derive(Default)]
-pub(crate) struct ProvisionedDid {
-    pub at_did: Option<String>,
-    pub at_signing_key_pem: Option<String>,
-    pub at_rotation_key_pem: Option<String>,
-}
-
-/// DID確定 → TXT セット → PLC送信（最大3回リトライ）。DB 書き込みはこれより後に行う
-/// （失敗時に孤立レコードが残らないようにするため）。TXT レコードは bsky.app がハンドル解決に
-/// 常時使用するため作成後もそのまま残す。`register`・`setup`共通。
-pub(crate) async fn provision_plc_did(
+/// 新規ローカルアカウントの DID をローカル計算で確定する（`register`・`setup`共通）。
+/// アカウントは「DNS TXT 登録完了待ち」として作り、TXT 作成・PLC 送信・初期レコードは
+/// `seiran_common::did_provision` が進める。シングルホストモードでは`None`。
+pub(crate) fn prepare_did(
     state: &AppState,
     username: &str,
     log_tag: &str,
-) -> Result<ProvisionedDid, ApiError> {
-    if !state.local_domain.is_confirmed() {
-        return Ok(ProvisionedDid::default());
-    }
-    let rotation_key =
-        signing_key_from_pem(&state.secrets.atproto_private_key_pem).map_err(|e| {
-            tracing::error!("[{}] 回転鍵ロード失敗: {}", log_tag, e);
-            ApiError::Internal("ATP鍵ロードエラー".to_string())
-        })?;
-    let (did, pem, rotation_pem, _cf_record_id) =
-        crate::handlers::plc_genesis::register_plc_did(state, username, &rotation_key, log_tag)
-            .await?;
-    Ok(ProvisionedDid {
-        at_did: Some(did),
-        at_signing_key_pem: Some(pem),
-        at_rotation_key_pem: Some(rotation_pem),
+) -> Result<Option<PreparedDid>, ApiError> {
+    state.did_provisioner.prepare(username).map_err(|e| {
+        tracing::error!("[{}] did:plc genesis 準備失敗: {}", log_tag, e);
+        ApiError::Internal("did:plc genesis 準備エラー".to_string())
     })
-}
-
-/// 新規ローカルアカウントの ATP リポジトリへ初期レコードをコミットし、`#identity` を送る。
-/// 失敗しても登録自体は完了済みのためログのみ（`register`・`setup`共通）。
-pub(crate) async fn publish_initial_atp_records(
-    state: &AppState,
-    actor_id: i64,
-    username: &str,
-    at_did: &str,
-    log_tag: &str,
-) {
-    let now = chrono::Utc::now();
-    let atp = &state.atp_service;
-    if let Err(e) = atp
-        .commit_profile(
-            actor_id,
-            &seiran_common::atp::service::ProfileCommit::new(username),
-            now,
-        )
-        .await
-    {
-        tracing::error!(
-            "[{}] ATP プロフィールコミット失敗（登録は完了済み）: {}",
-            log_tag,
-            e
-        );
-    }
-    // Bsky公式クライアントからのDM受信を許可する設定（`docs/protocols.md` 9節）。
-    // 無いとBluesky公式クライアントが相手（このユーザー）へのDM送信を保守的にブロックする。
-    if let Err(e) = atp.commit_chat_declaration(actor_id, now).await {
-        tracing::error!(
-            "[{}] chat declaration コミット失敗（登録は完了済み）: {}",
-            log_tag,
-            e
-        );
-    }
-    // リモートseiranアクターの相互申告マージ用の自己申告（#236）。
-    let ap_actor_uri = format!("https://{}/users/{}", state.local_domain, username);
-    if let Err(e) = atp
-        .commit_seiran_actor_declaration(actor_id, &ap_actor_uri, now)
-        .await
-    {
-        tracing::error!(
-            "[{}] seiran actor declaration コミット失敗（登録は完了済み）: {}",
-            log_tag,
-            e
-        );
-    }
-    // #identity フレームを Relay に送信して AppView の handle キャッシュを更新させる。
-    // commit_profile より後に送信することで seq 順序が保たれる。
-    let handle = format!(
-        "{}.{}",
-        seiran_common::username::to_atp_username(username),
-        state.local_domain
-    );
-    if let Err(e) = atp
-        .broadcast_identity_event(actor_id, at_did, &handle, now)
-        .await
-    {
-        tracing::error!(
-            "[{}] #identity broadcast 失敗（登録は完了済み）: {}",
-            log_tag,
-            e
-        );
-    }
 }
 
 pub async fn register(
@@ -449,9 +363,10 @@ async fn register_account(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
     let birth_date = parse_birthday(req.birthday.as_deref())?;
-    let did = provision_plc_did(state, &req.username, "register").await?;
+    let did = prepare_did(state, &req.username, "register")?;
+    let pending_did = did.as_ref().map(PreparedDid::as_new_pending);
 
-    // DB 書き込み（PLC 送信成功後）。users と actors は1トランザクションで作る。
+    // users・actors・DNS TXT 登録完了待ちの行は1トランザクションで作る。
     let actor_id = generate_snowflake_id(chrono::Utc::now());
     let user_id = seiran_common::repository::create_local_account(
         &state.db,
@@ -462,18 +377,20 @@ async fn register_account(
             id: actor_id,
             username: &req.username,
             domain: &state.local_domain,
-            at_did: did.at_did.as_deref(),
-            at_signing_key_pem: did.at_signing_key_pem.as_deref(),
-            at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
+            at_did: None,
+            at_signing_key_pem: None,
+            at_rotation_key_pem: None,
             birth_date,
         },
+        pending_did.as_ref(),
         agreed_tos_text.as_deref(),
     )
     .await
     .map_err(|e| account_creation_error(e, "register"))?;
 
-    if let Some(at_did) = did.at_did.as_deref() {
-        publish_initial_atp_records(state, actor_id, &req.username, at_did, "register").await;
+    // 1段進め（Cloudflare 未設定ならここで DID 確定まで終わる）、残りはバックグラウンドで進める。
+    if did.is_some() && state.did_provisioner.advance(actor_id).await {
+        state.did_provisioner.kick(actor_id);
     }
 
     let (token, _jti) = state

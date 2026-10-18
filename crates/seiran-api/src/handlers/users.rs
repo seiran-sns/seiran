@@ -347,6 +347,11 @@ pub struct ProfileResponse {
     /// Bsky ID行の表示に使う（`fedi`単独/`local`は無関係、`bsky`単独は`username`と同値）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub at_handle: Option<String>,
+    /// ローカルユーザーの Bluesky 側の状態（`docs/ui_spec.md`）。`active`（DID 確定済み）・
+    /// `pending_dns`（DNS TXT 登録完了待ち、`seiran_common::did_provision`）・`none`
+    /// （シングルホストモードで DID を作らない）。ローカル以外は省略。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub did_status: Option<&'static str>,
     pub bio: Option<String>,
     /// 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。フロントは
     /// `bio` 描画時にこのマップで `:shortcode:` を画像に置換する。空なら省略。
@@ -526,6 +531,7 @@ async fn fetch_bsky_profile_from_appview(
         ap_uri: None,
         at_did: Some(bsky.did),
         at_handle: None,
+        did_status: None,
         bio: bsky.description,
         emojis: std::collections::HashMap::new(),
         avatar_url: bsky.avatar,
@@ -727,6 +733,23 @@ async fn sync_remote_fedi_pinned(state: &AppState, actor: &Actor) {
     {
         tracing::warn!("[profile] pinned_posts 同期失敗: {}", e);
     }
+}
+
+/// ローカルユーザーの Bluesky 側の状態（`ProfileResponse::did_status`）。
+async fn local_did_status(
+    state: &AppState,
+    actor: &seiran_common::repository::Actor,
+) -> Option<&'static str> {
+    if actor.actor_type != "local" {
+        return None;
+    }
+    if actor.at_did.is_some() {
+        return Some("active");
+    }
+    let pending = seiran_common::repository::did_provision::exists(&state.db, actor.id)
+        .await
+        .unwrap_or(false);
+    Some(if pending { "pending_dns" } else { "none" })
 }
 
 async fn build_profile_response(
@@ -1251,6 +1274,7 @@ async fn build_profile_response_inner(
     let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
     let also_known_as = load_also_known_as(state, &actor).await;
     let (birthday, birthday_public) = visible_birthday(&actor, my_actor_id == Some(actor_id));
+    let did_status = local_did_status(state, &actor).await;
 
     Ok(Json(ProfileResponse {
         actor_id: Some(actor_id.to_string()),
@@ -1262,6 +1286,7 @@ async fn build_profile_response_inner(
         ap_uri: actor.ap_uri,
         at_did: actor.at_did,
         at_handle: actor.at_handle,
+        did_status,
         bio,
         emojis,
         avatar_url,
@@ -1386,6 +1411,7 @@ async fn fetch_remote_profile(
         ap_uri: Some(actor_uri),
         at_did: None,
         at_handle: None,
+        did_status: None,
         bio,
         emojis: json_map_to_string_map(&emoji_map),
         avatar_url,

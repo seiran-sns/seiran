@@ -20,7 +20,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 2. （PDS Aがメール2FAを要求する場合のみ）確認コード入力
 3. PDS Aのリポジトリ取得（自動、待機表示のみ）
 4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
-5. `submitPlcOperation`実行（★不可逆境界、後述）。成功と同時にJWTが発行されログイン状態になる
+5. `signPlcOperation`で署名済みの PLC 操作を得て保存し、`_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
 6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス。`submit-plc-token`成功時にlocalStorageのmigration_token/idをクリアせず残しておき、`/api/migration/:id/status`のポーリングを引き続き行うことで、`importing_data`中の取り込み件数/全体件数（`import_done`/`import_total`）を表示する。完了検知時にクリアする）
 7. 完了、通常のSNS画面へ
 
@@ -32,13 +32,16 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち | ユーザー入力待ち |
-| `submitting_plc` | `signPlcOperation`→`submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | 同期処理（APIハンドラ内） |
+| `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
+| `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
 | `importing_data` | ステージング済みレコード/blobの実体化中 | `Job::MigrationImportProcess`（自己再enqueue） |
 | `deactivating_source` | PDS A側旧アカウントの無効化中（ベストエフォート） | `Job::MigrationDeactivateSource` |
 | `completed` | 転入完了 | — |
 | `failed` | `submitting_plc`到達前の失敗。リトライ／別DIDで再開／新規DID立ち上げへ切替のいずれも可 | ユーザー選択待ち |
 | `failed_post_submit` | `submitting_plc`成功後の失敗。リトライのみ可 | ユーザー選択待ち |
-| `abandoned` | ユーザーによる打ち切り（`plc_submitted_at IS NULL`の間のみ選択可） | — |
+| `abandoned` | ユーザーによる打ち切り（`plc_submitted_at IS NULL`かつ`submitting_plc`でない間のみ選択可。PLC 送信開始と競合しないよう、状態の条件付き遷移で行う） | — |
+
+`awaiting_dns_txt` を置くのは、PLC 送信で DID のハンドルが seiran 側に切り替わった時点で Relay/AppView が解決しにくるため（新規アカウントと同じ理由、`docs/protocols.md` 3節）。署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、メールのワンタイムトークンの期限（15分）とは無関係に待てる。plc.directory が操作を拒んだ（4xx。転入元で別の操作が入った等）場合は `failed`、通信の失敗なら `awaiting_dns_txt` に戻して送り直す。Cloudflare が未設定なら待たずに送る（`submit-plc-token` の中で確定まで終わる）。
 
 `Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`deactivating_source`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
 

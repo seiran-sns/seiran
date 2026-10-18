@@ -38,6 +38,7 @@ ID の採番は2系統:
 | `atp_records` / `atp_blocks` / `atp_repo_events` | ATP の非 post レコード、MST のブロックストア、`subscribeRepos` のイベントログ |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
 | `at_migration_requests` / `at_migration_records` / `at_migration_blobs` | DID 転入の状態機械とステージング |
+| `pending_did_provisions` | 「DNS TXT 登録完了待ち」の新規ローカルアカウント（DID 発行前） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP・Jetstream カーソル等） |
 | `terms_of_service_agreements` | 利用規約同意の証跡（登録時に同意した場合のみ1行） |
 | `instance_domain` | 自ホストドメインの確定値（1行、不変） |
@@ -86,6 +87,7 @@ ID の採番は2系統:
 - **`ap_uri`（UNIQUE）**: ローカル行も `https://{local_domain}/users/{username}` を持つので、自ドメインの Actor URI がリモート解決経路に入っても `ON CONFLICT (ap_uri)` で影の `fedi` 行はできない（入口のガードと二重防御、`docs/protocols.md` 5節）。
 - **退会済みの除外**: `find_by_username_domain` は `withdrawn_at` のあるアクターを除く（プロフィール・フォロー解決・検索等）。退会済みも解決できないと処理が失敗する内部処理（AP 受信の同一性検証等）は、あえて不自然な名前の `find_including_withdrawn_by_username_domain` を使う（呼び出し側にどちらかを意識させるため）。
 - **シングルホストモード**（`instance_domain` 参照）で作られたローカルユーザーは `domain='localhost'`、`at_did`/`at_signing_key_pem` は NULL（PLC genesis をしない）。
+- **「DNS TXT 登録完了待ち」**: `pending_did_provisions` に行がある間は `at_did`/`at_signing_key_pem`/`at_rotation_key_pem` が NULL で、シングルホストモードの DID 無しユーザーと同じに扱う（ATP のイベントを出さない）。
 - `birth_date`/`birth_date_public`: Misskey 互換の `birthday`。`birth_date_public`（既定 `false`、seiran 独自）は `vcard:bday` で Fedi に出すかどうか。Bsky の `#personalDetailsPref` は常に非公開（`docs/protocols.md` 3節）。
 - `hide_from_algorithmic_recommendations`: `contentVisibilityDeclaration` のローカルキャッシュ（`docs/protocols.md` 3節）。
 - `is_locked`: フォロー承認制。投稿の公開範囲には影響しない（`docs/protocols.md` 2節）。
@@ -283,12 +285,18 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 ### 既存DID転入（`at_migration_requests` / `at_migration_records` / `at_migration_blobs`）
 フォローインポートと同じ親子テーブル＋進捗は COUNT の設計。状態遷移の詳細は `docs/account_migration.md`。
 
-- `at_migration_requests`: 転入1回＝1行。`status`（ENUM `at_migration_status`）が状態機械で、`awaiting_source_2fa` → `fetching_repo` → `requesting_plc_signature` → `awaiting_plc_token` → `submitting_plc` → `importing_data` → `deactivating_source` → `completed`。ほかに `failed`（`submitPlcOperation` 前のみ。リトライ・別DID・新規DID切替が可）、`failed_post_submit`（成功後専用、リトライのみ）、`abandoned`（`plc_submitted_at IS NULL` の間だけ選べる打ち切り）。`awaiting_seiran_email` は ENUM に残るが到達しない。
+- `at_migration_requests`: 転入1回＝1行。`status`（ENUM `at_migration_status`）が状態機械で、`awaiting_source_2fa` → `fetching_repo` → `requesting_plc_signature` → `awaiting_plc_token` → `awaiting_dns_txt` → `submitting_plc` → `importing_data` → `deactivating_source` → `completed`。ほかに `failed`（`submitPlcOperation` 前のみ。リトライ・別DID・新規DID切替が可）、`failed_post_submit`（成功後専用、リトライのみ）、`abandoned`（`plc_submitted_at IS NULL` の間だけ選べる打ち切り）。`awaiting_seiran_email` は ENUM に残るが到達しない。 `awaiting_dns_txt` の間は `staged_plc_operation`/`staged_signing_key_pem`/`staged_rotation_key_pem`（`signPlcOperation` の結果。PLC 送信が済むまで `new_*_key_pem` に入れないのは、そちらが「提出済み」の印を兼ねるため）と、`pending_did_provisions` と同じ意味の `cf_txt_record_id`/`txt_visible_at`/`dns_locked_until` を使う。
   - `request_token_hash`: 匿名段階の認可トークンの SHA-256（生値は1回だけ返す）。
   - `plc_submitted_at`: 不可逆境界のマーカー。`new_signing_key_pem`（転入後の repo 署名鍵）と `new_rotation_key_pem`（専用ローテーションキー）はこの成功と同時に保存する（後のアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id` の確定とは別ステップ）。
 - `at_migration_records`: 取得した生レコード1件＝1行（`request_id, collection, rkey` の UNIQUE）。`bytes` は DAG-CBOR のまま。`imported_at` は `posts`/`atp_records` への実体化の完了。`app.bsky.graph.follow` だけは `follow_materialized_at` で `follows` への反映を別に追跡する（ATP リポジトリへの複製と seiran の社会グラフへの反映は別の処理だから）。
 - `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。
 - `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。
+
+### `pending_did_provisions`（DNS TXT 登録完了待ち）
+新規ローカルアカウントの DID 発行待ち。1アカウント1行（`actor_id` が PK、`actors` 削除で連鎖削除）。登録時に `users`/`actors` と同じトランザクションで作り、`seiran_common::did_provision` が `cf_txt_record_id`（TXT 作成済み）→ `txt_visible_at`（全権威 NS で公開を確認）→ PLC 送信の順に進め、確定したら DID と鍵を `actors` に移して行を消す（`finalize`、1トランザクション）。
+
+- `at_did`/鍵/`genesis_op`: ローカル計算で確定した DID と、plc.directory に送る署名済み genesis op。PLC 送信が失敗したら鍵ごと作り直して差し替える（DID も変わるので TXT の状態も戻す）。
+- `locked_until`: 登録リクエストの直後の1段と定時処理が同じ行を同時に進めないためのリース（`claim` が `UPDATE ... RETURNING` で取る）。外部 API 呼び出しを挟むのでトランザクションで直列化しない。期限切れなら次の処理が引き継ぐ。
 
 ### 利用規約同意（`terms_of_service_agreements`）
 新規登録画面（Blueskyからの転入を含む）の同意チェックボックスをONにしてアカウントを作成した場合のみ1行作られる。`terms_of_service_text` が空、またはチェックを入れなかった場合は行自体を作らない。

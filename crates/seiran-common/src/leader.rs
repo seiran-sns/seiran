@@ -32,6 +32,8 @@ pub enum LeaderTask {
     BskyDmPoll = 3,
     /// Bsky フォロワーのポーリング。
     BskyFollowerPoll = 4,
+    /// 「DNS TXT 登録完了待ち」アカウントの DID 発行。
+    DidProvision = 5,
 }
 
 /// ロックを取れなかったときに取り直すまでの間隔。

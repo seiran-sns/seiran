@@ -4,6 +4,8 @@
     "pairedBadge": "영혼에 묶인",
     "pairedBadgeTitle": "영혼결속을 통해 원격 세이란 사용자와 연결됨",
     "suspendedBadge": "정지됨",
+    "blueskyPreparingBadge": "Bluesky 준비 중",
+    "blueskyPreparingTitle": "Bluesky 핸들(DNS TXT 레코드)이 공개되기를 기다리는 중입니다. 공개되면 Bluesky에서 보이게 됩니다",
     "editProfileButton": "프로필 수정",
     "followingBadge": "수행원",
     "unfollowingButton": "팔로우 해제 중...",

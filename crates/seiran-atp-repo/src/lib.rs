@@ -7,6 +7,7 @@
 
 use std::sync::Arc;
 
+use seiran_common::did_provision::DidProvisioner;
 use seiran_common::leader::{LeaderTask, run_as_leader};
 use seiran_common::traits::JobQueue;
 use seiran_common::{CancellationToken, StreamHub};
@@ -15,9 +16,10 @@ use sqlx::PgPool;
 pub mod bsky_block_watch;
 pub mod bsky_dm_poll;
 pub mod bsky_follower_poll;
+pub mod did_provision_poll;
 pub mod firehose;
 
-/// Jetstream 購読と Bsky のポーリングを動かし、`shutdown` が発火してすべて止まったら戻る。
+/// Jetstream 購読・Bsky のポーリング・DID 発行の定時処理を動かし、`shutdown` が発火してすべて止まったら戻る。
 ///
 /// それぞれ複数のプロセスのうち1つだけが担当する（`seiran_common::leader`）。
 /// 担当を取れなかったプロセスは待機し、担当のプロセスが終了したら引き継ぐ。
@@ -26,6 +28,7 @@ pub async fn run(
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
     job_queue: Arc<dyn JobQueue>,
+    did_provisioner: Arc<DidProvisioner>,
     shutdown: CancellationToken,
 ) {
     tracing::info!("[seiran-atp-repo] Firehose リスナーを起動します。");
@@ -89,12 +92,21 @@ pub async fn run(
         run_as_leader(
             pool.clone(),
             LeaderTask::BskyFollowerPoll,
-            shutdown,
+            shutdown.clone(),
             move |stop| {
                 bsky_follower_poll::run(pool.clone(), Arc::clone(&http), Arc::clone(&hub), stop)
             },
         )
     };
-    tokio::join!(jetstream, block_watch, dm_poll, follower_poll);
+    let did_provision = run_as_leader(pool, LeaderTask::DidProvision, shutdown, move |stop| {
+        did_provision_poll::run(Arc::clone(&did_provisioner), stop)
+    });
+    tokio::join!(
+        jetstream,
+        block_watch,
+        dm_poll,
+        follower_poll,
+        did_provision
+    );
     tracing::info!("[seiran-atp-repo] 停止しました。");
 }

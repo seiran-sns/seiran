@@ -244,90 +244,124 @@ pub struct SubmitPlcTokenRequest {
     pub token: String,
 }
 
-/// ★不可逆境界。`signPlcOperation` → `submitPlcOperation` を実行し、成功したら
-/// アカウント（`users`/`actors`）をDB確定する。`plc_genesis::register_plc_did`と同様、
-/// 「外部への副作用のある呼び出しを完了させてからDB書き込みを行う」原則に従う。
+/// `submit-plc-token` の応答。DNS TXT の公開を確かめてから PLC 送信へ進むため、その場で
+/// アカウントまで確定できたときだけ JWT を返し、待ちが残ったら状態だけを返す（フロントは
+/// `/status` をポーリングし、アカウントができたら `/session` で JWT を受け取る）。
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum SubmitPlcTokenResponse {
+    Auth(Box<AuthResponse>),
+    Pending { status: &'static str },
+}
+
+/// PDS A に PLC 操作へ署名させ（`signPlcOperation`、メールのワンタイムトークンを消費する）、
+/// 署名済みの操作を保存して「DNS TXT 登録完了待ち」（`awaiting_dns_txt`）にする。PLC 送信・
+/// アカウント確定は `seiran_common::did_provision::migration` が TXT の公開を確かめてから行う。
 ///
-/// **再入可能**: `submitPlcOperation`成功直後に`mark_plc_submitted`でDB記録するため、
-/// その後のアカウント作成（`users`/`actors`）が失敗しても、`plc_submitted_at`が
-/// 設定済み・`status='submitting_plc'`のリクエストに対して同エンドポイントを再度叩けば、
-/// PLC提出をやり直さず（＝使用済みtokenを再送しない）保存済みの署名鍵でアカウント作成
-/// だけをやり直す（`actors` INSERTが失敗した場合にこれが無いと`awaiting_plc_token`の
-/// まま停滞し、ユーザーが消費済みのtokenで再試行することになる）。
+/// **再入可能**: PLC 送信後にアカウント作成だけが失敗した（`submitting_plc`・鍵記録済み）
+/// リクエストに対して同エンドポイントを再度叩けば、PLC 提出をやり直さず（＝使用済みtokenを
+/// 再送しない）保存済みの署名鍵でアカウント作成だけをやり直す。
 ///
 /// `signPlcOperation`のtokenはPDS A側で15分・ワンタイムのため、`awaiting_plc_token`
-/// からの一発勝負。失敗時はステータスを据え置き、ユーザーは`requesting_plc_signature`
+/// からの一発勝負。署名に失敗したらステータスを据え置き、ユーザーは`requesting_plc_signature`
 /// から新しいメールトークンを取り直す。
 pub async fn submit_plc_token(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     headers: HeaderMap,
     Json(req): Json<SubmitPlcTokenRequest>,
-) -> Result<Json<AuthResponse>, ApiError> {
+) -> Result<Json<SubmitPlcTokenResponse>, ApiError> {
     let migration_req = authorize_migration_request(&state, id, &headers).await?;
-    let email = migration_req
-        .email
-        .clone()
-        .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
-
-    let keys = match (
-        migration_req.new_signing_key_pem.clone(),
-        migration_req.new_rotation_key_pem.clone(),
+    if let (Some(signing_key_pem), Some(rotation_key_pem)) = (
+        migration_req.new_signing_key_pem.as_deref(),
+        migration_req.new_rotation_key_pem.as_deref(),
     ) {
-        (Some(signing_key_pem), Some(rotation_key_pem)) => {
-            // 再入: PLCは既に提出済み。tokenは使わずアカウント作成のみやり直す。
-            if migration_req.status != "submitting_plc" {
-                return Err(ApiError::BadRequest("INVALID_STATE".into()));
-            }
-            tracing::info!(
-                "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
-                id
-            );
-            MigrationKeys {
-                signing_key_pem,
-                rotation_key_pem,
-            }
+        // 再入: PLCは既に提出済み。tokenは使わずアカウント作成のみやり直す。
+        if migration_req.status != "submitting_plc" {
+            return Err(ApiError::BadRequest("INVALID_STATE".into()));
         }
-        _ => {
-            if migration_req.status != "awaiting_plc_token" {
-                return Err(ApiError::BadRequest("INVALID_STATE".into()));
-            }
-            // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
-            crate::handlers::auth::ensure_registration_open(&state).await?;
-            submit_plc_operation_to_seiran(&state, &migration_req, &req.token).await?
-        }
-    };
-
-    // ここから先はresume経路と共通。副作用のある外部呼び出しは完了済みなので、
-    // ロールバックせずログを残しつつ可能な限り完了させる（`plc_genesis`/`register`と同じ原則）。
-    let (user_id, actor_id) =
-        materialize_local_account(&state, &migration_req, &email, &keys).await?;
-
-    let repo = PgAtMigrationRepository::new(state.db.clone());
-    if let Err(e) = repo
-        .confirm_account_created(id, actor_id, user_id, chrono::Utc::now())
-        .await
-    {
-        // at_migration_requests側の記録に失敗しても、users/actorsは既に確定済みなので
-        // アカウント作成自体は成立している（ログのみ、レスポンスは正常に返す）。
-        tracing::error!(
-            "[migration:submit-plc-token] at_migration_requests確定記録失敗 (request_id={}): {}",
-            id,
-            e
+        tracing::info!(
+            "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
+            id
         );
+        let (user_id, actor_id) =
+            materialize_account(&state, &migration_req, signing_key_pem, rotation_key_pem).await?;
+        let repo = PgAtMigrationRepository::new(state.db.clone());
+        if let Err(e) = repo
+            .confirm_account_created(id, actor_id, user_id, chrono::Utc::now())
+            .await
+        {
+            // users/actors は確定済みなのでアカウント作成自体は成立している（ログのみ）。
+            tracing::error!(
+                "[migration:submit-plc-token] at_migration_requests確定記録失敗 (request_id={}): {}",
+                id,
+                e
+            );
+        }
+        state.enqueue_migration_import_process(id).await;
+        return Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
+            account_auth_response(&state, id).await?,
+        ))));
     }
 
-    state.enqueue_migration_import_process(id).await;
+    if migration_req.status != "awaiting_plc_token" {
+        return Err(ApiError::BadRequest("INVALID_STATE".into()));
+    }
+    // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
+    crate::handlers::auth::ensure_registration_open(&state).await?;
+    stage_plc_operation(&state, &migration_req, &req.token).await?;
 
+    // 1段進め（Cloudflare 未設定ならここでアカウント確定まで終わる）、残りはバックグラウンドで進める。
+    if state.did_provisioner.advance_migration(id).await {
+        state.did_provisioner.kick_migration(id);
+        return Ok(Json(SubmitPlcTokenResponse::Pending {
+            status: "awaiting_dns_txt",
+        }));
+    }
+    Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
+        account_auth_response(&state, id).await?,
+    ))))
+}
+
+/// 転入で作られたアカウントの JWT を発行する。`awaiting_dns_txt` の待ちが明けてアカウントが
+/// できたとき、ログイン前の転入画面が `X-Migration-Token` で JWT を受け取るのに使う
+/// （`submit-plc-token` がその場で確定できた場合に返すものと同じ）。
+pub async fn session(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Json<AuthResponse>, ApiError> {
+    authorize_migration_request(&state, id, &headers).await?;
+    Ok(Json(account_auth_response(&state, id).await?))
+}
+
+/// 転入リクエストに紐づくアカウントの JWT とプロフィール。アカウントが未確定なら、
+/// 失敗理由があればそれを、無ければ `ACCOUNT_NOT_READY` を返す。
+async fn account_auth_response(state: &AppState, id: i64) -> Result<AuthResponse, ApiError> {
+    let migration_req = PgAtMigrationRepository::new(state.db.clone())
+        .get(id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    let (Some(user_id), Some(actor_id), Some(email)) = (
+        migration_req.user_id,
+        migration_req.actor_id,
+        migration_req.email.clone(),
+    ) else {
+        if migration_req.status == "failed" {
+            return Err(ApiError::BadGateway("PLC_SUBMIT_FAILED".into()));
+        }
+        return Err(ApiError::Conflict("ACCOUNT_NOT_READY"));
+    };
     let (token, _jti) = state
         .local_auth
         .generate_token(user_id, &email)
         .map_err(|e| {
-            tracing::error!("[migration:submit-plc-token] JWT 生成失敗: {}", e);
+            tracing::error!("[migration] JWT 生成失敗: {}", e);
             ApiError::Internal("トークン生成エラー".to_string())
         })?;
-
-    Ok(Json(AuthResponse {
+    let migration_status = (migration_req.status != "completed").then_some(migration_req.status);
+    Ok(AuthResponse {
         token: token.clone(),
         user: UserInfo {
             id: user_id,
@@ -342,18 +376,10 @@ pub async fn submit_plc_token(
             language_preference: None,
             token,
             is_suspended: false,
-            // このレスポンスを返す時点でステータスは必ず`importing_data`
-            // （直前の`confirm_account_created`が確定させる値）。
-            migration_status: Some("importing_data".to_string()),
+            migration_status,
             did_moved_out: false, // 転入直後はDID転出済みであり得ない
         },
-    }))
-}
-
-/// 転入後にseiranが保持するDIDの鍵（PEM）。
-struct MigrationKeys {
-    signing_key_pem: String,
-    rotation_key_pem: String,
+    })
 }
 
 /// 新しい鍵ペア（PEM, did:key）を生成する。
@@ -370,13 +396,13 @@ fn generate_did_key(label: &str) -> Result<(String, String), ApiError> {
     Ok((pem, did_key))
 }
 
-/// PDS A に PLC 操作へ署名させ（`signPlcOperation`）、DID の鍵・ハンドル・PDS を seiran へ
-/// 向け替える操作を提出する（`submitPlcOperation`）。提出後ただちに鍵を DB へ記録する。
-async fn submit_plc_operation_to_seiran(
+/// PDS A に、DID の鍵・ハンドル・PDS を seiran へ向け替える PLC 操作へ署名させ
+/// （`signPlcOperation`）、署名済みの操作と新しい鍵を保存して `awaiting_dns_txt` にする。
+async fn stage_plc_operation(
     state: &AppState,
     migration_req: &AtMigrationRequestRow,
     plc_token: &str,
-) -> Result<MigrationKeys, ApiError> {
+) -> Result<(), ApiError> {
     let id = migration_req.id;
     let session = seiran_common::atp::migration_client::AtpSession {
         did: migration_req.source_did.clone(),
@@ -410,8 +436,6 @@ async fn submit_plc_operation_to_seiran(
     let atp_username = seiran_common::username::to_atp_username(&migration_req.new_username);
     let handle = format!("{}.{}", atp_username, state.local_domain);
     let pds_endpoint = format!("https://{}", state.local_domain);
-    set_handle_txt_best_effort(state, &handle, &migration_req.source_did).await;
-
     let desired = seiran_common::atp::migration_client::DesiredDidCredentials {
         rotation_keys: vec![new_rotation_did_key],
         also_known_as: vec![format!("at://{}", handle)],
@@ -434,168 +458,45 @@ async fn submit_plc_operation_to_seiran(
         ApiError::BadGateway("PLC_SIGN_FAILED".into())
     })?;
 
-    // ─────────────────────────────────────────────────────────────
-    // ★不可逆境界: ここから先、DIDのservice endpointはseiranを指すようになる。
-    // ─────────────────────────────────────────────────────────────
-    seiran_common::atp::migration_client::submit_plc_operation(
-        &migration_req.source_did,
+    let staged = seiran_common::repository::at_migration::stage_plc_operation(
+        &state.db,
+        id,
         &operation,
-        &state.http_client,
+        &new_signing_key_pem,
+        &new_rotation_key_pem,
     )
     .await
-    .map_err(|e| {
-        tracing::error!(
-            "[migration:submit-plc-token] submitPlcOperation失敗 (request_id={}): {}",
-            id,
-            e
-        );
-        ApiError::Internal("PLC_SUBMIT_FAILED".into())
-    })?;
-
-    // 不可逆操作は完了した。以降のアカウント作成が失敗してもこの事実を必ず残す
-    // （このUPDATE自体が失敗した場合は仕方なくエラーを返すが、実際のPLC状態と
-    // DBの食い違いが起きるのはこの一箇所だけに限定される）。
-    let repo = PgAtMigrationRepository::new(state.db.clone());
-    repo.mark_plc_submitted(id, &new_signing_key_pem, &new_rotation_key_pem, chrono::Utc::now())
-        .await
-        .map_err(|e| {
-            tracing::error!(
-                "[migration:submit-plc-token] mark_plc_submitted失敗（PLCは提出済み！） (request_id={}): {}",
-                id, e
-            );
-            ApiError::Internal(format!(
-                "PLC提出は成功しましたが記録に失敗しました。手動確認が必要です: {e}"
-            ))
-        })?;
-
-    Ok(MigrationKeys {
-        signing_key_pem: new_signing_key_pem,
-        rotation_key_pem: new_rotation_key_pem,
-    })
-}
-
-/// Cloudflare TXTセット（ベストエフォート、plc_genesis::register_plc_didと同じ扱い）。
-/// Cloudflare未設定の環境（このdev環境含む）では何もせず、ハンドル検証は
-/// `/.well-known/atproto-did`（seiranが常時実装済み）に一本化される。
-async fn set_handle_txt_best_effort(state: &AppState, handle: &str, did: &str) {
-    let Some(cf) = state.cloudflare().await else {
-        return;
-    };
-    match cf.set_atproto_txt(handle, did).await {
-        Ok(_record_id) => tracing::info!(
-            "[migration:submit-plc-token] Cloudflare TXT セット完了: _atproto.{}",
-            handle
-        ),
-        Err(e) => tracing::error!(
-            "[migration:submit-plc-token] Cloudflare TXT セット失敗（続行）: {}",
-            e
-        ),
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !staged {
+        return Err(ApiError::BadRequest("INVALID_STATE".into()));
     }
+    Ok(())
 }
 
 /// 転入したアカウントの `users`/`actors` 行を確定し、（user_id, actor_id）を返す。
-async fn materialize_local_account(
+async fn materialize_account(
     state: &AppState,
     migration_req: &AtMigrationRequestRow,
-    email: &str,
-    keys: &MigrationKeys,
+    signing_key_pem: &str,
+    rotation_key_pem: &str,
 ) -> Result<(i64, i64), ApiError> {
-    // 転入元DIDが既にseiranの`actors`にリモートキャッシュ行として存在することがある
-    // （firehose購読やプロフィール参照で自然に発生、`start`時点の重複チェックは
-    // `actor_type='local'`のみ対象にしているため素通りする）。
-    // 存在すればローカル用に変換（UPDATE）、無ければ新規作成（INSERT）する。
-    let existing_actor_id = state
-        .actors
-        .find_by_did(&migration_req.source_did)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .map(|a| a.id);
-
-    let existing_user_id = state
-        .users
-        .find_id_by_email(email)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    let user_id = if let Some(uid) = existing_user_id {
-        uid
-    } else {
-        seiran_common::repository::insert_local_user(
-            &state.db,
-            email,
-            &migration_req.password_hash,
-            "user",
-            migration_req.agreed_tos_text.as_deref(),
-        )
-        .await
-        .map_err(|e| {
-            tracing::error!("[migration:submit-plc-token] users INSERT 失敗: {}", e);
-            ApiError::Internal("ユーザー作成エラー".to_string())
-        })?
-    };
-
-    let actor_id = if let Some(existing_id) = existing_actor_id {
-        convert_remote_actor_to_local(state, existing_id, user_id, migration_req, keys).await?;
-        existing_id
-    } else {
-        let new_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
-        state
-            .actors
-            .insert_local(
-                user_id,
-                &seiran_common::repository::NewLocalActor {
-                    id: new_id,
-                    username: &migration_req.new_username,
-                    domain: &state.local_domain,
-                    at_did: Some(&migration_req.source_did),
-                    at_signing_key_pem: Some(&keys.signing_key_pem),
-                    at_rotation_key_pem: Some(&keys.rotation_key_pem),
-                    birth_date: None,
-                },
-            )
-            .await
-            .map_err(|e| {
-                tracing::error!("[migration:submit-plc-token] actors INSERT 失敗: {}", e);
-                ApiError::Internal("アクター作成エラー".to_string())
-            })?;
-        new_id
-    };
-    Ok((user_id, actor_id))
-}
-
-/// firehose 等で作られていた転入元DIDのリモートキャッシュ行をローカルアクターへ変換する。
-async fn convert_remote_actor_to_local(
-    state: &AppState,
-    existing_id: i64,
-    user_id: i64,
-    migration_req: &AtMigrationRequestRow,
-    keys: &MigrationKeys,
-) -> Result<(), ApiError> {
-    let ap_uri = format!(
-        "https://{}/users/{}",
-        state.local_domain, migration_req.new_username
-    );
-    seiran_common::repository::actor::convert_remote_to_local(
+    let email = migration_req
+        .email
+        .as_deref()
+        .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
+    seiran_common::did_provision::migration::materialize_local_account(
         &state.db,
-        &seiran_common::repository::actor::ConvertToLocal {
-            actor_id: existing_id,
-            user_id,
-            username: &migration_req.new_username,
-            domain: state.local_domain.as_str(),
-            ap_uri: &ap_uri,
-            signing_key_pem: &keys.signing_key_pem,
-            rotation_key_pem: &keys.rotation_key_pem,
-        },
+        &state.local_domain,
+        migration_req,
+        email,
+        signing_key_pem,
+        rotation_key_pem,
     )
     .await
     .map_err(|e| {
-        tracing::error!(
-            "[migration:submit-plc-token] actors UPDATE（リモート→ローカル変換）失敗: {}",
-            e
-        );
-        ApiError::Internal("アクター変換エラー".to_string())
-    })?;
-    Ok(())
+        tracing::error!("[migration:submit-plc-token] アカウント作成失敗: {}", e);
+        ApiError::Internal("アカウント作成エラー".to_string())
+    })
 }
 
 #[derive(Serialize)]
@@ -623,11 +524,16 @@ fn needs_input_for(status: &str) -> Option<&'static str> {
     }
 }
 
-/// ジョブが裏で動くステータス（`/retry`で再enqueueできる対象）。
+/// 裏で進むステータス（`/retry`で再enqueueできる対象。`awaiting_dns_txt`はジョブではなく
+/// `did_provision`の定時処理が進め、`/retry`はその場で進め直す）。
 fn is_job_driven_status(status: &str) -> bool {
     matches!(
         status,
-        "fetching_repo" | "requesting_plc_signature" | "importing_data" | "deactivating_source"
+        "fetching_repo"
+            | "requesting_plc_signature"
+            | "awaiting_dns_txt"
+            | "importing_data"
+            | "deactivating_source"
     )
 }
 
@@ -636,7 +542,16 @@ pub async fn get_status(
     Path(id): Path<i64>,
     headers: HeaderMap,
 ) -> Result<Json<MigrationStatusResponse>, ApiError> {
-    let migration_req = authorize_migration_request(&state, id, &headers).await?;
+    let mut migration_req = authorize_migration_request(&state, id, &headers).await?;
+    // DNS TXT の公開待ちなら、ポーリングのついでに1段進める（定時処理の間隔を待たない）。
+    if migration_req.status == "awaiting_dns_txt" {
+        state.did_provisioner.advance_migration(id).await;
+        migration_req = PgAtMigrationRepository::new(state.db.clone())
+            .get(id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    }
 
     let import_progress = if migration_req.status == "importing_data" {
         let repo = PgAtMigrationRepository::new(state.db.clone());
@@ -656,6 +571,7 @@ pub async fn get_status(
         needs_input: needs_input_for(&migration_req.status),
         retryable: is_job_driven_status(&migration_req.status),
         can_abandon: migration_req.plc_submitted_at.is_none()
+            && migration_req.status != "submitting_plc"
             && migration_req.status != "completed"
             && migration_req.status != "abandoned",
         import_done: import_progress.map(|(done, _)| done),
@@ -684,6 +600,14 @@ pub async fn retry(
             state.enqueue_migration_request_plc_signature(id).await;
             Ok(Json(MigrationStatusStub {
                 status: "requesting_plc_signature",
+            }))
+        }
+        "awaiting_dns_txt" => {
+            if state.did_provisioner.advance_migration(id).await {
+                state.did_provisioner.kick_migration(id);
+            }
+            Ok(Json(MigrationStatusStub {
+                status: "awaiting_dns_txt",
             }))
         }
         "importing_data" => {
@@ -716,10 +640,20 @@ pub async fn abandon(
             "CANNOT_ABANDON_AFTER_PLC_SUBMIT".into(),
         ));
     }
-    let repo = PgAtMigrationRepository::new(state.db.clone());
-    repo.set_status(id, "abandoned", chrono::Utc::now())
+    // PLC 送信中（`submitting_plc`）は打ち切れない。状態が読んだ時点から変わっていたら
+    // （`awaiting_dns_txt` から PLC 送信が始まった等）打ち切らない。
+    if migration_req.status == "submitting_plc"
+        || !seiran_common::repository::at_migration::transition_status(
+            &state.db,
+            id,
+            &migration_req.status,
+            "abandoned",
+        )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        return Err(ApiError::Conflict("CANNOT_ABANDON_NOW"));
+    }
     Ok(Json(MigrationStatusStub {
         status: "abandoned",
     }))

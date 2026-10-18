@@ -20,10 +20,11 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use seiran_common::atp::AtpCommitService;
+use seiran_common::did_provision::DidProvisioner;
 use seiran_common::repository::{
     InstanceDomainRepository, PgActorRepository, PgBlockRepository, PgFollowRepository,
     PgHashtagRepository, PgInstanceDomainRepository, PgListRepository, PgNotificationRepository,
-    PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository,
+    PgPostRepository, PgReactionRepository, PgRemoteEmojiRepository, PgSiteSettingsRepository,
 };
 use seiran_common::{
     ap::ApClient, db::recommended_max_connections, get_db_pool, resolve_local_domain,
@@ -291,11 +292,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     match role {
         Role::Firehose => {
+            let did_provisioner = build_did_provisioner(&shared);
             seiran_atp_repo::run(
                 shared.pool,
                 shared.http_client,
                 shared.messaging.stream_hub,
                 shared.messaging.job_queue,
+                did_provisioner,
                 shutdown,
             )
             .await;
@@ -335,6 +338,25 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!("[seiran-server] 終了します。");
     Ok(())
+}
+
+/// firehose ロール単独で動かす DID 発行の定時処理（api ロールと同じ設定を DB から読む）。
+fn build_did_provisioner(shared: &SharedResources) -> Arc<DidProvisioner> {
+    let atp_service = Arc::new(AtpCommitService::new(
+        shared.pool.clone(),
+        Arc::clone(&shared.messaging.atp_events),
+        Arc::clone(&shared.http_client),
+        shared.local_domain.clone(),
+    ));
+    Arc::new(DidProvisioner {
+        pool: shared.pool.clone(),
+        http: Arc::clone(&shared.http_client),
+        atp_service,
+        site_settings: Arc::new(PgSiteSettingsRepository::new(shared.pool.clone())),
+        local_domain: shared.local_domain.clone(),
+        server_rotation_key_pem: shared.secrets.atproto_private_key_pem.clone(),
+        job_queue: Arc::clone(&shared.messaging.job_queue),
+    })
 }
 
 /// worker 以外のロールで共有するプロセス内リソース。
@@ -445,6 +467,7 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
         Arc::clone(&http_client),
         Arc::clone(&api_state.stream_hub),
         Arc::clone(&job_queue),
+        Arc::clone(&api_state.did_provisioner),
         shutdown.clone(),
     ));
 

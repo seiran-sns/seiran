@@ -76,11 +76,11 @@ LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、�
 - **All**（`run_all`）: DB・シークレット・HTTP クライアント・`Messaging` を1回だけ作り、`seiran_api::router().merge(seiran_federation_inbox::router())` を1ポートで待ち受ける。firehose と worker は同じプロセスの `tokio::spawn`。合流後のルーターに `tower_http::trace::TraceLayer` を1枚だけ被せ、全リクエストのメソッド・パス・レイテンシ・ステータスを INFO ログへ出す（サードパーティクライアントがどのパスを叩いて 404/401 になっているか事後に追えるようにするため。他にアクセスログが無い）。パスのみ記録し、`/api/streaming?token=...` 等クエリ文字列に含まれうる JWT はログに残さない。
 - **Api / Federation**: 専用ポートで待ち受ける。
 - **Worker**（`run_standalone_worker`）: HTTP を持たずジョブを消費する。
-- **Firehose**: Jetstream 購読と Bsky のポーリングだけを動かす。
+- **Firehose**: Jetstream 購読・Bsky のポーリング・新規アカウントの DID 発行の定時処理だけを動かす。
 
 **プロセス間の共有（`Messaging`）**: ジョブキュー・`StreamHub`（WebSocket へのリアルタイム配信）・subscribeRepos のコミットイベントの3つは、`REDIS_URL` があればすべて Redis でプロセス間につなぎ、無ければプロセス内で完結させる。プロセス内で完結するのは `all` を1つだけ動かすときに限られる（split-role では worker が取り込んだ投稿が api の WebSocket に届かず、無停止更新では止める側の未処理ジョブが消える）。`REDIS_URL` を設定したのに繋がらないときは起動しない（黙ってプロセス内に切り替えると上の取りこぼしが起きるため）。配信は `event_bus::EventBus`: 送信を1本のタスクに通して Redis の Pub/Sub へ流し（同じプロセスから出たイベントの順序を保つ）、各プロセス（自分を含む）が購読して手元の購読者へ配る。Redis への送信に失敗したイベントは手元の購読者にだけ配る。
 
-**常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリングは、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。
+**常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリング・新規アカウントの DID 発行（「DNS TXT 登録完了待ち」の進行、`docs/protocols.md` 3節）は、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。
 
 **停止（graceful shutdown）**: SIGTERM（`docker stop`）か SIGINT を受けると `Messaging::shutdown` を発火し、各部分が手持ちの処理を終えてから止まる。
 - HTTP: 新しい接続の受け付けを止め、処理中のリクエストが終わるのを待つ（`with_graceful_shutdown`）。WebSocket（Misskey 互換・Mastodon 互換のストリーミング、subscribeRepos）はハンドラが Close（1012 Service Restart）を送って閉じる。クライアントとリレーは再接続し、新しいプロセスにつながる。

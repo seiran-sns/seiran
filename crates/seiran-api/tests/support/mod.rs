@@ -110,6 +110,7 @@ async fn ensure_test_user(pool: &sqlx::PgPool, username: &str) {
             birth_date: None,
         },
         None,
+        None,
     )
     .await;
     // 並列実行された別テストが同時に作成した場合の一意制約違反は無視する。
@@ -247,6 +248,7 @@ pub async fn create_fixture_local_actor(pool: &sqlx::PgPool, prefix: &str) -> i6
             at_rotation_key_pem: None,
             birth_date: None,
         },
+        None,
         None,
     )
     .await

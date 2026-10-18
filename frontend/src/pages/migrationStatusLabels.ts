@@ -7,6 +7,7 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   fetching_repo: "auth:migrationStatus.step.fetchingRepo",
   requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",
   awaiting_plc_token: "auth:migrationStatus.step.awaitingPlcToken",
+  awaiting_dns_txt: "auth:migrationStatus.step.awaitingDnsTxt",
   submitting_plc: "auth:migrationStatus.step.submittingPlc",
   importing_data: "auth:migrationStatus.step.importingData",
   deactivating_source: "auth:migrationStatus.step.deactivatingSource",

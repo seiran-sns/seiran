@@ -16,6 +16,7 @@ pub async fn create_local_account(
     password_hash: &str,
     role: &str,
     actor: &crate::repository::actor::NewLocalActor<'_>,
+    pending_did: Option<&crate::repository::did_provision::NewPendingDid<'_>>,
     agreed_tos_text: Option<&str>,
 ) -> Result<i64, sqlx::Error> {
     let mut tx = pool.begin().await?;
@@ -30,6 +31,9 @@ pub async fn create_local_account(
     .fetch_one(&mut *tx)
     .await?;
     crate::repository::actor::insert_local_actor_row(&mut tx, user_id, actor).await?;
+    if let Some(p) = pending_did {
+        crate::repository::did_provision::insert_pending_row(&mut tx, actor.id, p).await?;
+    }
     if let Some(text) = agreed_tos_text {
         crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
     }

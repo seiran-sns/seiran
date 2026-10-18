@@ -458,6 +458,9 @@ export interface UserProfile {
   at_did?: string;
   /** AT Protocolハンドル（`user.pds-domain`形式）。`remote_seiran`のBsky ID行表示に使う。 */
   at_handle?: string;
+  /** ローカルユーザーの Bluesky 側の状態。`active`=DID確定済み、`pending_dns`=DNS TXT登録完了待ち、
+   * `none`=DIDを作らない（シングルホストモード）。ローカル以外は省略。 */
+  did_status?: "active" | "pending_dns" | "none";
   bio?: string;
   /** 自己紹介文中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#169）。未指定/空なら絵文字化しない。 */
   emojis?: Record<string, string>;

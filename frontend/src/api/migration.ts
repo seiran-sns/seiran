@@ -45,6 +45,14 @@ interface SimpleStatus {
   status: string;
 }
 
+/** `submit-plc-token` の応答。その場でアカウントまで確定できたら JWT、DNS TXT の公開待ちが
+ * 残ったら `{ status: "awaiting_dns_txt" }`（`/status` をポーリングし、確定後に `session` で JWT を得る）。 */
+export type SubmitPlcTokenResponse = AuthResponse | { status: "awaiting_dns_txt" };
+
+export function isAuthResponse(res: SubmitPlcTokenResponse): res is AuthResponse {
+  return "token" in res;
+}
+
 async function migrationRequest<T>(
   method: string,
   path: string,
@@ -70,9 +78,16 @@ export const migration = {
     return migrationRequest<MigrationStartResponse>("POST", "/migration/start", undefined, params);
   },
   submitPlcToken(id: string, requestToken: string, plcToken: string) {
-    return migrationRequest<AuthResponse>("POST", `/migration/${id}/submit-plc-token`, requestToken, {
-      token: plcToken,
-    });
+    return migrationRequest<SubmitPlcTokenResponse>(
+      "POST",
+      `/migration/${id}/submit-plc-token`,
+      requestToken,
+      { token: plcToken },
+    );
+  },
+  /** 転入で作られたアカウントの JWT（DNS TXT の公開待ちが明けた後に使う）。 */
+  session(id: string, requestToken: string) {
+    return migrationRequest<AuthResponse>("POST", `/migration/${id}/session`, requestToken);
   },
   status(id: string, requestToken: string) {
     return migrationRequest<MigrationStatusResponse>("GET", `/migration/${id}/status`, requestToken);

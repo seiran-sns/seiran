@@ -25,6 +25,7 @@ pub mod auth_rate_limit;
 pub mod block;
 pub mod bookmark;
 pub mod bsky_ingest;
+pub mod did_provision;
 pub mod dm;
 pub mod email_change;
 pub mod email_short_code;

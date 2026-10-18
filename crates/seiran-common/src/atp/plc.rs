@@ -128,6 +128,13 @@ pub struct PlcGenesis {
     signed_op: GenesisOpSigned,
 }
 
+impl PlcGenesis {
+    /// 後で `submit_plc_genesis_op` に渡すために保存する署名済み genesis op。
+    pub fn signed_op_json(&self) -> Result<serde_json::Value, PlcError> {
+        serde_json::to_value(&self.signed_op).map_err(|e| PlcError::Cbor(e.to_string()))
+    }
+}
+
 /// DID を確定させ genesis op を準備する（ネットワーク通信なし）。
 /// plc.directory への送信は `submit_plc_genesis` で別途行う。
 ///
@@ -242,10 +249,19 @@ pub async fn submit_plc_genesis(
     genesis: &PlcGenesis,
     client: &reqwest::Client,
 ) -> Result<(), PlcError> {
-    let url = format!("{}/{}", plc_directory_base_url(), genesis.did);
+    submit_plc_genesis_op(&genesis.did, &genesis.signed_op_json()?, client).await
+}
+
+/// 保存しておいた署名済み genesis op（`PlcGenesis::signed_op_json`）を plc.directory に送信する。
+pub async fn submit_plc_genesis_op(
+    did: &str,
+    signed_op: &serde_json::Value,
+    client: &reqwest::Client,
+) -> Result<(), PlcError> {
+    let url = format!("{}/{}", plc_directory_base_url(), did);
     let res = client
         .post(&url)
-        .json(&genesis.signed_op)
+        .json(signed_op)
         .send()
         .await
         .map_err(|e| PlcError::Http(e.to_string()))?;
@@ -257,6 +273,25 @@ pub async fn submit_plc_genesis(
     }
 
     Ok(())
+}
+
+/// plc.directory に DID が登録済みか。送信後の確定前にプロセスが止まった行を再処理するとき、
+/// 同じ genesis op を二重に送らないために使う。
+pub async fn plc_did_exists(did: &str, client: &reqwest::Client) -> Result<bool, PlcError> {
+    let url = format!("{}/{}", plc_directory_base_url(), did);
+    let res = client
+        .get(&url)
+        .send()
+        .await
+        .map_err(|e| PlcError::Http(e.to_string()))?;
+    match res.status().as_u16() {
+        200 | 410 => Ok(true),
+        404 => Ok(false),
+        status => Err(PlcError::PlcDirectory {
+            status,
+            body: res.text().await.unwrap_or_default(),
+        }),
+    }
 }
 
 /// 現在のDIDドキュメント全体（`/{did}/data`）と直前オペレーションのCID（`/{did}/log/audit`

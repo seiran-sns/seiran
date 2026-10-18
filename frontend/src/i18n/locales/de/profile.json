@@ -4,6 +4,8 @@
     "pairedBadge": "Seelengebunden",
     "pairedBadgeTitle": "Über Seelenbindung mit einem entfernten Seiran-Benutzer verbunden",
     "suspendedBadge": "Gesperrt",
+    "blueskyPreparingBadge": "Bluesky ausstehend",
+    "blueskyPreparingTitle": "Warten auf die Veröffentlichung des Bluesky-Handles (DNS-TXT-Eintrag). Danach ist das Konto auf Bluesky sichtbar",
     "editProfileButton": "Profil bearbeiten",
     "followingBadge": "Nachfolgend",
     "unfollowingButton": "Nicht mehr folgen...",

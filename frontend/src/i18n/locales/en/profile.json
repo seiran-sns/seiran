@@ -4,6 +4,8 @@
     "pairedBadge": "Soul-bound",
     "pairedBadgeTitle": "Linked with a remote seiran user via soul-binding",
     "suspendedBadge": "Suspended",
+    "blueskyPreparingBadge": "Bluesky pending",
+    "blueskyPreparingTitle": "Waiting for the Bluesky handle (DNS TXT record) to be published. The account becomes visible on Bluesky once it is",
     "editProfileButton": "Edit profile",
     "followingBadge": "Following",
     "unfollowingButton": "Unfollowing...",

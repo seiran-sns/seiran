@@ -363,10 +363,24 @@ export default function ProfilePage() {
                     </span>
                   )}
                 </span>
-                <span className={styles.acct}>
-                  <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
-                  @{profile.username}.{profile.domain}
-                </span>
+                {/* DID を作らない（シングルホストモード）なら Bluesky 側の ID は存在しないので出さない。
+                    DNS TXT 登録完了待ちの間は、まだ Bluesky から見えないことを薄い表示とバッジで示す。 */}
+                {profile.did_status !== "none" && (
+                  <span
+                    className={`${styles.acct} ${profile.did_status === "pending_dns" ? styles.acctPreparing : ""}`}
+                  >
+                    <img src={blueskyLogo} alt="" className={styles.acctProtoIcon} />
+                    @{profile.username}.{profile.domain}
+                    {profile.did_status === "pending_dns" && (
+                      <span
+                        className={styles.preparingBadge}
+                        title={t("profile:profilePage.blueskyPreparingTitle")}
+                      >
+                        {t("profile:profilePage.blueskyPreparingBadge")}
+                      </span>
+                    )}
+                  </span>
+                )}
               </>
             ) : profile.actor_type === "remote_seiran" ? (
               <>

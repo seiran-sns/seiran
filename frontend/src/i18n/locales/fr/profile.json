@@ -4,6 +4,8 @@
     "pairedBadge": "Lié à l'âme",
     "pairedBadgeTitle": "Lié à un utilisateur de Seiran distant via un lien d'âme",
     "suspendedBadge": "Suspendu",
+    "blueskyPreparingBadge": "Bluesky en attente",
+    "blueskyPreparingTitle": "En attente de la publication de l'identifiant Bluesky (enregistrement DNS TXT). Le compte sera visible sur Bluesky une fois publié",
     "editProfileButton": "Modifier le profil",
     "followingBadge": "Suivant",
     "unfollowingButton": "Ne plus suivre...",

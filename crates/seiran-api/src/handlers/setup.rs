@@ -117,10 +117,13 @@ pub async fn setup(
         ApiError::Internal("パスワード処理エラー".to_string())
     })?;
 
-    // ドメインを確定できた場合のみ PLC genesis を行う（`provision_plc_did`は確定済みの
+    // ドメインを確定できた場合のみ DID を作る（`prepare_did`は確定済みの
     // `state.local_domain`を見る。`try_confirm_domain`は確定時にそれを更新する）。
     try_confirm_domain(&state, &headers, req.domain_candidate.as_deref()).await?;
-    let did = crate::handlers::auth::provision_plc_did(&state, &req.username, "setup").await?;
+    let did = crate::handlers::auth::prepare_did(&state, &req.username, "setup")?;
+    let pending_did = did
+        .as_ref()
+        .map(seiran_common::did_provision::PreparedDid::as_new_pending);
 
     let actor_id = generate_snowflake_id(chrono::Utc::now());
     let user_id = seiran_common::repository::create_local_account(
@@ -132,25 +135,19 @@ pub async fn setup(
             id: actor_id,
             username: &req.username,
             domain: &state.local_domain,
-            at_did: did.at_did.as_deref(),
-            at_signing_key_pem: did.at_signing_key_pem.as_deref(),
-            at_rotation_key_pem: did.at_rotation_key_pem.as_deref(),
+            at_did: None,
+            at_signing_key_pem: None,
+            at_rotation_key_pem: None,
             birth_date: None,
         },
+        pending_did.as_ref(),
         None, // セットアップ画面の初回管理者作成に利用規約同意は不要
     )
     .await
     .map_err(|e| crate::handlers::auth::account_creation_error(e, "setup"))?;
 
-    if let Some(at_did) = did.at_did.as_deref() {
-        crate::handlers::auth::publish_initial_atp_records(
-            &state,
-            actor_id,
-            &req.username,
-            at_did,
-            "setup",
-        )
-        .await;
+    if did.is_some() && state.did_provisioner.advance(actor_id).await {
+        state.did_provisioner.kick(actor_id);
     }
 
     let (token, _jti) = state

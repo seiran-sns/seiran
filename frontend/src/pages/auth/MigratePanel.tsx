@@ -2,7 +2,7 @@ import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ApiError } from "../../api/client";
-import type { MigrationStatusResponse } from "../../api/migration";
+import { isAuthResponse, type MigrationStatusResponse } from "../../api/migration";
 import { useAuth } from "../../contexts/AuthContext";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
 import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
@@ -15,6 +15,9 @@ import {
 } from "../migrationStorage";
 import { migrationStepLabel } from "../migrationStatusLabels";
 import styles from "../Auth.module.css";
+
+/** アカウント（`users`/`actors`）が作られた後の転入の状態。 */
+const ACCOUNT_CREATED_STATUSES = ["importing_data", "deactivating_source", "completed"];
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
 export interface MigratePanelState {
@@ -270,6 +273,28 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     };
   }, [statusData, fetchStatus]);
 
+  // この画面で DNS TXT の公開待ちを見ていて、それが裏で明けてアカウントが作られたら、
+  // 転入トークンで JWT を受け取ってログイン後の画面へ移る（待ちを見ていない場合に限るのは、
+  // ログアウトした人が転入画面を開いただけで再ログインされないようにするため）。
+  const sawDnsWait = useRef(false);
+  useEffect(() => {
+    if (!statusData) return;
+    if (statusData.status === "awaiting_dns_txt") sawDnsWait.current = true;
+    if (!sawDnsWait.current || !ACCOUNT_CREATED_STATUSES.includes(statusData.status)) return;
+    let cancelled = false;
+    api.migration
+      .session(stored.id, stored.token)
+      .then((res) => {
+        if (cancelled) return;
+        login(res.token, res.user);
+        navigate("/", { replace: true });
+      })
+      .catch((err) => !cancelled && setError(getErrorMessage(err)));
+    return () => {
+      cancelled = true;
+    };
+  }, [statusData, stored, login, navigate]);
+
   async function handleRetry() {
     setError("");
     setSubmitting(true);
@@ -308,6 +333,11 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     setSubmitting(true);
     try {
       const res = await api.migration.submitPlcToken(stored.id, stored.token, inputValue);
+      if (!isAuthResponse(res)) {
+        // DNS TXT の公開待ち。ポーリングで待ち、アカウントができたら下の effect がログインする。
+        await fetchStatus();
+        return;
+      }
       // localStorageのmigration_token/idはここではクリアしない——`importing_data`以降は
       // `MigrationImportingPage`（ログイン後専用画面）が同じ`/api/migration/:id/status`を
       // 引き続きポーリングして進捗表示に使うため、完了検知した時点でそちらがクリアする。

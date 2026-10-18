@@ -31,6 +31,13 @@
   word-break: break-all;
 }
 
+.identityHint {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  margin: 4px 0 0;
+  line-height: 1.5;
+}
+
 .label {
   display: flex;
   flex-direction: column;
