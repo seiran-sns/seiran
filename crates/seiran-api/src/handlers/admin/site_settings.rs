@@ -48,6 +48,9 @@ pub struct SiteSettingsResponse {
     // Cloudflare Turnstile（#223）: secret_key はレスポンスに含めず設定有無のみ返す
     pub turnstile_site_key: String,
     pub turnstile_secret_key_set: bool,
+    // Cloudflare DNS（ハンドル検証 TXT）: api_token はレスポンスに含めず設定有無のみ返す
+    pub cloudflare_api_token_set: bool,
+    pub cloudflare_zone_id: String,
     // パスワードリセット/確認メールのレート制限（#223）
     pub password_reset_max_active: String,
     // アカウント生成のIPレート制限（#223）
@@ -144,6 +147,14 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("turnstile_secret_key")
             .map(|v| !v.is_empty())
             .unwrap_or(false),
+        cloudflare_api_token_set: settings
+            .get("cloudflare_api_token")
+            .map(|v| !v.is_empty())
+            .unwrap_or(false),
+        cloudflare_zone_id: settings
+            .get("cloudflare_zone_id")
+            .cloned()
+            .unwrap_or_default(),
         password_reset_max_active: settings
             .get("password_reset_max_active")
             .cloned()
@@ -251,6 +262,8 @@ pub struct UpdateSiteSettingsRequest {
     pub auth_ip_block_duration_hours: Option<String>,
     pub turnstile_site_key: Option<String>,
     pub turnstile_secret_key: Option<String>,
+    pub cloudflare_api_token: Option<String>,
+    pub cloudflare_zone_id: Option<String>,
     pub password_reset_max_active: Option<String>,
     pub account_creation_ip_window_minutes: Option<String>,
     pub account_creation_ip_max: Option<String>,
@@ -460,6 +473,12 @@ pub async fn update_site_settings(
         req.turnstile_secret_key
             .as_deref()
             .map(|v| ("turnstile_secret_key", v.to_string())),
+        req.cloudflare_api_token
+            .as_deref()
+            .map(|v| ("cloudflare_api_token", v.trim().to_string())),
+        req.cloudflare_zone_id
+            .as_deref()
+            .map(|v| ("cloudflare_zone_id", v.trim().to_string())),
         req.password_reset_max_active
             .as_deref()
             .map(|v| ("password_reset_max_active", v.to_string())),

@@ -123,6 +123,8 @@ export const admin = {
       auth_ip_block_duration_hours: string;
       turnstile_site_key: string;
       turnstile_secret_key: string;
+      cloudflare_api_token: string;
+      cloudflare_zone_id: string;
       password_reset_max_active: string;
       account_creation_ip_window_minutes: string;
       account_creation_ip_max: string;

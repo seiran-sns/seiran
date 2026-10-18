@@ -47,6 +47,9 @@ export default function SiteSettingsPanel() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileSecretKey, setTurnstileSecretKey] = useState("");
   const [turnstileSecretKeySet, setTurnstileSecretKeySet] = useState(false);
+  const [cloudflareApiToken, setCloudflareApiToken] = useState("");
+  const [cloudflareApiTokenSet, setCloudflareApiTokenSet] = useState(false);
+  const [cloudflareZoneId, setCloudflareZoneId] = useState("");
   const [passwordResetMaxActive, setPasswordResetMaxActive] = useState("");
   const [accountCreationIpWindowMinutes, setAccountCreationIpWindowMinutes] = useState("");
   const [accountCreationIpMax, setAccountCreationIpMax] = useState("");
@@ -99,6 +102,8 @@ export default function SiteSettingsPanel() {
         setIpBlockDurationHours(s.auth_ip_block_duration_hours);
         setTurnstileSiteKey(s.turnstile_site_key);
         setTurnstileSecretKeySet(s.turnstile_secret_key_set);
+        setCloudflareApiTokenSet(s.cloudflare_api_token_set);
+        setCloudflareZoneId(s.cloudflare_zone_id);
         setPasswordResetMaxActive(s.password_reset_max_active);
         setAccountCreationIpWindowMinutes(s.account_creation_ip_window_minutes);
         setAccountCreationIpMax(s.account_creation_ip_max);
@@ -189,6 +194,7 @@ export default function SiteSettingsPanel() {
         auth_ip_block_threshold: ipBlockThreshold,
         auth_ip_block_duration_hours: ipBlockDurationHours,
         turnstile_site_key: turnstileSiteKey,
+        cloudflare_zone_id: cloudflareZoneId,
         password_reset_max_active: passwordResetMaxActive,
         account_creation_ip_window_minutes: accountCreationIpWindowMinutes,
         account_creation_ip_max: accountCreationIpMax,
@@ -212,11 +218,14 @@ export default function SiteSettingsPanel() {
       // パスワード/シークレットは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
       if (turnstileSecretKey) patch.turnstile_secret_key = turnstileSecretKey;
+      if (cloudflareApiToken) patch.cloudflare_api_token = cloudflareApiToken;
       const s = await api.admin.updateSiteSettings(patch);
       setPasswordSet(s.smtp_password_set);
       setTurnstileSecretKeySet(s.turnstile_secret_key_set);
+      setCloudflareApiTokenSet(s.cloudflare_api_token_set);
       setPassword("");
       setTurnstileSecretKey("");
+      setCloudflareApiToken("");
       setSaved(true);
     } catch (e) {
       setError(getErrorMessage(e));
@@ -437,6 +446,25 @@ export default function SiteSettingsPanel() {
             />
           </label>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.turnstileHint")}</p>
+        </div>
+
+        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.cloudflareDnsSectionTitle")}</div>
+        <div className={styles.card}>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.cloudflareApiTokenLabel")}
+            <input
+              className={styles.input}
+              type="password"
+              value={cloudflareApiToken}
+              onChange={(e) => setCloudflareApiToken(e.target.value)}
+              placeholder={cloudflareApiTokenSet ? t("admin:siteSettingsPanel.passwordSetPlaceholder") : t("admin:siteSettingsPanel.passwordUnsetPlaceholder")}
+            />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.cloudflareZoneIdLabel")}
+            <input className={styles.input} value={cloudflareZoneId} onChange={(e) => setCloudflareZoneId(e.target.value)} />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.cloudflareDnsHint")}</p>
         </div>
 
         <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.roleRateLimitSectionTitle")}</div>

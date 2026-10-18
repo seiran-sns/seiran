@@ -108,7 +108,6 @@ pub struct AppState {
     pub atp_service: Arc<AtpCommitService>,
     pub http_client: Arc<reqwest::Client>,
     pub ap_client: Arc<ApClient>,
-    pub cloudflare: Option<Arc<cloudflare::CloudflareClient>>,
     pub storage_providers: Arc<dyn StorageProviderRepository>,
     pub media_files: Arc<dyn MediaFileRepository>,
     pub site_settings: Arc<dyn SiteSettingsRepository>,
@@ -163,6 +162,26 @@ pub struct AppState {
 const REMOTE_FOLLOW_SYNC_COOLDOWN: std::time::Duration = std::time::Duration::from_secs(600);
 
 impl AppState {
+    /// 管理画面設定（`cloudflare_api_token` / `cloudflare_zone_id`）から Cloudflare DNS クライアントを作る。
+    /// 設定の変更を再起動なしで反映するため、呼び出しごとに読む。どちらかが空なら `None`
+    /// （ハンドル検証は HTTP `/.well-known/atproto-did` のみになる）。
+    pub async fn cloudflare(&self) -> Option<Arc<cloudflare::CloudflareClient>> {
+        let settings = match self.site_settings.get_all().await {
+            Ok(s) => s,
+            Err(e) => {
+                tracing::error!("[cloudflare] 設定の取得に失敗: {}", e);
+                return None;
+            }
+        };
+        let value = |key: &str| settings.get(key).map(|v| v.trim()).filter(|v| !v.is_empty());
+        let (token, zone_id) = (value("cloudflare_api_token")?, value("cloudflare_zone_id")?);
+        Some(Arc::new(cloudflare::CloudflareClient::new(
+            Arc::clone(&self.http_client),
+            token.to_string(),
+            zone_id.to_string(),
+        )))
+    }
+
     /// `seiran_common::follow_exec::execute_follow` に渡す設定を組み立てる。
     /// フォローインポートジョブ（`JobContext::follow_exec`）と全く同じ実処理を
     /// API ハンドラからも呼べるようにするための橋渡し（軽量な Arc クローンのみ）。
@@ -770,24 +789,6 @@ pub async fn init_state(
         local_domain.clone(),
     ));
 
-    let cloudflare = match (
-        std::env::var("CLOUDFLARE_API_TOKEN"),
-        std::env::var("CLOUDFLARE_ZONE_ID"),
-    ) {
-        (Ok(token), Ok(zone_id)) if !token.is_empty() && !zone_id.is_empty() => {
-            tracing::info!("[seiran-api] Cloudflare DNS ハンドル検証: 有効");
-            Some(Arc::new(cloudflare::CloudflareClient::new(
-                Arc::clone(&http_client),
-                token,
-                zone_id,
-            )))
-        }
-        _ => {
-            tracing::info!("[seiran-api] Cloudflare DNS ハンドル検証: 無効 (HTTP well-known のみ)");
-            None
-        }
-    };
-
     let enc_key = secrets.encryption_key_bytes();
     let storage_providers: Arc<dyn StorageProviderRepository> =
         Arc::new(PgStorageProviderRepository::new(pool.clone(), enc_key));
@@ -907,7 +908,6 @@ pub async fn init_state(
         atp_service,
         http_client,
         ap_client,
-        cloudflare,
         storage_providers,
         media_files,
         site_settings,
@@ -1299,7 +1299,7 @@ async fn backfill_unset_avatar_profiles(state: &AppState) {
 
 /// 全ローカルユーザーの ATP ハンドル TXT レコードを確保する（再デプロイ後の消失対策）。
 async fn ensure_handle_txt_records(state: &AppState) {
-    let Some(cf) = state.cloudflare.as_ref() else {
+    let Some(cf) = state.cloudflare().await else {
         return;
     };
     let rows = match state.actors.list_local_dids().await {

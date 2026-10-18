@@ -125,6 +125,8 @@ export interface SiteSettings {
   auth_ip_block_duration_hours: string;
   turnstile_site_key: string;
   turnstile_secret_key_set: boolean;
+  cloudflare_api_token_set: boolean;
+  cloudflare_zone_id: string;
   password_reset_max_active: string;
   account_creation_ip_window_minutes: string;
   account_creation_ip_max: string;

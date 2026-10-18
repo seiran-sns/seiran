@@ -35,10 +35,6 @@ const backendEnv: Record<string, string> = {
   // Relay への requestCrawl が本物の bsky.network に飛ばないよう、存在しないローカル
   // ポートに向けておく（接続失敗はログに出るだけで登録処理自体は継続する）。
   ATP_RELAY_URL: "http://127.0.0.1:1",
-  // Cloudflare DNS 連携はE2Eのスコープ外（docs/architecture.md 9章）。空文字なら
-  // 無効化される（crates/seiran-api/src/lib.rs のCloudflareClient初期化条件）。
-  CLOUDFLARE_API_TOKEN: "",
-  CLOUDFLARE_ZONE_ID: "",
   REDIS_URL: "",
   // 連合用HTTPクライアントのSSRF防御（内部IP拒否、`seiran_common::net::federation_client_builder`）
   // を無効化する。E2Eのスタブ Fedi サーバー等は 127.0.0.1 で待ち受けるため。

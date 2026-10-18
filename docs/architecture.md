@@ -334,7 +334,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 
 **E2E**（`e2e/`、`cd e2e && npm test`）: 外部の実サービス（Fedi/Bsky・PLC・Relay）とは通信せず、相手をすべてローカルのスタブに置き換える。ポートは開発サーバーと別（バックエンド3100・フロント5273、`e2e/ports.ts`）なので、開発サーバーを止めなくてよい。
 
-- `playwright.config.ts` の `webServer` がスタブ PLC・スタブ AppView・スタブ Fedi・バックエンド・フロントを起動する。バックエンドには `PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL` をスタブへ、`ATP_RELAY_URL` を存在しないポートへ、`CLOUDFLARE_*` を空に、`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（スタブが 127.0.0.1 のため）を渡す。
+- `playwright.config.ts` の `webServer` がスタブ PLC・スタブ AppView・スタブ Fedi・バックエンド・フロントを起動する。バックエンドには `PLC_DIRECTORY_BASE_URL`/`ATP_APPVIEW_URL` をスタブへ、`ATP_RELAY_URL` を存在しないポートへ、`SEIRAN_ALLOW_PRIVATE_NETWORK=true`（スタブが 127.0.0.1 のため）を渡す。
   - 全 `webServer` の `reuseExistingServer` は `false` 固定（変更禁止）。`true` だとポートが空いていない場合に既存のサーバーへ相乗りし、実開発DBへのテストデータ混入や本物の plc.directory への誤登録を起こす。
   - Playwright は「webServer 起動 → globalSetup」の順なので、E2E 用 Postgres（`e2e/docker-compose.yml`、5433）の起動待ちはバックエンドの `command` の前段（`scripts/wait-for-db.ts`）に入れている。`global-setup.ts` は起動済みのバックエンドで初期管理者を作る（`users` が空だとフロントは常にセットアップ画面を出すため）。`globalTeardown` が DB を `down -v` で捨てる。
   - project は3つ（`workers` は CI 3・ローカル4）。大半は `main`。`storage_providers` に触れる spec（スタブ S3 の登録が競合する）は `storage-serial`（project 内 `workers: 1`、`main` と並行）、`site_settings` やスタブのグローバル状態に触れる spec は `globals-serial`（`main`・`storage-serial` の後に排他で実行）。
@@ -358,7 +358,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 | 本番・単騎運用 | `SEIRAN_VERSION`（動かす版）、`SEIRAN_IMAGE`（既定 `seiranorg/seiran`）。3.1節 |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWT secret 等は `secrets.toml` で自動生成する |
 | DBバックアップ | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_DEFAULT_REGION`/`S3_ENDPOINT`（R2 の API トークン）、`BACKUP_OBJECT_S3URL`（`s3://<bucket>/<prefix>`）。`cron` サービスと `scripts/backup-db.sh` が `.env` から読む |
-| 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel）、`CLOUDFLARE_API_TOKEN`/`CLOUDFLARE_ZONE_ID`（ハンドル検証の TXT 自動作成。未設定なら `.well-known` 方式のみ）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |
+| 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel。ハンドル検証 TXT 用の Cloudflare DNS トークン/Zone ID は環境変数ではなく管理画面設定 `site_settings`）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |
 | 開発・一回限り | `WEBAUTHN_ORIGIN`（ローカル/E2E のパスキー origin）、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE`、`BSKY_FOLLOWER_POLL_INTERVAL_SECS` |
 | SMTP | 環境変数ではなく `site_settings`（管理 API）で設定する |
 

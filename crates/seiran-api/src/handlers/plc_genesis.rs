@@ -23,6 +23,7 @@ pub async fn register_plc_did(
     rotation_key: &SigningKey,
     log_prefix: &str,
 ) -> Result<PlcGenesisResult, ApiError> {
+    let cloudflare = state.cloudflare().await;
     let mut prev_cf_id: Option<String> = None;
     let mut attempt = 0u8;
 
@@ -30,7 +31,7 @@ pub async fn register_plc_did(
         attempt += 1;
 
         // リトライ時: 前回の TXT を削除してから新しい genesis を使う
-        if let (Some(cf), Some(old_id)) = (&state.cloudflare, prev_cf_id.take()) {
+        if let (Some(cf), Some(old_id)) = (&cloudflare, prev_cf_id.take()) {
             let _ = cf.delete_txt_record(&old_id).await;
         }
 
@@ -53,7 +54,7 @@ pub async fn register_plc_did(
         };
 
         // 2. Cloudflare TXT セット（plc.directory 送信より先に配置）
-        let new_cf_id = if let Some(cf) = &state.cloudflare {
+        let new_cf_id = if let Some(cf) = &cloudflare {
             let handle = format!(
                 "{}.{}",
                 seiran_common::username::to_atp_username(username),
@@ -100,7 +101,7 @@ pub async fn register_plc_did(
                 );
                 prev_cf_id = new_cf_id;
                 if attempt >= 3 {
-                    if let (Some(cf), Some(id)) = (state.cloudflare.clone(), prev_cf_id) {
+                    if let (Some(cf), Some(id)) = (cloudflare.clone(), prev_cf_id) {
                         let log_prefix = log_prefix.to_string();
                         tokio::spawn(async move {
                             let _ = cf.delete_txt_record(&id).await;

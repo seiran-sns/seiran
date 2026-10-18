@@ -204,7 +204,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 
 ### DID解決・PLC登録・ハンドル検証（アカウント登録時）
 1. P-256 鍵を生成し、`did:plc:xxx` をローカル計算で確定
-2. Cloudflare API で `_atproto.{username}.{domain}` TXT をセット
+2. Cloudflare API で `_atproto.{username}.{domain}` TXT をセット（`site_settings` の `cloudflare_api_token`/`cloudflare_zone_id` が両方あるときだけ。管理画面で設定し、呼び出しごとに読むので再起動なしで反映される。未設定なら `.well-known` 方式のみ）
 3. `plc.directory` へ genesis operation を POST
 4. 失敗したら新しい鍵で最大3回リトライ
 

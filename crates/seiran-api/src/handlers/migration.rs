@@ -478,7 +478,7 @@ async fn submit_plc_operation_to_seiran(
 /// Cloudflare未設定の環境（このdev環境含む）では何もせず、ハンドル検証は
 /// `/.well-known/atproto-did`（seiranが常時実装済み）に一本化される。
 async fn set_handle_txt_best_effort(state: &AppState, handle: &str, did: &str) {
-    let Some(cf) = &state.cloudflare else {
+    let Some(cf) = state.cloudflare().await else {
         return;
     };
     match cf.set_atproto_txt(handle, did).await {
