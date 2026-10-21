@@ -185,6 +185,17 @@ pub trait UserRepository: Send + Sync {
         language: Option<&str>,
     ) -> Result<(), sqlx::Error>;
 
+    /// 「今後は表示しない」にしたガイドのキー一覧（`guides::HIDEABLE_GUIDES` のうち）。
+    async fn find_hidden_guides(&self, user_id: i64) -> Result<Vec<String>, sqlx::Error>;
+
+    /// ガイドの非表示状態を切り替え、更新後の一覧を返す。冪等（既に同じ状態なら変わらない）。
+    async fn set_guide_hidden(
+        &self,
+        user_id: i64,
+        key: &str,
+        hidden: bool,
+    ) -> Result<Vec<String>, sqlx::Error>;
+
     /// 最終ログイン成功時刻を取得する（ブルートフォース判定ウィンドウの起点用、#223）。
     async fn find_last_login_success_at(
         &self,
@@ -432,6 +443,39 @@ impl UserRepository for PgUserRepository {
             .execute(&self.pool)
             .await
             .map(|_| ())
+    }
+
+    async fn find_hidden_guides(&self, user_id: i64) -> Result<Vec<String>, sqlx::Error> {
+        let row: Option<(Vec<String>,)> =
+            sqlx::query_as("SELECT hidden_guides FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(v,)| v).unwrap_or_default())
+    }
+
+    async fn set_guide_hidden(
+        &self,
+        user_id: i64,
+        key: &str,
+        hidden: bool,
+    ) -> Result<Vec<String>, sqlx::Error> {
+        // 追加は「一度外してから末尾へ足す」ことで重複させない。1文なので同時操作でも壊れない。
+        let (guides,): (Vec<String>,) = sqlx::query_as(
+            "UPDATE users
+             SET hidden_guides = CASE WHEN $3
+                     THEN array_append(array_remove(hidden_guides, $2), $2)
+                     ELSE array_remove(hidden_guides, $2) END,
+                 updated_at = NOW()
+             WHERE id = $1
+             RETURNING hidden_guides",
+        )
+        .bind(user_id)
+        .bind(key)
+        .bind(hidden)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(guides)
     }
 
     async fn find_last_login_success_at(

@@ -12,6 +12,7 @@ pub mod event_bus;
 pub mod follow_approval;
 pub mod follow_exec;
 pub mod follow_target;
+pub mod guides;
 pub mod hashtag;
 pub mod id;
 pub mod jetstream_control;

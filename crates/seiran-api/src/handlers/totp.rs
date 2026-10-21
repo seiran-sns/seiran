@@ -313,7 +313,7 @@ pub async fn totp_verify(
         return Err(ApiError::Unauthorized("TOTP_CODE_INVALID"));
     }
 
-    let auth = finish_login(&state, user_id, email, username).await?;
+    let auth = finish_login(&state, user_id, email).await?;
     Ok(Json(auth))
 }
 

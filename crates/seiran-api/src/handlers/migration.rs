@@ -364,20 +364,19 @@ async fn account_auth_response(state: &AppState, id: i64) -> Result<AuthResponse
     Ok(AuthResponse {
         token: token.clone(),
         user: UserInfo {
-            id: user_id,
-            username: migration_req.new_username,
-            email,
-            role: "user".to_string(),
-            actor_id: actor_id.to_string(),
-            avatar_url: Some(seiran_common::avatar::fallback_avatar_url(
-                &state.local_domain,
-                actor_id,
-            )),
-            language_preference: None,
-            token,
-            is_suspended: false,
             migration_status,
-            did_moved_out: false, // 転入直後はDID転出済みであり得ない
+            ..UserInfo::new_account(
+                user_id,
+                migration_req.new_username,
+                email,
+                "user",
+                actor_id,
+                Some(seiran_common::avatar::fallback_avatar_url(
+                    &state.local_domain,
+                    actor_id,
+                )),
+                token,
+            )
         },
     })
 }

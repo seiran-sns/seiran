@@ -160,18 +160,15 @@ pub async fn setup(
 
     Ok(Json(AuthResponse {
         token: token.clone(),
-        user: UserInfo {
-            id: user_id,
-            username: req.username,
-            email: req.email,
-            role: "admin".to_string(),
-            actor_id: actor_id.to_string(),
-            avatar_url: None,          // セットアップ直後はアバター未設定
-            language_preference: None, // セットアップ直後は「自動」
+        // セットアップ直後はアバター未設定。
+        user: UserInfo::new_account(
+            user_id,
+            req.username,
+            req.email,
+            "admin",
+            actor_id,
+            None,
             token,
-            is_suspended: false,    // セットアップ直後は凍結され得ない
-            migration_status: None, // セットアップ（初期管理者作成）は転入経由ではない
-            did_moved_out: false,   // セットアップ直後はDID転出済みであり得ない
-        },
+        ),
     }))
 }

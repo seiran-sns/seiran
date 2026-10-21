@@ -54,6 +54,49 @@ pub async fn update_language(
     Ok(Json(()))
 }
 
+#[derive(Deserialize)]
+pub struct UpdateHiddenGuideRequest {
+    /// `seiran_common::guides::HIDEABLE_GUIDES` のキー。
+    pub guide: String,
+    pub hidden: bool,
+}
+
+#[derive(serde::Serialize)]
+pub struct HiddenGuidesResponse {
+    pub hidden_guides: Vec<String>,
+}
+
+/// `POST /api/account/hidden-guides`
+/// 確認ダイアログの「今後は表示しない」と、設定画面「おせっかいなガイドの非表示」から呼ばれる。
+/// 更新後の非表示ガイド一覧を返す。
+pub async fn update_hidden_guide(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateHiddenGuideRequest>,
+) -> Result<Json<HiddenGuidesResponse>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+
+    if !seiran_common::guides::is_hideable_guide(&req.guide) {
+        return Err(ApiError::BadRequest("UNKNOWN_GUIDE".to_owned()));
+    }
+
+    let hidden_guides = state
+        .users
+        .set_guide_hidden(auth_user.user_id, &req.guide, req.hidden)
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("[update-hidden-guide] users UPDATE 失敗: {}", e))
+        })?;
+
+    Ok(Json(HiddenGuidesResponse { hidden_guides }))
+}
+
 #[cfg(test)]
 mod language_tests {
     use seiran_common::{

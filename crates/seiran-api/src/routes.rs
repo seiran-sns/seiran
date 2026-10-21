@@ -334,6 +334,10 @@ fn auth_account_routes() -> Router<AppState> {
             post(handlers::account::update_language),
         )
         .route(
+            "/api/account/hidden-guides",
+            post(handlers::account::update_hidden_guide),
+        )
+        .route(
             "/api/account/content-visibility",
             get(handlers::account::get_content_visibility)
                 .post(handlers::account::update_content_visibility),

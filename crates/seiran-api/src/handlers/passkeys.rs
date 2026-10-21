@@ -239,9 +239,7 @@ pub async fn authentication_finish(
         .await
         .map_err(internal)?
         .ok_or(ApiError::Unauthorized("PASSKEY_INVALID"))?;
-    Ok(Json(
-        finish_login(&state, user_id, login.email, login.username).await?,
-    ))
+    Ok(Json(finish_login(&state, user_id, login.email).await?))
 }
 
 async fn load_passkeys(state: &AppState, user_id: i64) -> Result<Vec<(Uuid, Passkey)>, ApiError> {

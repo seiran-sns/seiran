@@ -107,6 +107,8 @@ pub struct UserInfo {
     pub avatar_url: Option<String>,
     /// 表示言語設定（`ja` / `en`）。`None` は「自動」（ブラウザ設定に従う）。
     pub language_preference: Option<String>,
+    /// 「今後は表示しない」にしたガイドのキー（`seiran_common::guides::HIDEABLE_GUIDES`）。
+    pub hidden_guides: Vec<String>,
     /// ログイントークンは無期限のため、新しいフロントエンドはこの値を使わない
     /// （#222関連）。旧バージョンのフロントエンド（トークン有効期限があった当時の
     /// スライディング延命実装）が引き続き動作できるよう、後方互換のためだけに
@@ -127,6 +129,36 @@ pub struct UserInfo {
     /// 読み取り画面をそのまま表示する。投稿・リアクション・リポスト・フォロー・
     /// リスト操作・DM送信等の書き込みUIのみを無効化する。
     pub did_moved_out: bool,
+}
+
+impl UserInfo {
+    /// 作成直後のアカウント（登録・初期セットアップ・DID転入）の応答。作成直後は表示言語
+    /// 「自動」・ガイド非表示なし・凍結なし・転入未了なし・DID転出済みなし。転入経由の
+    /// 呼び出し元だけが `migration_status` を上書きする。
+    pub(crate) fn new_account(
+        id: i64,
+        username: String,
+        email: String,
+        role: &str,
+        actor_id: i64,
+        avatar_url: Option<String>,
+        token: String,
+    ) -> Self {
+        Self {
+            id,
+            username,
+            email,
+            role: role.to_owned(),
+            actor_id: actor_id.to_string(),
+            avatar_url,
+            language_preference: None,
+            hidden_guides: Vec::new(),
+            token,
+            is_suspended: false,
+            migration_status: None,
+            did_moved_out: false,
+        }
+    }
 }
 
 /// `at_migration_requests`に本ユーザーの行があり、かつ`completed`未満なら
@@ -403,22 +435,18 @@ async fn register_account(
 
     Ok(AuthResponse {
         token: token.clone(),
-        user: UserInfo {
-            id: user_id,
-            username: req.username,
+        user: UserInfo::new_account(
+            user_id,
+            req.username,
             email,
-            role: "user".to_string(),
-            actor_id: actor_id.to_string(),
-            avatar_url: Some(seiran_common::avatar::fallback_avatar_url(
+            "user",
+            actor_id,
+            Some(seiran_common::avatar::fallback_avatar_url(
                 &state.local_domain,
                 actor_id,
             )),
-            language_preference: None, // 登録直後は「自動」
             token,
-            is_suspended: false,    // 登録直後は凍結され得ない
-            migration_status: None, // 通常登録（転入経由ではない）
-            did_moved_out: false,   // 登録直後はDID転出済みであり得ない
-        },
+        ),
     })
 }
 
@@ -442,7 +470,6 @@ pub(crate) async fn finish_login(
     state: &AppState,
     user_id: i64,
     email: String,
-    username: String,
 ) -> Result<AuthResponse, ApiError> {
     // ログイン成功でブルートフォース判定ウィンドウをリセットする（#223フォローアップ）。
     // 失敗しても致命的ではないためログのみ（ログイン自体は継続する）。
@@ -458,6 +485,17 @@ pub(crate) async fn finish_login(
             ApiError::Internal("トークン生成エラー".to_string())
         })?;
 
+    let user = load_user_info(state, user_id, email, token.clone()).await?;
+    Ok(AuthResponse { token, user })
+}
+
+/// 既存アカウントの `UserInfo` を DB から組み立てる（ログイン応答と `GET /api/auth/me` で共有）。
+async fn load_user_info(
+    state: &AppState,
+    user_id: i64,
+    email: String,
+    token: String,
+) -> Result<UserInfo, ApiError> {
     let role = state
         .users
         .find_role_by_user_id(user_id)
@@ -471,15 +509,10 @@ pub(crate) async fn finish_login(
         .find_local_by_user_id(user_id)
         .await
         .map_err(|e| {
-            tracing::error!("[login] アクター取得失敗: {}", e);
+            tracing::error!("[user-info] アクター取得失敗: {}", e);
             ApiError::Internal(e.to_string())
         })?
         .ok_or(ApiError::NotFound("NOT_FOUND"))?;
-    let actor_id = actor.id;
-    let is_suspended = actor.suspended_at.is_some();
-    let did_moved_out = actor.did_moved_out_at.is_some();
-
-    let avatar_url = fetch_avatar_url(state, actor_id).await;
 
     let language_preference = state
         .users
@@ -487,31 +520,32 @@ pub(crate) async fn finish_login(
         .await
         .ok()
         .flatten();
+    let hidden_guides = state
+        .users
+        .find_hidden_guides(user_id)
+        .await
+        .unwrap_or_default();
 
-    let migration_status = fetch_incomplete_migration_status(state, user_id).await;
-
-    Ok(AuthResponse {
-        token: token.clone(),
-        user: UserInfo {
-            id: user_id,
-            username,
-            email,
-            role,
-            actor_id: actor_id.to_string(),
-            avatar_url,
-            language_preference,
-            token,
-            is_suspended,
-            migration_status,
-            did_moved_out,
-        },
+    Ok(UserInfo {
+        id: user_id,
+        username: actor.username,
+        email,
+        role,
+        actor_id: actor.id.to_string(),
+        avatar_url: fetch_avatar_url(state, actor.id).await,
+        language_preference,
+        hidden_guides,
+        token,
+        is_suspended: actor.suspended_at.is_some(),
+        migration_status: fetch_incomplete_migration_status(state, user_id).await,
+        did_moved_out: actor.did_moved_out_at.is_some(),
     })
 }
 
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum LoginResponse {
-    Success(AuthResponse),
+    Success(Box<AuthResponse>),
     TotpRequired(TotpRequiredResponse),
 }
 
@@ -563,7 +597,6 @@ pub async fn login(
     };
     let user_id = row.id;
     let email = row.email;
-    let username = row.username;
     let hash = row.password_hash.expect("直前のガードでSomeを確認済み");
 
     let window_reset_at = rate_limit::window_reset_at(&state, user_id).await;
@@ -606,8 +639,8 @@ pub async fn login(
         })));
     }
 
-    let auth = finish_login(&state, user_id, email, username).await?;
-    Ok(Json(LoginResponse::Success(auth)))
+    let auth = finish_login(&state, user_id, email).await?;
+    Ok(Json(LoginResponse::Success(Box::new(auth))))
 }
 
 pub async fn me(
@@ -625,33 +658,6 @@ pub async fn me(
     .await
     .map_err(|_| ApiError::Unauthorized("UNAUTHORIZED"))?;
 
-    let actor = state
-        .actors
-        .find_local_by_user_id(auth_user.user_id)
-        .await
-        .map_err(|e| {
-            tracing::error!("[me] DB エラー: {}", e);
-            ApiError::Internal(e.to_string())
-        })?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
-
-    let role = state
-        .users
-        .find_role_by_user_id(auth_user.user_id)
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_else(|| "user".to_string());
-
-    let avatar_url = fetch_avatar_url(&state, actor.id).await;
-
-    let language_preference = state
-        .users
-        .find_language_preference_by_user_id(auth_user.user_id)
-        .await
-        .ok()
-        .flatten();
-
     // ログイントークンは無期限化済み（#222関連）で、新しいフロントエンドはこの`token`を
     // 使ったトークン差し替えを行わない。旧バージョンのフロントエンド（スライディング延命
     // 実装済み）が引き続き動作できるよう、レスポンス形状の後方互換のためだけに発行する。
@@ -660,19 +666,9 @@ pub async fn me(
         .generate_token(auth_user.user_id, &auth_user.email)
         .map_err(|e| ApiError::Internal(format!("[me] トークン再発行失敗: {}", e)))?;
 
-    Ok(Json(UserInfo {
-        id: auth_user.user_id,
-        username: actor.username,
-        email: auth_user.email,
-        role,
-        actor_id: actor.id.to_string(),
-        avatar_url,
-        language_preference,
-        token,
-        is_suspended: actor.suspended_at.is_some(),
-        migration_status: fetch_incomplete_migration_status(&state, auth_user.user_id).await,
-        did_moved_out: actor.did_moved_out_at.is_some(),
-    }))
+    Ok(Json(
+        load_user_info(&state, auth_user.user_id, auth_user.email, token).await?,
+    ))
 }
 
 // =====================================================================

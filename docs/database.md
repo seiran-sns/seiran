@@ -77,6 +77,7 @@ ID の採番は2系統:
 ローカルの `users` 行と `actors` 行は `repository::create_local_account` が1トランザクションで作る。別々に作ると、同名の同時登録で `actors` 側だけが一意制約に違反したとき actor の無い `users` 行が残り、そのメールアドレスで二度と登録もログインもできなくなる。一意制約違反は 409（`EMAIL_ALREADY_REGISTERED`/`USERNAME_TAKEN`）。
 
 - `users.language_preference`: 表示言語（`SUPPORTED_DISPLAY_LANGUAGES` の8言語）。NULL は「自動」。
+- `users.hidden_guides`: 「今後は表示しない」を選んだ確認ガイドのキー（`seiran_common::guides::HIDEABLE_GUIDES`）。`TEXT[] NOT NULL DEFAULT '{}'`。端末をまたいで共有するため localStorage ではなく DB に持つ。`GET /api/auth/me`・ログイン応答の `hidden_guides` で返し、`POST /api/account/hidden-guides`（`{guide, hidden}`）で切り替える。
 - `users.token_valid_after`: これより前に発行された JWT を一括失効させる基準時刻（NULL は制約なし）。
 
 ### `actors`
