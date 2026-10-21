@@ -255,7 +255,7 @@ test("設定メニューから表示設定画面へ遷移でき、言語を切�
   await seedAuth(page, user.token);
 
   await page.goto("/settings");
-  await page.getByRole("button", { name: "表示" }).click();
+  await page.getByRole("button", { name: "🎨 表示 ›", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
 
   await page.getByRole("combobox").selectOption({ label: "English" });
@@ -305,7 +305,7 @@ test("表示設定画面でテーマを切り替えるとhtmlのdata-theme属性
   await seedAuth(page, user.token);
 
   await page.goto("/settings");
-  await page.getByRole("button", { name: "表示" }).click();
+  await page.getByRole("button", { name: "🎨 表示 ›", exact: true }).click();
   await expect(page).toHaveURL(/\/settings\/appearance$/);
 
   await page.getByRole("button", { name: "常にダーク" }).click();
