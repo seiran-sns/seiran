@@ -107,13 +107,12 @@ test("削除して編集再投稿: 確認後にポストが削除され、元の
   expect(await noteStatus(request, alice.token, id3)).toBe(404);
   await expect(page.locator('[contenteditable="true"]').last()).toContainText(text3);
 
-  // 設定画面で非表示を解除できる。
+  // 設定画面で非表示を解除できる（スイッチは「表示する」側がオン）。
   await page.goto("/settings/guides");
-  const checkbox = page.getByLabel("「削除して編集再投稿」の確認");
-  await expect(checkbox).toBeChecked();
-  // 保存の応答でチェック状態が変わる制御コンポーネントなので、uncheck()（クリック直後の状態を検証する）は使わない。
-  await checkbox.click();
-  await expect(checkbox).not.toBeChecked();
+  const guideSwitch = page.getByRole("switch", { name: "「削除して編集再投稿」の確認" });
+  await expect(guideSwitch).toHaveAttribute("aria-checked", "false");
+  await guideSwitch.click();
+  await expect(guideSwitch).toHaveAttribute("aria-checked", "true");
   await expect.poll(() => hiddenGuides(request, alice.token)).not.toContain("redraft_note");
 });
 

@@ -30,7 +30,7 @@
   font-size: 0.82rem;
   color: var(--text-dim);
   line-height: 1.5;
-  margin: 10px 0 0;
+  margin: 4px 0 0;
 }
 
 .error {
@@ -39,6 +39,22 @@
   margin: 0 0 12px;
 }
 
+.guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
 .guide + .guide {
   margin-top: 18px;
+}
+
+.guideText {
+  min-width: 0;
+}
+
+.guideTitle {
+  font-size: 0.9rem;
+  color: var(--text);
 }

@@ -44,7 +44,8 @@
   },
   "guidesSettings": {
     "title": "Aufdringliche Hinweise ausblenden",
-    "intro": "Das sind Hinweise, die du in einem Bestätigungsdialog mit „Nicht mehr anzeigen“ ausgeblendet hast. Aktivierte Hinweise werden nicht angezeigt; deaktiviere sie, um sie wieder zu sehen.",
+    "show": "Anzeigen",
+    "hide": "Ausblenden",
     "guides": {
       "redraft_note": {
         "title": "Bestätigung für „Löschen und neu verfassen“",

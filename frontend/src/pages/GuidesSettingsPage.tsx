@@ -2,11 +2,12 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
+import LabeledSwitch from "../components/common/LabeledSwitch";
 import { GuideKey, HIDEABLE_GUIDES, useHiddenGuides } from "../hooks/useHiddenGuides";
 import styles from "./GuidesSettings.module.css";
 
 /** 設定画面「おせっかいなガイドの非表示」。確認ダイアログの「今後は表示しない」で非表示に
- * したガイドを、ガイドごとのチェックで切り替える（チェックあり＝表示しない）。 */
+ * したガイドを、ガイドごとのスイッチ（表示する／表示しない）で切り替える。 */
 export default function GuidesSettingsPage() {
   const { t } = useTranslation();
   const { isGuideHidden, setGuideHidden } = useHiddenGuides();
@@ -28,22 +29,25 @@ export default function GuidesSettingsPage() {
   const center = (
     <div className={styles.section}>
       <h3 className={styles.sectionTitle}>{t("account:guidesSettings.title")}</h3>
-      <p className={styles.description}>{t("account:guidesSettings.intro")}</p>
       {error && <p className={styles.error}>{error}</p>}
       {HIDEABLE_GUIDES.map((guide) => (
         <div key={guide} className={styles.guide}>
-          <label className={styles.checkboxLabel}>
-            <input
-              type="checkbox"
-              checked={isGuideHidden(guide)}
-              disabled={pending === guide}
-              onChange={(e) => onToggle(guide, e.target.checked)}
-            />
-            {t(`account:guidesSettings.guides.${guide}.title`)}
-          </label>
-          <p className={styles.description}>
-            {t(`account:guidesSettings.guides.${guide}.description`)}
-          </p>
+          <div className={styles.guideText}>
+            <span className={styles.guideTitle}>
+              {t(`account:guidesSettings.guides.${guide}.title`)}
+            </span>
+            <p className={styles.description}>
+              {t(`account:guidesSettings.guides.${guide}.description`)}
+            </p>
+          </div>
+          <LabeledSwitch
+            checked={!isGuideHidden(guide)}
+            onChange={(shown) => onToggle(guide, !shown)}
+            offLabel={t("account:guidesSettings.hide")}
+            onLabel={t("account:guidesSettings.show")}
+            ariaLabel={t(`account:guidesSettings.guides.${guide}.title`)}
+            disabled={pending === guide}
+          />
         </div>
       ))}
     </div>

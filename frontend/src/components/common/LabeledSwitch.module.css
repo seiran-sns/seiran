@@ -1,0 +1,55 @@
+.switch {
+  position: relative;
+  display: inline-grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center;
+  min-width: 11.5em;
+  padding: 0;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  font: inherit;
+  font-size: 0.82rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.switch:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.switch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* 現在の状態側に滑るつまみ。ラベルの下に敷く。 */
+.thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 999px;
+  background: var(--accent);
+  transition: transform 0.15s ease;
+}
+
+.thumbOn {
+  transform: translateX(100%);
+}
+
+.label {
+  position: relative;
+  padding: 6px 12px;
+  text-align: center;
+  white-space: nowrap;
+  color: var(--text-dim);
+  transition: color 0.15s ease;
+}
+
+.labelActive {
+  color: #fff;
+  font-weight: 700;
+}

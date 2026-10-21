@@ -44,7 +44,8 @@
   },
   "guidesSettings": {
     "title": "Ocultar guías insistentes",
-    "intro": "Son las guías que ocultaste con «No volver a mostrar» en un cuadro de confirmación. Las guías activadas no se muestran; desactívalas para verlas de nuevo.",
+    "show": "Mostrar",
+    "hide": "Ocultar",
     "guides": {
       "redraft_note": {
         "title": "Confirmación de «Eliminar y reeditar»",

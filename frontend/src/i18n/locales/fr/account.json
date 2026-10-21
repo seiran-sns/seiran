@@ -44,7 +44,8 @@
   },
   "guidesSettings": {
     "title": "Masquer les guides insistants",
-    "intro": "Ce sont les guides que vous avez masqués avec « Ne plus afficher » dans une boîte de confirmation. Les guides activés ne sont pas affichés ; désactivez-les pour les revoir.",
+    "show": "Afficher",
+    "hide": "Masquer",
     "guides": {
       "redraft_note": {
         "title": "Confirmation de « Supprimer et rééditer »",
