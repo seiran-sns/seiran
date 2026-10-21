@@ -240,7 +240,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 `type`: フォロー・リアクション・メンション・返信・リポスト・引用・`moveRefollowed`/`moveAlreadyFollowing`（seiran 独自）等。リポスト・引用の `note_id` は新しいリポスト/引用投稿。
 
 - `source_uri`（ATP Like の `at_uri`、AP の activity id 等）の部分 UNIQUE で、Jetstream/AP の複線受信による重複を防ぐ。
-- `reaction_emoji_url`: 通知時点の絵文字画像URL（リアクションは1人1個なので、後で切り替えると過去の内容が分からなくなるため）。
+- `reaction_emoji_url`: 通知時点の絵文字画像URL（リアクションは1人1個なので、後で切り替えると過去の内容が分からなくなるため）。 `i/notifications` は `note.reactionEmojis` に加え、独自拡張フィールド `reactionEmojiUrl` としてもこの値を返す。対象ポストが削除済みだと `note` 自体が無く `reactionEmojis` から引けないため、フロントは `reactionEmojiUrl` を優先して絵文字を画像で出す。
 - `related_actor_id`: `move*` 専用の2つ目のアクター（移転先。`notifier_actor_id` が移転元）。
 - `reaction_id`（`reactions.id`、部分 UNIQUE）: 自分のリアクションが firehose で戻ってきたときの重複排除（`docs/protocols.md` 8節）。他人のリアクションでは NULL なので、絵文字の連投は妨げない。
 

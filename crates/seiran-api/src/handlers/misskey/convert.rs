@@ -784,6 +784,7 @@ pub async fn build_notifications(
                     .and_then(|id| notifier_users.get(&id).cloned()),
                 note,
                 reaction: r.reaction,
+                reaction_emoji_url: r.reaction_emoji_url,
                 related_user_id: r.related_actor_id.map(|id| id.to_string()),
                 related_user: r
                     .related_actor_id

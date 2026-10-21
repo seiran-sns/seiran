@@ -23,6 +23,14 @@ describe("describeNotification（#61: カスタム絵文字リアクション通
     expect(describeNotification(n).iconUrl).toBe("https://example.com/blob_cat.png");
   });
 
+  it("対象ポストが削除済みで note が無くても、通知に保存された reactionEmojiUrl で画像URLを解決できる", () => {
+    const n = makeReactionNotification({
+      reaction: ":blob_cat:",
+      reactionEmojiUrl: "https://example.com/blob_cat.png",
+    });
+    expect(describeNotification(n).iconUrl).toBe("https://example.com/blob_cat.png");
+  });
+
   it("reactionEmojis に対応するキーが無ければ画像URLは undefined（絵文字テキストへフォールバック）", () => {
     const n = makeReactionNotification({ reaction: ":unknown_emoji:", note: { id: "42", reactionEmojis: {} } });
     expect(describeNotification(n).iconUrl).toBeUndefined();

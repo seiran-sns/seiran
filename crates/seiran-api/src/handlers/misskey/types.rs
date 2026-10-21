@@ -241,6 +241,11 @@ pub struct MisskeyNotification {
     /// `type == "reaction"` の場合のみ。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub reaction: Option<String>,
+    /// `type == "reaction"` でカスタム絵文字の場合のみ（seiran独自拡張）。通知 INSERT 時に
+    /// 保存した絵文字の画像URL。`note.reactionEmojis` は対象ポストが削除済みだと得られない
+    /// （`note` 自体が無い）ため、削除済みポストへの通知でも絵文字を画像で出せるようにする。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reaction_emoji_url: Option<String>,
     /// `type == "moveRefollowed" | "moveAlreadyFollowing"`（seiran独自拡張、ActivityPub
     /// Move受信時の再フォロー通知）の場合のみ。移転先アクターのID。
     #[serde(skip_serializing_if = "Option::is_none")]

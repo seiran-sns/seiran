@@ -868,6 +868,9 @@ export interface NotificationItem {
   user?: NotificationUser;
   /** `type === "reaction"` の場合のみ。カスタム絵文字は `:shortcode:` 形式。 */
   reaction?: string;
+  /** `type === "reaction"` でカスタム絵文字の場合のみ。通知時点で保存した画像URL。
+   * 対象ポストが削除済みだと `note` が無く `note.reactionEmojis` から引けないため、こちらを優先する。 */
+  reactionEmojiUrl?: string;
   /** `type === "moveRefollowed" | "moveAlreadyFollowing"` の場合のみ。引っ越し先アクター。 */
   relatedUserId?: string;
   relatedUser?: NotificationUser;

@@ -88,7 +88,7 @@ export function describeNotification(n: NotificationItem): {
         : undefined;
       return {
         icon: n.reaction || "⭐",
-        iconUrl: emojiKey ? n.note?.reactionEmojis?.[emojiKey] : undefined,
+        iconUrl: n.reactionEmojiUrl ?? (emojiKey ? n.note?.reactionEmojis?.[emojiKey] : undefined),
         i18nKey: "notifications:notificationsPanel.reactionText",
         who,
         whoEmojis,
