@@ -105,6 +105,11 @@ pub enum BskyEmbedChoice {
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AttachmentResponse {
+    /// 自サーバーにアップロードされたメディアの id（`media_files.id`、ドライブのファイル id と同じ）。
+    /// リモート添付は `media_files` に対応行が無いため `None`。削除して編集再投稿が
+    /// 添付を引き継ぐ（`attachmentIds`/Misskey の `fileIds` として再送する）のに使う。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub id: Option<String>,
     pub url: String,
     pub mime_type: String,
     pub width: i32,

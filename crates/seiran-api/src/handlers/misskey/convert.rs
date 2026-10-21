@@ -430,7 +430,7 @@ fn to_misskey_note(p: &TimelinePost, local_domain: &str, materials: &NoteMateria
         .iter()
         .enumerate()
         .map(|(i, a)| MisskeyDriveFile {
-            id: format!("{}-{}", p.id, i),
+            id: a.id.clone().unwrap_or_else(|| format!("{}-{}", p.id, i)),
             // リモート添付は media_files に対応行が無く取得できないため、投稿日時を代用する。
             created_at: a
                 .media_created_at
@@ -863,6 +863,7 @@ mod tests {
     fn note_files_reflect_is_sensitive() {
         let p = base_post();
         let attachment = crate::handlers::notes::dto::AttachmentResponse {
+            id: None,
             url: "https://example.com/a.png".to_string(),
             mime_type: "image/png".to_string(),
             width: 100,

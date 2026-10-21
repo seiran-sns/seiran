@@ -118,6 +118,7 @@ pub async fn fetch_attachments_map(
         map.entry(row.post_id)
             .or_default()
             .push(AttachmentResponse {
+                id: row.media_file_id.map(|id| id.to_string()),
                 url,
                 mime_type: row.mime_type,
                 width: row.width,

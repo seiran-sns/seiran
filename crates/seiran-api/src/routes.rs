@@ -696,6 +696,10 @@ fn misskey_routes() -> Router<AppState> {
             post(handlers::misskey::endpoints::reactions_delete),
         )
         .route(
+            "/api/notes/delete",
+            post(handlers::misskey::endpoints::notes_delete),
+        )
+        .route(
             "/api/notes/unrenote",
             post(handlers::misskey::endpoints::notes_unrenote),
         )

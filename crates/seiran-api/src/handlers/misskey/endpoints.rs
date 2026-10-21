@@ -36,6 +36,7 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "i/notifications",
         "meta",
         "notes/create",
+        "notes/delete",
         "notes/global-timeline",
         "notes/hybrid-timeline",
         "notes/local-timeline",
@@ -625,6 +626,21 @@ pub async fn reactions_delete(
     let resp =
         crate::handlers::notes::reactions::remove_reaction(&state, &user, &body.note_id, None)
             .await;
+    as_no_content(resp)
+}
+
+/// POST /api/notes/delete
+///
+/// 自分のポストを削除する。「削除して編集再投稿」はサーバー側に専用APIを持たず、Misskey 本家と
+/// 同じくクライアントが手元のノートの内容でこれを呼んだあと `notes/create` で投稿し直す。
+pub async fn notes_delete(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<NoteIdBody>,
+) -> Response {
+    let resp = crate::handlers::notes::delete_note(Path(body.note_id), user, State(state))
+        .await
+        .into_response();
     as_no_content(resp)
 }
 

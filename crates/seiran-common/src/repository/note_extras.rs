@@ -9,6 +9,8 @@ use sqlx::PgPool;
 #[derive(Debug, sqlx::FromRow)]
 pub struct AttachmentRow {
     pub post_id: i64,
+    /// 自サーバーにアップロードされたメディアの id（リモート添付は `None`）。
+    pub media_file_id: Option<i64>,
     pub url: Option<String>,
     pub mime_type: String,
     pub width: i32,
@@ -35,6 +37,7 @@ pub async fn attachments_for_posts(
     }
     sqlx::query_as(
         "SELECT pa.post_id,
+                pa.media_file_id,
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, pa.remote_url) AS url,
                 COALESCE(mf.mime_type, pa.remote_mime_type, 'image/jpeg') AS mime_type,
                 COALESCE(mf.width, 0) AS width,
