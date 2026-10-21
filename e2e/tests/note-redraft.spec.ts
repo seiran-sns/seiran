@@ -68,6 +68,11 @@ test("削除して編集再投稿: 確認後にポストが削除され、元の
   let card = await openMenu(page, cw);
   await card.getByRole("button", { name: REDRAFT_ITEM }).click();
   await expect(page.getByText("削除して編集再投稿しますか？")).toBeVisible({ timeout: 5_000 });
+  // 何も付いていないときは「以下は〜」の見出しを出さず、付いていた場合の注意書きだけを出す。
+  await expect(
+    page.getByText("もし返信・引用・リアクション・リポストが付いていても、それらは引き継がれません。"),
+  ).toBeVisible();
+  await expect(page.getByText("以下は引き継がれません。")).toHaveCount(0);
   await page.getByLabel("今後は表示しない").check();
   await page.getByRole("button", { name: "削除して編集する" }).click();
 

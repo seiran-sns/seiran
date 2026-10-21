@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "要删除并重新编辑这条帖子吗？",
-      "body": "此帖子会立即删除，让你编辑后重新发布。删除也会波及联邦服务器和 Bluesky 上的帖子。重新发布后是另一条帖子，以下内容不会沿用。",
+      "body": "此帖子会立即删除，让你编辑后重新发布。删除也会波及联邦服务器和 Bluesky 上的帖子。重新发布后是另一条帖子。",
+      "lossIntro": "以下内容不会沿用。",
+      "lossNone": "即使已有回复、引用、反应或转发，也不会沿用。",
       "lossReplies": "{{count}} 条回复",
       "lossQuotes": "{{count}} 条引用",
       "lossReposts": "{{count}} 次转发",

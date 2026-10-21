@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "Diesen Beitrag löschen und neu verfassen?",
-      "body": "Der Beitrag wird sofort gelöscht, damit du ihn bearbeiten und erneut veröffentlichen kannst. Das Löschen betrifft auch föderierte Server und Bluesky. Der neue Beitrag ist ein anderer Beitrag, und Folgendes wird nicht übernommen.",
+      "body": "Der Beitrag wird sofort gelöscht, damit du ihn bearbeiten und erneut veröffentlichen kannst. Das Löschen betrifft auch föderierte Server und Bluesky. Der neue Beitrag ist ein anderer Beitrag.",
+      "lossIntro": "Folgendes wird nicht übernommen.",
+      "lossNone": "Falls es Antworten, Zitate, Reaktionen oder Reposts gibt, werden auch diese nicht übernommen.",
       "lossReplies": "{{count}} Antworten",
       "lossQuotes": "{{count}} Zitate",
       "lossReposts": "{{count}} Reposts",

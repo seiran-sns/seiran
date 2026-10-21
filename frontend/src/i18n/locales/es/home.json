@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "¿Eliminar y reeditar esta publicación?",
-      "body": "La publicación se elimina de inmediato para que puedas editarla y publicarla de nuevo. La eliminación también llega a los servidores federados y a Bluesky. La nueva publicación es otra distinta y no se conserva lo siguiente.",
+      "body": "La publicación se elimina de inmediato para que puedas editarla y publicarla de nuevo. La eliminación también llega a los servidores federados y a Bluesky. La nueva publicación es otra distinta.",
+      "lossIntro": "No se conserva lo siguiente.",
+      "lossNone": "Si tuviera respuestas, citas, reacciones o reposts, tampoco se conservarían.",
       "lossReplies": "{{count}} respuestas",
       "lossQuotes": "{{count}} citas",
       "lossReposts": "{{count}} reposts",

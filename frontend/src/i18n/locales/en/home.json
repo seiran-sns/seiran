@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "Delete and redraft this post?",
-      "body": "This deletes the post right away so you can edit it and post it again. The deletion also reaches federated servers and Bluesky. The new post is a different post, and the following won't carry over.",
+      "body": "This deletes the post right away so you can edit it and post it again. The deletion also reaches federated servers and Bluesky. The new post is a different post.",
+      "lossIntro": "The following won't carry over.",
+      "lossNone": "Any replies, quotes, reactions, or reposts it may have received won't carry over.",
       "lossReplies": "{{count}} replies",
       "lossQuotes": "{{count}} quotes",
       "lossReposts": "{{count}} reposts",

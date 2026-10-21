@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "要刪除並重新編輯這則貼文嗎？",
-      "body": "此貼文會立即刪除，讓你編輯後重新發佈。刪除也會波及聯邦伺服器與 Bluesky 上的貼文。重新發佈後是另一則貼文，以下內容不會沿用。",
+      "body": "此貼文會立即刪除，讓你編輯後重新發佈。刪除也會波及聯邦伺服器與 Bluesky 上的貼文。重新發佈後是另一則貼文。",
+      "lossIntro": "以下內容不會沿用。",
+      "lossNone": "即使已有回覆、引用、反應或轉發，也不會沿用。",
       "lossReplies": "{{count}} 則回覆",
       "lossQuotes": "{{count}} 則引用",
       "lossReposts": "{{count}} 次轉發",

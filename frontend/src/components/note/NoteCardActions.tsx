@@ -104,6 +104,13 @@ export default function NoteCardActions({
   const [reportOpen, setReportOpen] = useState(false);
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
   const reactedByMe = reactions.some((r) => r.reactedByMe);
+  const hasLoss =
+    replyCount > 0 ||
+    quoteCount > 0 ||
+    repostCount > 0 ||
+    totalReactionCount > 0 ||
+    (redraft?.pollVoters ?? 0) > 0 ||
+    pinned;
 
   function confirmDelete() {
     setDeleteConfirmOpen(false);
@@ -304,38 +311,38 @@ export default function NoteCardActions({
           title={t("home:noteCard.redraftConfirmModal.title")}
         >
           <p className={styles.modalText}>{t("home:noteCard.redraftConfirmModal.body")}</p>
-          {(replyCount > 0 ||
-            quoteCount > 0 ||
-            repostCount > 0 ||
-            totalReactionCount > 0 ||
-            redraft.pollVoters > 0 ||
-            pinned) && (
-          <ul className={styles.redraftLossList}>
-            {replyCount > 0 && (
-              <li>{t("home:noteCard.redraftConfirmModal.lossReplies", { count: replyCount })}</li>
-            )}
-            {quoteCount > 0 && (
-              <li>{t("home:noteCard.redraftConfirmModal.lossQuotes", { count: quoteCount })}</li>
-            )}
-            {repostCount > 0 && (
-              <li>{t("home:noteCard.redraftConfirmModal.lossReposts", { count: repostCount })}</li>
-            )}
-            {totalReactionCount > 0 && (
-              <li>
-                {t("home:noteCard.redraftConfirmModal.lossReactions", {
-                  count: totalReactionCount,
-                })}
-              </li>
-            )}
-            {redraft.pollVoters > 0 && (
-              <li>
-                {t("home:noteCard.redraftConfirmModal.lossPollVotes", {
-                  count: redraft.pollVoters,
-                })}
-              </li>
-            )}
-            {pinned && <li>{t("home:noteCard.redraftConfirmModal.lossPinned")}</li>}
-          </ul>
+          {hasLoss ? (
+            <>
+              <p className={styles.modalText}>{t("home:noteCard.redraftConfirmModal.lossIntro")}</p>
+              <ul className={styles.redraftLossList}>
+                {replyCount > 0 && (
+                  <li>{t("home:noteCard.redraftConfirmModal.lossReplies", { count: replyCount })}</li>
+                )}
+                {quoteCount > 0 && (
+                  <li>{t("home:noteCard.redraftConfirmModal.lossQuotes", { count: quoteCount })}</li>
+                )}
+                {repostCount > 0 && (
+                  <li>{t("home:noteCard.redraftConfirmModal.lossReposts", { count: repostCount })}</li>
+                )}
+                {totalReactionCount > 0 && (
+                  <li>
+                    {t("home:noteCard.redraftConfirmModal.lossReactions", {
+                      count: totalReactionCount,
+                    })}
+                  </li>
+                )}
+                {redraft.pollVoters > 0 && (
+                  <li>
+                    {t("home:noteCard.redraftConfirmModal.lossPollVotes", {
+                      count: redraft.pollVoters,
+                    })}
+                  </li>
+                )}
+                {pinned && <li>{t("home:noteCard.redraftConfirmModal.lossPinned")}</li>}
+              </ul>
+            </>
+          ) : (
+            <p className={styles.modalText}>{t("home:noteCard.redraftConfirmModal.lossNone")}</p>
           )}
           {redraft.overwritesDraft() ? (
             <p className={styles.modalText}>

@@ -95,7 +95,9 @@
     },
     "redraftConfirmModal": {
       "title": "Supprimer et rééditer cette publication ?",
-      "body": "La publication est supprimée immédiatement pour que vous puissiez la modifier et la republier. La suppression atteint aussi les serveurs fédérés et Bluesky. La nouvelle publication est une autre publication, et les éléments suivants ne sont pas repris.",
+      "body": "La publication est supprimée immédiatement pour que vous puissiez la modifier et la republier. La suppression atteint aussi les serveurs fédérés et Bluesky. La nouvelle publication est une autre publication.",
+      "lossIntro": "Les éléments suivants ne sont pas repris.",
+      "lossNone": "Les éventuelles réponses, citations, réactions ou reposts ne sont pas repris non plus.",
       "lossReplies": "{{count}} réponses",
       "lossQuotes": "{{count}} citations",
       "lossReposts": "{{count}} reposts",
