@@ -262,7 +262,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `post_attachments`: `media_file_id`（ローカル）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート）のどちらかが埋まる。
   - `is_sensitive`: AP の `attachment[].sensitive`。投稿全体の `sensitive=true` は全添付に伝播させる。
   - `is_gif`: GIF アニメ由来（GIF ピッカー、または `presentation:"gif"`）。フロントは自動再生・ミュート・ループ・コントロール無しで表示する。
-- **孤立ファイル GC**（`run_media_gc`、7日周期）: `post_attachments`/`actors`/`custom_emojis` のどこからも参照されない行を消す。参照の有無は `NOT EXISTS` で判定する（`post_attachments.media_file_id` はリモート添付で NULL の行が大半で、`NOT IN` だと結果が常に UNKNOWN になり1件も消せない）。削除は、その瞬間に孤立条件を再評価する単一の `DELETE ... RETURNING` で DB を先に確定させてから S3 を消す（DB → S3）。これで「行があれば実体もある」を保ち、途中で参照が増えるレースにも安全（削除0件になるだけ）。S3 の削除に失敗するとゴミが残るが実害は小さい。
+- **孤立ファイル GC**（`run_media_gc`、7日周期）: `post_attachments`（論理削除されていないポストのもの）/`actors`/`custom_emojis` 等のどこからも参照されず、`last_uploaded_at` から7日以上経った行を消す。論理削除済みポストの添付は参照に数えず、`PostRepository::soft_delete_by_id` がポスト削除と同じ1文でその添付メディアの `last_uploaded_at` を更新して7日の猶予を与える（削除して編集再投稿が、削除直後でも同じメディアを使い回せる）。猶予を過ぎた行は、死んだ `post_attachments` 行（外部キーが残るため）と同じ文でまとめて消す。参照の有無は `NOT EXISTS` で判定する（`post_attachments.media_file_id` はリモート添付で NULL の行が大半で、`NOT IN` だと結果が常に UNKNOWN になり1件も消せない）。削除は、その瞬間に孤立条件を再評価する単一の `DELETE ... RETURNING` で DB を先に確定させてから S3 を消す（DB → S3）。これで「行があれば実体もある」を保ち、途中で参照が増えるレースにも安全（削除0件になるだけ）。S3 の削除に失敗するとゴミが残るが実害は小さい。
 
 ### `post_link_cards`（URLカード）
 投稿ごとに0件以上のカードを `(post_id, position)`（UNIQUE）で持つ。

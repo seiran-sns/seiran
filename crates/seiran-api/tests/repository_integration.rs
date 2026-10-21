@@ -650,3 +650,89 @@ async fn feeds_with_many_targets_page_across_time_windows() {
         .unwrap());
     assert_eq!(newer, home_expected[..5], "home_timeline since_id");
 }
+
+/// 削除済みポストの添付は孤児判定で参照に数えない。ただし削除の瞬間にメディアの
+/// `last_uploaded_at` を更新して猶予期間を与え、削除して編集再投稿が添付を使い回せるようにする。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn deleted_post_media_is_kept_for_grace_period_then_orphaned() {
+    use seiran_common::repository::maintenance::delete_media_file_if_orphaned;
+
+    let pool = test_db_pool().await;
+    let posts = PgPostRepository::new(pool.clone());
+    let actor = create_fixture_local_actor(&pool, "rigc").await;
+    let post_id = create_fixture_post(
+        &pool,
+        actor,
+        FixturePost {
+            body: "添付つき",
+            ..FixturePost::default()
+        },
+    )
+    .await;
+
+    let provider_id: i64 = sqlx::query_scalar(
+        "WITH existing AS (SELECT id FROM storage_providers WHERE name = 'integration-test'),
+              inserted AS (
+                  INSERT INTO storage_providers (name, endpoint, bucket, access_key, secret_key, public_url, is_active)
+                  SELECT 'integration-test', 'https://s3.integration-test.invalid', 'test', 'test', 'test',
+                         'https://media.integration-test.invalid', false
+                  WHERE NOT EXISTS (SELECT 1 FROM existing)
+                  RETURNING id
+              )
+         SELECT id FROM inserted UNION ALL SELECT id FROM existing",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    let media_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
+    // 30日前にアップロードされた古いメディア（猶予期間の7日を大きく過ぎている）。
+    sqlx::query(
+        "INSERT INTO media_files (id, storage_provider_id, sha256, size, storage_key, last_uploaded_at)
+         VALUES ($1, $2, $3, 1, $4, now() - INTERVAL '30 days')",
+    )
+    .bind(media_id)
+    .bind(provider_id)
+    .bind(format!("{:0>64}", media_id))
+    .bind(format!("test/{media_id}.png"))
+    .execute(&pool)
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, 0)",
+    )
+    .bind(post_id)
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+
+    assert!(
+        !delete_media_file_if_orphaned(&pool, media_id)
+            .await
+            .unwrap(),
+        "未削除ポストの添付は孤児ではない"
+    );
+
+    posts.soft_delete_by_id(post_id).await.unwrap();
+    assert!(
+        !delete_media_file_if_orphaned(&pool, media_id)
+            .await
+            .unwrap(),
+        "削除直後は last_uploaded_at の更新で猶予期間内"
+    );
+
+    sqlx::query(
+        "UPDATE media_files SET last_uploaded_at = now() - INTERVAL '8 days' WHERE id = $1",
+    )
+    .bind(media_id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        delete_media_file_if_orphaned(&pool, media_id)
+            .await
+            .unwrap(),
+        "削除済みポストの添付は猶予期間を過ぎれば孤児になる"
+    );
+}

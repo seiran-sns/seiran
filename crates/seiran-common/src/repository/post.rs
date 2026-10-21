@@ -1670,8 +1670,20 @@ impl PostRepository for PgPostRepository {
     async fn soft_delete_by_id(&self, id: i64) -> Result<(), sqlx::Error> {
         // `deleted_at IS NULL` ガードで「実際に未削除→削除済みへ遷移したか」を判定し、
         // 既に削除済みの行への重複呼び出しでnotes_countを二重に減らさないようにする。
+        //
+        // `touched` は添付メディアの猶予期間: 論理削除済みポストの添付は孤立判定で参照に数えない
+        // （`maintenance::ORPHANED_MEDIA_FILE_CONDITION`）ので、更新しないと古いメディアが
+        // 削除直後に GC され、削除して編集再投稿で添付を使い回せない。削除と同じ1文で更新して
+        // 「更新前に GC が割り込む」余地を作らない。
         sqlx::query(
-            "WITH deleted AS (
+            "WITH touched AS (
+                 UPDATE media_files SET last_uploaded_at = now()
+                 WHERE EXISTS (
+                     SELECT 1 FROM post_attachments pa
+                     WHERE pa.post_id = $1 AND pa.media_file_id = media_files.id
+                 )
+                 RETURNING id
+             ), deleted AS (
                  UPDATE posts SET deleted_at = NOW() WHERE id = $1 AND deleted_at IS NULL
                  RETURNING actor_id
              )
