@@ -10,6 +10,7 @@ function makeUser(): User {
     role: "user",
     actor_id: "1",
     language_preference: null,
+    hidden_guides: [],
     token: "test-token",
     is_suspended: false,
     did_moved_out: false,

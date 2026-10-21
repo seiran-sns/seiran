@@ -233,6 +233,13 @@ export const account = {
       is_locked: isLocked,
     });
   },
+  /** ガイド（確認ダイアログ等）の非表示状態を切り替える。更新後の非表示ガイド一覧を返す。 */
+  updateHiddenGuide(guide: string, hidden: boolean) {
+    return request<{ hidden_guides: string[] }>("POST", "/account/hidden-guides", {
+      guide,
+      hidden,
+    });
+  },
   /** 設定画面のアカウント設定からメールアドレス変更をリクエストする（#59、新アドレス宛に確認メール送信）。 */
   requestEmailChange(newEmail: string) {
     return request<void>("POST", "/account/email/request-change", {

@@ -5,6 +5,7 @@
     "profile": "Profil",
     "mutesBlocks": "Stummschalten und Blockieren",
     "privacy": "Datenschutz",
+    "guides": "Aufdringliche Hinweise ausblenden",
     "lists": "Listen",
     "appearance": "Aussehen",
     "appTokens": "App-Tokens",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "Follow-Anfragen",
     "lockedAccountLabel": "Genehmigung für neue Follower erforderlich",
     "lockedAccountDescription": "Wenn aktiviert, werden neue Follow-Anfragen nicht automatisch angenommen — Sie müssen sie unter „Follow-Anfragen“ in den Einstellungen genehmigen oder ablehnen. Dies wirkt sich nur darauf aus, wer Ihnen folgen kann; es ändert nicht, wer Ihre öffentlichen Beiträge sehen kann. Wenn Sie dies deaktivieren, werden alle ausstehenden Follow-Anfragen automatisch genehmigt."
+  },
+  "guidesSettings": {
+    "title": "Aufdringliche Hinweise ausblenden",
+    "intro": "Das sind Hinweise, die du in einem Bestätigungsdialog mit „Nicht mehr anzeigen“ ausgeblendet hast. Aktivierte Hinweise werden nicht angezeigt; deaktiviere sie, um sie wieder zu sehen.",
+    "guides": {
+      "redraft_note": {
+        "title": "Bestätigung für „Löschen und neu verfassen“",
+        "description": "Bestätigungsdialog, der vor dem Löschen zum Neuverfassen zeigt, was verloren geht."
+      }
+    }
   },
   "accountSettings": {
     "title": "Kontoeinstellungen",

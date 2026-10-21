@@ -85,6 +85,27 @@
       "body": "이 작업은 취소할 수 없습니다. 삭제하면 페더레이션 서버 및 Bluesky에서도 게시물이 제거됩니다.",
       "confirmButton": "삭제"
     },
+    "redraftButton": "삭제하고 다시 편집해 게시",
+    "redraftBlocked": {
+      "replyUnavailable": "답글 대상 글이 없어 다시 게시할 수 없습니다",
+      "quoteUnavailable": "인용한 글이 없어 다시 게시할 수 없습니다",
+      "replyAndQuote": "답글이면서 인용인 글은 다시 게시할 수 없습니다",
+      "attachmentUnavailable": "이어받을 수 없는 첨부가 있어 다시 게시할 수 없습니다",
+      "checking": "답글·인용 대상 글을 확인하는 중…"
+    },
+    "redraftConfirmModal": {
+      "title": "이 글을 삭제하고 다시 편집할까요?",
+      "body": "이 글을 바로 삭제하여 편집한 뒤 다시 게시할 수 있게 합니다. 삭제는 연합 서버와 Bluesky의 글에도 반영됩니다. 다시 게시하면 다른 글이 되며, 아래 항목은 이어지지 않습니다.",
+      "lossReplies": "답글 {{count}}개",
+      "lossQuotes": "인용 {{count}}개",
+      "lossReposts": "리포스트 {{count}}개",
+      "lossReactions": "리액션 {{count}}개",
+      "lossPollVotes": "투표 {{count}}명",
+      "lossPinned": "고정 상태",
+      "overwritesDraft": "이 게시 대상에는 작성 중인 임시 저장이 있으며 교체됩니다.",
+      "dontShowAgain": "다시 표시하지 않기",
+      "confirmButton": "삭제하고 편집"
+    },
     "linkCardLoadEmbed": "임베드 불러오기",
     "referencePendingNotice": "아직 가져오지 않았습니다",
     "referenceGoneNotice": "참조를 찾을 수 없습니다",

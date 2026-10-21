@@ -5,6 +5,7 @@
     "profile": "Profil",
     "mutesBlocks": "Sourdines et blocages",
     "privacy": "Confidentialité",
+    "guides": "Masquer les guides insistants",
     "lists": "Listes",
     "appearance": "Apparence",
     "appTokens": "Jetons d'application",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "Demandes d'abonnement",
     "lockedAccountLabel": "Exiger une approbation pour les nouveaux abonnés",
     "lockedAccountDescription": "Lorsque cette option est activée, les nouvelles demandes d'abonnement ne sont pas acceptées automatiquement — vous devrez les approuver ou les rejeter depuis « Demandes d'abonnement » dans les Paramètres. Cela n'affecte que qui peut vous suivre ; cela ne change pas qui peut voir vos publications publiques. En désactivant cette option, toutes les demandes d'abonnement en attente seront automatiquement approuvées."
+  },
+  "guidesSettings": {
+    "title": "Masquer les guides insistants",
+    "intro": "Ce sont les guides que vous avez masqués avec « Ne plus afficher » dans une boîte de confirmation. Les guides activés ne sont pas affichés ; désactivez-les pour les revoir.",
+    "guides": {
+      "redraft_note": {
+        "title": "Confirmation de « Supprimer et rééditer »",
+        "description": "Boîte de confirmation qui indique ce qui sera perdu avant de supprimer une publication pour la rééditer."
+      }
+    }
   },
   "accountSettings": {
     "title": "Paramètres du compte",

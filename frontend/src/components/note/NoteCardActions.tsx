@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ReactionSummary } from "../../api/client";
+import { ReactionSummary, getErrorMessage } from "../../api/client";
 import { formatCount } from "../../lib/format";
+import { RedraftBlockReason } from "../../lib/redraft";
+import { useHiddenGuides } from "../../hooks/useHiddenGuides";
+import { useToast } from "../../contexts/ToastContext";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
@@ -9,6 +12,20 @@ import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./NoteCard.module.css";
+
+/** 「削除して編集再投稿」メニュー項目まわりの入力（自分の通常ポストのときだけ渡す）。 */
+export interface RedraftActionProps {
+  /** `null`なら選べる。それ以外は項目を不活性にして理由をツールチップで示す
+   * （`"checking"`は返信元・引用元の存在を確認している間）。 */
+  blockReason: RedraftBlockReason | "checking" | null;
+  /** ケバブメニューを開いたとき。返信元・引用元の存在確認を始める。 */
+  onMenuOpen: () => void;
+  /** 投票済みの人数（アンケート付きのとき。再投稿で失われる）。 */
+  pollVoters: number;
+  /** 再投稿先の下書きに作成中の内容があり、置き換わるか。 */
+  overwritesDraft: () => boolean;
+  onRedraft: () => void;
+}
 
 interface NoteCardActionsProps {
   noteId: string;
@@ -38,6 +55,7 @@ interface NoteCardActionsProps {
   onTogglePin: (e?: React.MouseEvent) => void;
   deleting: boolean;
   onDelete: () => void;
+  redraft?: RedraftActionProps;
   /** リアクションチップに50pxインデントを付けるか（`ReactionChips`の`indent`をそのまま透過）。 */
   indent?: boolean;
 }
@@ -73,9 +91,14 @@ export default function NoteCardActions({
   onTogglePin,
   deleting,
   onDelete,
+  redraft,
   indent = true,
 }: NoteCardActionsProps) {
   const { t } = useTranslation();
+  const { showError } = useToast();
+  const { isGuideHidden, setGuideHidden } = useHiddenGuides();
+  const [redraftConfirmOpen, setRedraftConfirmOpen] = useState(false);
+  const [dontShowRedraftGuide, setDontShowRedraftGuide] = useState(false);
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
@@ -85,6 +108,29 @@ export default function NoteCardActions({
   function confirmDelete() {
     setDeleteConfirmOpen(false);
     onDelete();
+  }
+
+  function requestRedraft() {
+    if (!redraft) return;
+    // 下書きが置き換わるときは、ガイドを非表示にしていても確認する（作成中の内容が失われる）。
+    if (isGuideHidden("redraft_note") && !redraft.overwritesDraft()) {
+      redraft.onRedraft();
+      return;
+    }
+    setDontShowRedraftGuide(false);
+    setRedraftConfirmOpen(true);
+  }
+
+  async function confirmRedraft() {
+    setRedraftConfirmOpen(false);
+    if (dontShowRedraftGuide) {
+      try {
+        await setGuideHidden("redraft_note", true);
+      } catch (err) {
+        showError(getErrorMessage(err));
+      }
+    }
+    redraft?.onRedraft();
   }
 
   const menuItems: ActionsMenuItem[] = [
@@ -121,6 +167,17 @@ export default function NoteCardActions({
       onClick: () => onTogglePin(),
       disabled: pinning,
     });
+    if (redraft) {
+      menuItems.push({
+        key: "redraft",
+        label: `✏️ ${t("home:noteCard.redraftButton")}`,
+        onClick: requestRedraft,
+        disabled: deleting || redraft.blockReason !== null,
+        title: redraft.blockReason
+          ? t(`home:noteCard.redraftBlocked.${redraft.blockReason}`)
+          : undefined,
+      });
+    }
     menuItems.push({
       key: "delete",
       label: `🗑️ ${t("common:delete")}`,
@@ -212,6 +269,7 @@ export default function NoteCardActions({
           items={menuItems}
           triggerTitle={t("home:noteCard.menuTitle")}
           triggerClassName={styles.actionBtn}
+          onOpen={redraft?.onMenuOpen}
         />
       </div>
 
@@ -239,6 +297,77 @@ export default function NoteCardActions({
           </button>
         </div>
       </Modal>
+      {redraft && (
+        <Modal
+          open={redraftConfirmOpen}
+          onClose={() => setRedraftConfirmOpen(false)}
+          title={t("home:noteCard.redraftConfirmModal.title")}
+        >
+          <p className={styles.modalText}>{t("home:noteCard.redraftConfirmModal.body")}</p>
+          {(replyCount > 0 ||
+            quoteCount > 0 ||
+            repostCount > 0 ||
+            totalReactionCount > 0 ||
+            redraft.pollVoters > 0 ||
+            pinned) && (
+          <ul className={styles.redraftLossList}>
+            {replyCount > 0 && (
+              <li>{t("home:noteCard.redraftConfirmModal.lossReplies", { count: replyCount })}</li>
+            )}
+            {quoteCount > 0 && (
+              <li>{t("home:noteCard.redraftConfirmModal.lossQuotes", { count: quoteCount })}</li>
+            )}
+            {repostCount > 0 && (
+              <li>{t("home:noteCard.redraftConfirmModal.lossReposts", { count: repostCount })}</li>
+            )}
+            {totalReactionCount > 0 && (
+              <li>
+                {t("home:noteCard.redraftConfirmModal.lossReactions", {
+                  count: totalReactionCount,
+                })}
+              </li>
+            )}
+            {redraft.pollVoters > 0 && (
+              <li>
+                {t("home:noteCard.redraftConfirmModal.lossPollVotes", {
+                  count: redraft.pollVoters,
+                })}
+              </li>
+            )}
+            {pinned && <li>{t("home:noteCard.redraftConfirmModal.lossPinned")}</li>}
+          </ul>
+          )}
+          {redraft.overwritesDraft() ? (
+            <p className={styles.modalText}>
+              {t("home:noteCard.redraftConfirmModal.overwritesDraft")}
+            </p>
+          ) : (
+            <label className={styles.redraftDontShow}>
+              <input
+                type="checkbox"
+                checked={dontShowRedraftGuide}
+                onChange={(e) => setDontShowRedraftGuide(e.target.checked)}
+              />
+              {t("home:noteCard.redraftConfirmModal.dontShowAgain")}
+            </label>
+          )}
+          <div className={styles.modalActions}>
+            <button
+              className={styles.modalPrimaryDanger}
+              onClick={confirmRedraft}
+              disabled={deleting}
+            >
+              {t("home:noteCard.redraftConfirmModal.confirmButton")}
+            </button>
+            <button
+              className={styles.modalSecondary}
+              onClick={() => setRedraftConfirmOpen(false)}
+            >
+              {t("common:cancel")}
+            </button>
+          </div>
+        </Modal>
+      )}
       <ReportModal
         open={reportOpen}
         onClose={() => setReportOpen(false)}

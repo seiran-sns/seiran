@@ -85,6 +85,27 @@
       "body": "Dies kann nicht rückgängig gemacht werden. Durch das Löschen wird der Beitrag auch von den Verbundservern und Bluesky entfernt.",
       "confirmButton": "Löschen"
     },
+    "redraftButton": "Löschen und neu verfassen",
+    "redraftBlocked": {
+      "replyUnavailable": "Neu verfassen nicht möglich, da der Beitrag, auf den geantwortet wird, nicht mehr existiert",
+      "quoteUnavailable": "Neu verfassen nicht möglich, da der zitierte Beitrag nicht mehr existiert",
+      "replyAndQuote": "Ein Beitrag, der Antwort und Zitat zugleich ist, kann nicht neu verfasst werden",
+      "attachmentUnavailable": "Neu verfassen nicht möglich, da Anhänge nicht übernommen werden können",
+      "checking": "Beitrag, auf den geantwortet oder der zitiert wird, wird geprüft …"
+    },
+    "redraftConfirmModal": {
+      "title": "Diesen Beitrag löschen und neu verfassen?",
+      "body": "Der Beitrag wird sofort gelöscht, damit du ihn bearbeiten und erneut veröffentlichen kannst. Das Löschen betrifft auch föderierte Server und Bluesky. Der neue Beitrag ist ein anderer Beitrag, und Folgendes wird nicht übernommen.",
+      "lossReplies": "{{count}} Antworten",
+      "lossQuotes": "{{count}} Zitate",
+      "lossReposts": "{{count}} Reposts",
+      "lossReactions": "{{count}} Reaktionen",
+      "lossPollVotes": "{{count}} Umfragestimmen",
+      "lossPinned": "Angeheftet-Status",
+      "overwritesDraft": "Für dieses Ziel gibt es einen laufenden Entwurf; er wird ersetzt.",
+      "dontShowAgain": "Nicht mehr anzeigen",
+      "confirmButton": "Löschen und bearbeiten"
+    },
     "linkCardLoadEmbed": "Einbettung laden",
     "referencePendingNotice": "Noch nicht importiert",
     "referenceGoneNotice": "Referenz nicht gefunden",

@@ -15,6 +15,8 @@ interface AuthContextValue {
   user: User | null;
   loading: boolean;
   login: (token: string, user: User) => void;
+  /** ログイン中のユーザー情報の一部を、サーバーで更新した直後にローカルへ反映する。 */
+  updateUser: (patch: Partial<User>) => void;
   /**
    * `preserveRedirect: false`（既定は`true`）を指定すると、ログアウトを検知した
    * `RequireAuth`が`/login`へリダイレクトする際に`?redirect=`を付与しない
@@ -37,6 +39,7 @@ const AuthContext = createContext<AuthContextValue>({
   user: null,
   loading: true,
   login: () => {},
+  updateUser: () => {},
   logout: () => {},
   suppressLoginRedirect: false,
   sessionUnresolved: false,
@@ -89,6 +92,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem("seiran_token", token);
     setUser(user);
     applyLanguagePreference(user);
+  }
+
+  function updateUser(patch: Partial<User>) {
+    setUser((current) => (current ? { ...current, ...patch } : current));
   }
 
   function logout(opts?: { preserveRedirect?: boolean }) {
@@ -158,7 +165,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <AuthContext.Provider
-      value={{ user, loading, login, logout, suppressLoginRedirect, sessionUnresolved }}
+      value={{ user, loading, login, updateUser, logout, suppressLoginRedirect, sessionUnresolved }}
     >
       {children}
     </AuthContext.Provider>

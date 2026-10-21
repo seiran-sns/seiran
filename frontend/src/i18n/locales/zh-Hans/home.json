@@ -85,6 +85,27 @@
       "body": "此操作无法撤销。删除也会从联邦服务器和 Bluesky 中删除该帖子。",
       "confirmButton": "删除"
     },
+    "redraftButton": "删除并重新编辑发布",
+    "redraftBlocked": {
+      "replyUnavailable": "回复的帖子已不存在，无法重新发布",
+      "quoteUnavailable": "引用的帖子已不存在，无法重新发布",
+      "replyAndQuote": "同时为回复和引用的帖子无法重新发布",
+      "attachmentUnavailable": "包含无法沿用的附件，无法重新发布",
+      "checking": "正在确认回复或引用的帖子…"
+    },
+    "redraftConfirmModal": {
+      "title": "要删除并重新编辑这条帖子吗？",
+      "body": "此帖子会立即删除，让你编辑后重新发布。删除也会波及联邦服务器和 Bluesky 上的帖子。重新发布后是另一条帖子，以下内容不会沿用。",
+      "lossReplies": "{{count}} 条回复",
+      "lossQuotes": "{{count}} 条引用",
+      "lossReposts": "{{count}} 次转发",
+      "lossReactions": "{{count}} 个反应",
+      "lossPollVotes": "{{count}} 人投票",
+      "lossPinned": "置顶状态",
+      "overwritesDraft": "此发布对象有编辑中的草稿，将被替换。",
+      "dontShowAgain": "不再显示",
+      "confirmButton": "删除并编辑"
+    },
     "linkCardLoadEmbed": "加载嵌入内容",
     "referencePendingNotice": "尚未导入",
     "referenceGoneNotice": "找不到引用对象",

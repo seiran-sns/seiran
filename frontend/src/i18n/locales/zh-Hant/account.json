@@ -5,6 +5,7 @@
     "profile": "個人檔案",
     "mutesBlocks": "靜音與封鎖",
     "privacy": "隱私",
+    "guides": "隱藏多餘的提示",
     "lists": "列表",
     "appearance": "外觀",
     "appTokens": "應用程式權杖",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "追蹤審核制",
     "lockedAccountLabel": "新追蹤需要審核",
     "lockedAccountDescription": "啟用後，新的追蹤請求不會自動成立，需要在設定的「追蹤請求」中批准或拒絕後才會生效。此設定僅影響追蹤關係的成立，不會改變誰可以查看你的公開貼文。關閉此設定後，目前所有待處理的追蹤請求將自動獲得批准。"
+  },
+  "guidesSettings": {
+    "title": "隱藏多餘的提示",
+    "intro": "這些是你在確認對話框中選擇「不再顯示」而隱藏的提示。開啟的提示不會顯示，關閉後會再次顯示。",
+    "guides": {
+      "redraft_note": {
+        "title": "「刪除並重新編輯發佈」的確認",
+        "description": "刪除貼文以重新編輯前，列出會失去的內容的確認對話框。"
+      }
+    }
   },
   "accountSettings": {
     "title": "帳戶設定",

@@ -5,6 +5,7 @@
     "profile": "윤곽",
     "mutesBlocks": "음소거 및 차단",
     "privacy": "개인정보 보호",
+    "guides": "참견하는 안내 숨기기",
     "lists": "기울기",
     "appearance": "모습",
     "appTokens": "앱 토큰",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "팔로우 요청",
     "lockedAccountLabel": "새 팔로우 승인 필요",
     "lockedAccountDescription": "활성화하면 새로운 팔로우 요청이 자동으로 성립되지 않으며, 설정의 「팔로우 요청」에서 승인 또는 거부해야 합니다. 이 설정은 나를 팔로우할 수 있는지에만 영향을 미치며, 공개 게시물을 볼 수 있는 사람은 바뀌지 않습니다. 이 설정을 끄면 그 시점에 남아있던 모든 대기 중인 팔로우 요청이 자동으로 승인됩니다."
+  },
+  "guidesSettings": {
+    "title": "참견하는 안내 숨기기",
+    "intro": "확인 대화상자에서 \"다시 표시하지 않기\"로 숨긴 안내입니다. 켜 둔 안내는 표시되지 않으며, 끄면 다시 표시됩니다.",
+    "guides": {
+      "redraft_note": {
+        "title": "\"삭제하고 다시 편집해 게시\" 확인",
+        "description": "글을 삭제해 다시 편집하기 전에 잃게 되는 것을 보여 주는 확인 대화상자."
+      }
+    }
   },
   "accountSettings": {
     "title": "계정 설정",

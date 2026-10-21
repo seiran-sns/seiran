@@ -5,6 +5,7 @@
     "profile": "Profile",
     "mutesBlocks": "Mutes & Blocks",
     "privacy": "Privacy",
+    "guides": "Hide nagging guides",
     "lists": "Lists",
     "appearance": "Appearance",
     "appTokens": "App tokens",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "Follow requests",
     "lockedAccountLabel": "Require approval for new followers",
     "lockedAccountDescription": "When enabled, new follow requests won't be accepted automatically — you'll need to approve or reject them from \"Follow requests\" in Settings. This only affects who can follow you; it doesn't change who can see your public posts. Turning this off automatically approves any pending follow requests."
+  },
+  "guidesSettings": {
+    "title": "Hide nagging guides",
+    "intro": "These are guides you hid with \"Don't show this again\" in a confirmation dialog. Guides that are turned on are not shown. Turn one off to see it again.",
+    "guides": {
+      "redraft_note": {
+        "title": "\"Delete & redraft\" confirmation",
+        "description": "Confirmation dialog listing what you lose before a post is deleted for redrafting."
+      }
+    }
   },
   "accountSettings": {
     "title": "Account settings",

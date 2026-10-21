@@ -29,6 +29,9 @@ export interface ComposerDraft {
    * 「最後に送信した値」ではなく毎回現在の表示言語がデフォルトになる仕様のため、ここでは
    * あくまで書きかけ下書きの一時保存としてのみ扱う。 */
   language: string;
+  /** 投稿ボタンのデフォルトに印を付ける公開範囲。省略時は最後に送信した値（新規・引用）か
+   * 返信先から決まる値（返信）。削除して編集再投稿が元の公開範囲を引き継ぐのに使う。 */
+  visibility?: "public" | "unlisted" | "followers_only";
 }
 
 export type DraftTarget =

@@ -208,6 +208,10 @@ function PostContent({
     handleTogglePin,
     deleting,
     handleDelete,
+    handleRedraft,
+    redraftOverwritesDraft,
+    redraftBlock,
+    checkRedraftTargets,
   } = useNoteCardActions(note, onUnreposted, onDeleted);
 
   const targetKey = profileQuery(note.user.username, note.user.domain);
@@ -728,6 +732,18 @@ function PostContent({
         onTogglePin={handleTogglePin}
         deleting={deleting}
         onDelete={handleDelete}
+        redraft={
+          // リポスト（本文を持たないラッパ）とDMは編集して投稿し直す対象ではない。
+          isSelf && !note.renote && note.visibility !== "direct"
+            ? {
+                blockReason: redraftBlock,
+                onMenuOpen: checkRedraftTargets,
+                pollVoters: note.poll?.votersCount ?? 0,
+                overwritesDraft: redraftOverwritesDraft,
+                onRedraft: handleRedraft,
+              }
+            : undefined
+        }
         indent={!large}
       />
 

@@ -242,12 +242,19 @@ export default function PostComposer({
 
   // 投稿ダイアログを閉じても書きかけを失わないよう、ユーザー×対象ポスト単位でローカル
   // ストレージに自動保存する（#193）。マウント時に一度だけ読み込み、以降は入力の都度保存。
+  // 依存は`user`全体ではなくidだけにする。`user`は設定の保存（`updateUser`）などで別の
+  // オブジェクトに差し替わるが、そのたびに`draftTarget`が変わると下書き保存のeffectが
+  // 再実行され、他所（削除して編集再投稿）が書き込んだばかりの下書きを、この
+  // コンポーザの古い（空の）内容で消してしまう。
+  const userId = user?.id;
+  const replyToId = replyTo?.id;
+  const quoteToId = quoteTo?.id;
   const draftTarget: DraftTarget | null = useMemo(() => {
-    if (!user) return null;
-    if (replyTo) return { mode: "reply", userId: user.id, postId: replyTo.id };
-    if (quoteTo) return { mode: "quote", userId: user.id, postId: quoteTo.id };
-    return { mode: "compose", userId: user.id };
-  }, [user, replyTo, quoteTo]);
+    if (userId === undefined) return null;
+    if (replyToId !== undefined) return { mode: "reply", userId, postId: replyToId };
+    if (quoteToId !== undefined) return { mode: "quote", userId, postId: quoteToId };
+    return { mode: "compose", userId };
+  }, [userId, replyToId, quoteToId]);
   const [initialDraft] = useState(() =>
     draftTarget ? loadComposerDraft(draftTarget) : null,
   );
@@ -268,6 +275,11 @@ export default function PostComposer({
   // ここでの初期値はreplyの場合使われない。
   const [defaultVisibility, setDefaultVisibility] = useState<Visibility>(
     composerDefaults?.visibility ?? "public",
+  );
+  // 下書きが持つ公開範囲（削除して編集再投稿が元の公開範囲を引き継ぐ）。あれば、上の
+  // 「最後に送信した値」や返信先から決まる値より優先して、デフォルトの投稿ボタンにする。
+  const [draftVisibility, setDraftVisibility] = useState<Visibility | null>(
+    initialDraft?.visibility ?? null,
   );
   // Tabキーで投稿ボタンにフォーカスが乗っている間は、そのボタンが赤枠マーカー対象になる
   // （Ctrl+Enterの送信先が打鍵するまで分からないUXを避けるため）。
@@ -427,9 +439,11 @@ export default function PostComposer({
       cwGuide,
       linkCardUrls: checkedLinkCardUrls,
       language,
+      ...(draftVisibility ? { visibility: draftVisibility } : {}),
     });
   }, [
     draftTarget,
+    draftVisibility,
     text,
     attachments,
     deliverFedi,
@@ -467,6 +481,7 @@ export default function PostComposer({
       );
       setDeliverFedi(draft?.deliverFedi ?? fediReplyAllowed);
       setDeliverBsky(draft?.deliverBsky ?? bskyReplyAllowed);
+      setDraftVisibility(draft?.visibility ?? null);
     });
   }, [draftTarget, fediReplyAllowed, bskyReplyAllowed]);
 
@@ -705,6 +720,7 @@ export default function PostComposer({
       setCheckedLinkCardUrls([]);
       setLanguage(defaultPostLanguage());
       if (draftTarget) clearComposerDraft(draftTarget);
+      setDraftVisibility(null);
       // 新規投稿・引用は、実際に送信した公開範囲・配送先を次回以降のデフォルトボタンとして
       // 記憶する（返信は親ポストから決まる専用のデフォルトを持つため対象外）。
       if (!replyTo) {
@@ -723,9 +739,13 @@ export default function PostComposer({
   // 親ポストから決まるreplyConstraint.defaultValue、新規投稿・引用はローカルストレージへ
   // 永続化したdefaultVisibility）を、キーボードショートカット（Ctrl+Enter等）の送信先および
   // 赤枠マーカーの対象として使う。
+  const replyDefaultVisibility =
+    draftVisibility && replyConstraint?.options.includes(draftVisibility)
+      ? draftVisibility
+      : replyConstraint?.defaultValue;
   const effectiveDefaultVisibility: Visibility = replyTo
-    ? focusedVisibility ?? replyConstraint?.defaultValue ?? "public"
-    : focusedVisibility ?? defaultVisibility;
+    ? focusedVisibility ?? replyDefaultVisibility ?? "public"
+    : focusedVisibility ?? draftVisibility ?? defaultVisibility;
 
   function handlePost(e: FormEvent) {
     e.preventDefault();

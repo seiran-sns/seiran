@@ -1,10 +1,22 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ApiError, getErrorMessage, Note, ReactionSummary } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { ReactionUpdate, useStreamingContext } from "../contexts/StreamingContext";
 import { getReactionState, setReactionState, useReactionState } from "../stores/reactionStore";
+import { useComposer } from "../contexts/ComposerContext";
+import {
+  clearComposerDraft,
+  loadComposerDraft,
+  saveComposerDraft,
+} from "../lib/composerDraft";
+import {
+  buildRedraftDraft,
+  RedraftBlockReason,
+  redraftBlockReason,
+  redraftDraftTarget,
+} from "../lib/redraft";
 
 /**
  * リアクションの楽観的更新を適用した新しい配列を返す。
@@ -73,6 +85,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   const { user } = useAuth();
   const { showError } = useToast();
   const { registerReaction } = useStreamingContext();
+  const { openReply, openQuote, openCompose } = useComposer();
 
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
@@ -190,6 +203,91 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
     }
   }
 
+  /** 削除すると、再投稿先の下書き（作成中の内容）が置き換わるか。 */
+  function redraftOverwritesDraft() {
+    if (!user) return false;
+    const existing = loadComposerDraft(redraftDraftTarget(note, user.id));
+    return !!existing && existing.text.trim() !== "";
+  }
+
+  // 返信元・引用元が今も存在するか。`replyStatus`/`quoteStatus`は取り込み時の状態で、
+  // 後から削除された場合は変わらないため、メニューを開くたびに取り直す。
+  const [targetCheck, setTargetCheck] = useState<"idle" | "checking" | "ok" | "unavailable">("idle");
+  const targetCheckRunning = useRef(false);
+
+  function fetchRedraftTargets() {
+    return Promise.all([
+      note.replyId ? api.notes.get(note.replyId) : undefined,
+      note.quoteId ? api.notes.get(note.quoteId) : undefined,
+    ]);
+  }
+
+  function isTargetGone(err: unknown) {
+    return err instanceof ApiError && (err.status === 404 || err.status === 403);
+  }
+
+  function checkRedraftTargets() {
+    if ((!note.replyId && !note.quoteId) || targetCheckRunning.current) return;
+    targetCheckRunning.current = true;
+    setTargetCheck("checking");
+    fetchRedraftTargets()
+      .then(() => setTargetCheck("ok"))
+      // 通信の失敗は存在しないとは限らないので不活性にしない（実行時にも確認し直す）。
+      .catch((err) => setTargetCheck(isTargetGone(err) ? "unavailable" : "idle"))
+      .finally(() => {
+        targetCheckRunning.current = false;
+      });
+  }
+
+  const staticBlock = redraftBlockReason(note);
+  const redraftBlock: RedraftBlockReason | "checking" | null =
+    staticBlock ??
+    (targetCheck === "checking"
+      ? "checking"
+      : targetCheck === "unavailable"
+        ? note.replyId
+          ? "replyUnavailable"
+          : "quoteUnavailable"
+        : null);
+
+  /**
+   * 「削除して編集再投稿」: ポストの内容を下書きへ保存してから削除し、その下書きでコンポーザを開く。
+   * 削除を先に確定させるのは、編集中にリプライやリアクションが付き続けるのを防ぐため。
+   * 返信元・引用元は削除前に取得し、取れなければ何も消さずに中止する。下書きを削除より前に
+   * 保存するのは、削除後にタブが閉じても内容を失わないため。
+   */
+  async function handleRedraft() {
+    if (deleting || !user || staticBlock) return;
+    setDeleting(true);
+    const target = redraftDraftTarget(note, user.id);
+    const previous = loadComposerDraft(target);
+    try {
+      const [replyTarget, quoteTarget] = await fetchRedraftTargets().catch((err) => {
+        if (!isTargetGone(err)) throw err;
+        setTargetCheck("unavailable");
+        throw new Error(
+          t(`home:noteCard.redraftBlocked.${note.replyId ? "replyUnavailable" : "quoteUnavailable"}`),
+        );
+      });
+      saveComposerDraft(target, buildRedraftDraft(note));
+      try {
+        await api.notes.delete(note.id);
+      } catch (err) {
+        if (previous) saveComposerDraft(target, previous);
+        else clearComposerDraft(target);
+        throw err;
+      }
+      onDeleted?.();
+      if (replyTarget) openReply(replyTarget);
+      else if (quoteTarget) openQuote(quoteTarget);
+      else openCompose();
+    } catch (err) {
+      showError(getErrorMessage(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   return {
     isSelf,
     isPrivateRepostTarget,
@@ -208,5 +306,9 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
     handleTogglePin,
     deleting,
     handleDelete,
+    handleRedraft,
+    redraftOverwritesDraft,
+    redraftBlock,
+    checkRedraftTargets,
   };
 }

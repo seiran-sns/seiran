@@ -85,6 +85,27 @@
       "body": "この操作は取り消せません。削除すると連合先・Bluesky上の投稿も削除されます。",
       "confirmButton": "削除する"
     },
+    "redraftButton": "削除して編集再投稿",
+    "redraftBlocked": {
+      "replyUnavailable": "返信先が存在しないため再投稿できません",
+      "quoteUnavailable": "引用元が存在しないため再投稿できません",
+      "replyAndQuote": "返信と引用を同時に持つポストは再投稿できません",
+      "attachmentUnavailable": "引き継げない添付があるため再投稿できません",
+      "checking": "返信先・引用元を確認しています…"
+    },
+    "redraftConfirmModal": {
+      "title": "削除して編集再投稿しますか？",
+      "body": "このポストをすぐに削除し、内容を編集して投稿し直せるようにします。削除は連合先・Bluesky上のポストにも及びます。再投稿すると別のポストになり、以下は引き継がれません。",
+      "lossReplies": "リプライ {{count}}件",
+      "lossQuotes": "引用 {{count}}件",
+      "lossReposts": "リポスト {{count}}件",
+      "lossReactions": "リアクション {{count}}件",
+      "lossPollVotes": "アンケートの投票 {{count}}人",
+      "lossPinned": "ピン留め",
+      "overwritesDraft": "この投稿先には作成中の下書きがあり、置き換えられます。",
+      "dontShowAgain": "今後は表示しない",
+      "confirmButton": "削除して編集する"
+    },
     "bridgeConfirmModal": {
       "title": "これはブリッジポストです",
       "body": "brid.gyが別プロトコルへ自動生成したコピーです。このまま返信・リアクションするか、元ポストを表示できます。",

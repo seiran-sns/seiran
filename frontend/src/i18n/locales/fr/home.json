@@ -85,6 +85,27 @@
       "body": "Cela ne peut pas être annulé. La suppression supprimera également la publication des serveurs fédérés et de Bluesky.",
       "confirmButton": "Supprimer"
     },
+    "redraftButton": "Supprimer et rééditer",
+    "redraftBlocked": {
+      "replyUnavailable": "Impossible de rééditer : la publication à laquelle il répond n'existe plus",
+      "quoteUnavailable": "Impossible de rééditer : la publication citée n'existe plus",
+      "replyAndQuote": "Impossible de rééditer une publication qui est à la fois une réponse et une citation",
+      "attachmentUnavailable": "Impossible de rééditer : certaines pièces jointes ne peuvent pas être reprises",
+      "checking": "Vérification de la publication à laquelle il répond ou qu'il cite…"
+    },
+    "redraftConfirmModal": {
+      "title": "Supprimer et rééditer cette publication ?",
+      "body": "La publication est supprimée immédiatement pour que vous puissiez la modifier et la republier. La suppression atteint aussi les serveurs fédérés et Bluesky. La nouvelle publication est une autre publication, et les éléments suivants ne sont pas repris.",
+      "lossReplies": "{{count}} réponses",
+      "lossQuotes": "{{count}} citations",
+      "lossReposts": "{{count}} reposts",
+      "lossReactions": "{{count}} réactions",
+      "lossPollVotes": "{{count}} votes au sondage",
+      "lossPinned": "Statut épinglé",
+      "overwritesDraft": "Un brouillon est en cours pour cette destination ; il sera remplacé.",
+      "dontShowAgain": "Ne plus afficher",
+      "confirmButton": "Supprimer et modifier"
+    },
     "linkCardLoadEmbed": "Charger l'intégration",
     "referencePendingNotice": "Pas encore importé",
     "referenceGoneNotice": "Référence introuvable",

@@ -31,6 +31,7 @@ const MutesBlocksSettingsPage = lazy(() => import("./pages/MutesBlocksSettingsPa
 const NoteDetailPage = lazy(() => import("./pages/NoteDetailPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const PrivacySettingsPage = lazy(() => import("./pages/PrivacySettingsPage"));
+const GuidesSettingsPage = lazy(() => import("./pages/GuidesSettingsPage"));
 const ProfilePage = lazy(() => import("./pages/ProfilePage"));
 const ProfileEditPage = lazy(() => import("./pages/ProfileEditPage"));
 const ResetPassword = lazy(() => import("./pages/ResetPassword"));
@@ -208,6 +209,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <PrivacySettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/guides"
+          element={
+            <RequireAuth>
+              <GuidesSettingsPage />
             </RequireAuth>
           }
         />

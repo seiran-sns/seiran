@@ -10,6 +10,8 @@ export interface User {
   avatar_url?: string;
   /** 表示言語設定（`ja` / `en` / `zh` / `ko` / `es` / `de` / `fr`）。`null`/`undefined` は「自動」。 */
   language_preference?: string | null;
+  /** 「今後は表示しない」にしたガイドのキー（設定画面「おせっかいなガイドの非表示」）。 */
+  hidden_guides: string[];
   /** `GET /api/auth/me`のたびに再発行される新しいJWT（スライディング延命）。
    * 呼び出し側でlocalStorageへ保存し直すこと。 */
   token: string;
@@ -248,6 +250,9 @@ export interface PasskeySummary {
 }
 
 export interface NoteAttachment {
+  /** 自サーバーにアップロードされたメディアのid（ドライブのファイルidと同じ）。
+   * リモート添付は無い。削除して編集再投稿が添付を引き継ぐのに使う。 */
+  id?: string;
   url: string;
   mimeType: string;
   width: number;

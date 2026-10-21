@@ -5,6 +5,7 @@
     "profile": "Perfil",
     "mutesBlocks": "Silencios y bloques",
     "privacy": "Privacidad",
+    "guides": "Ocultar guías insistentes",
     "lists": "Liza",
     "appearance": "Apariencia",
     "appTokens": "Fichas de aplicación",
@@ -40,6 +41,16 @@
     "followApprovalTitle": "Solicitudes de seguimiento",
     "lockedAccountLabel": "Requerir aprobación para nuevos seguidores",
     "lockedAccountDescription": "Cuando está activado, las nuevas solicitudes de seguimiento no se aceptarán automáticamente; deberás aprobarlas o rechazarlas desde «Solicitudes de seguimiento» en Ajustes. Esto solo afecta a quién puede seguirte; no cambia quién puede ver tus publicaciones públicas. Al desactivarlo, se aprobarán automáticamente todas las solicitudes de seguimiento pendientes."
+  },
+  "guidesSettings": {
+    "title": "Ocultar guías insistentes",
+    "intro": "Son las guías que ocultaste con «No volver a mostrar» en un cuadro de confirmación. Las guías activadas no se muestran; desactívalas para verlas de nuevo.",
+    "guides": {
+      "redraft_note": {
+        "title": "Confirmación de «Eliminar y reeditar»",
+        "description": "Cuadro de confirmación que indica qué se pierde antes de eliminar una publicación para reeditarla."
+      }
+    }
   },
   "accountSettings": {
     "title": "Configuraciones de la cuenta",

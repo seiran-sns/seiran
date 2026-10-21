@@ -772,3 +772,19 @@
 }
 
 /* フォロースイッチのポップオーバー自体は UserHoverPopover.module.css 参照。 */
+
+.redraftLossList {
+  margin: 0 0 16px;
+  padding-left: 1.4em;
+  font-size: 0.9rem;
+  line-height: 1.7;
+}
+
+.redraftDontShow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 20px;
+  font-size: 0.88rem;
+  cursor: pointer;
+}

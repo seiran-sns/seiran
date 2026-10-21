@@ -20,6 +20,7 @@ const BASE_ITEMS: SettingsMenuItem[] = [
   { to: "/settings/profile", icon: "🪪", labelKey: "menu.profile" },
   { to: "/settings/mutes-blocks", icon: "🚫", labelKey: "menu.mutesBlocks" },
   { to: "/settings/privacy", icon: "🔒", labelKey: "menu.privacy" },
+  { to: "/settings/guides", icon: "🔕", labelKey: "menu.guides" },
   { to: "/settings/lists", icon: "📋", labelKey: "menu.lists" },
   { to: "/settings/appearance", icon: "🎨", labelKey: "menu.appearance" },
   { to: "/settings/app-tokens", icon: "🔑", labelKey: "menu.appTokens" },
