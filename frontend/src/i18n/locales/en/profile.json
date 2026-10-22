@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "Publish to Fediverse",
     "bioLabel": "Bio",
     "bioPlaceholder": "Tell us about yourself",
+    "remainingCount": "{{count}} left",
     "fieldsLabel": "Profile fields (links, etc. — up to {{count}})",
     "fieldNamePlaceholder": "Label (e.g. Website)",
     "fieldValuePlaceholder": "Value (e.g. https://example.com)",

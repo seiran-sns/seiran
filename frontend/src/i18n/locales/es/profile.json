@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "Publicar en Fediverse",
     "bioLabel": "Biografía",
     "bioPlaceholder": "Cuéntanos sobre ti",
+    "remainingCount": "{{count}} izquierda",
     "fieldsLabel": "Campos de perfil (enlaces, etc., hasta {{count}})",
     "fieldNamePlaceholder": "Etiqueta (por ejemplo, sitio web)",
     "fieldValuePlaceholder": "Valor (por ejemplo, https://example.com)",

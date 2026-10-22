@@ -4,11 +4,18 @@ import { useTranslation } from "react-i18next";
 import { ActorSuggestion, AlsoKnownAsItem, api, DriveFile, getErrorMessage, ProfileField } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
+import { calcLimit } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
 
 /** プロフィール編集フォームで扱う固定スロット数（#62、Mastodon のデフォルト4件に合わせる）。 */
 const PROFILE_FIELD_SLOTS = 4;
+
+/** Bsky の `app.bsky.actor.profile` の `displayName`・`description` の上限（サーバー側と同じ値）。 */
+const DISPLAY_NAME_MAX_GRAPHEMES = 64;
+const DISPLAY_NAME_MAX_BYTES = 640;
+const BIO_MAX_GRAPHEMES = 256;
+const BIO_MAX_BYTES = 2_560;
 
 function emptyProfileFields(): ProfileField[] {
   return Array.from({ length: PROFILE_FIELD_SLOTS }, () => ({ name: "", value: "" }));
@@ -160,8 +167,13 @@ export default function ProfileEditPage() {
     }
   }
 
+  const displayNameLimit = calcLimit(displayName, DISPLAY_NAME_MAX_GRAPHEMES, DISPLAY_NAME_MAX_BYTES);
+  const bioLimit = calcLimit(bio, BIO_MAX_GRAPHEMES, BIO_MAX_BYTES);
+  const overLimit = displayNameLimit.over || bioLimit.over;
+
   async function save(e: FormEvent) {
     e.preventDefault();
+    if (overLimit) return;
     setSaving(true);
     setError("");
     setSaved(false);
@@ -233,8 +245,10 @@ export default function ProfileEditPage() {
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder={user?.username}
-              maxLength={80}
             />
+            <span className={`${styles.charCount} ${displayNameLimit.over ? styles.charCountOver : ""}`}>
+              {t("profile:profileEditPage.remainingCount", { count: displayNameLimit.remaining })}
+            </span>
           </label>
 
           <label className={styles.label}>
@@ -246,6 +260,9 @@ export default function ProfileEditPage() {
               rows={5}
               placeholder={t("profile:profileEditPage.bioPlaceholder")}
             />
+            <span className={`${styles.charCount} ${bioLimit.over ? styles.charCountOver : ""}`}>
+              {t("profile:profileEditPage.remainingCount", { count: bioLimit.remaining })}
+            </span>
           </label>
 
           <label className={styles.label}>
@@ -396,7 +413,7 @@ export default function ProfileEditPage() {
             </ul>
           </div>
 
-          <button className={styles.save} type="submit" disabled={saving}>
+          <button className={styles.save} type="submit" disabled={saving || overLimit}>
             {saving ? t("common:saving") : t("common:save")}
           </button>
         </form>

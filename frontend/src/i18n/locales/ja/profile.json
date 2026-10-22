@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "Fediverseで公開する",
     "bioLabel": "自己紹介",
     "bioPlaceholder": "あなたについて教えてください",
+    "remainingCount": "残り {{count}}",
     "fieldsLabel": "プロフィール項目（リンク等、最大{{count}}件）",
     "fieldNamePlaceholder": "ラベル（例: サイト）",
     "fieldValuePlaceholder": "値（例: https://example.com）",

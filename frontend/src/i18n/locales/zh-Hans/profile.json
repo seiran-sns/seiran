@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "在Fediverse上公开",
     "bioLabel": "简介",
     "bioPlaceholder": "告诉我们你自己",
+    "remainingCount": "剩余 {{count}} 字",
     "fieldsLabel": "个人资料字段（链接等 - 最多 {{count}}）",
     "fieldNamePlaceholder": "标签（例如网站）",
     "fieldValuePlaceholder": "值（例如 https://example.com）",

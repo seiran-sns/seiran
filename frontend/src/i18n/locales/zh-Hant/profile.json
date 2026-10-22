@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "在Fediverse上公開",
     "bioLabel": "簡介",
     "bioPlaceholder": "介紹一下自己",
+    "remainingCount": "剩餘 {{count}} 字",
     "fieldsLabel": "個人檔案欄位（連結等，最多 {{count}} 項）",
     "fieldNamePlaceholder": "標籤（例如網站）",
     "fieldValuePlaceholder": "值（例如 https://example.com）",

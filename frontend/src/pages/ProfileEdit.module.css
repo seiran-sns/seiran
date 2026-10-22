@@ -147,6 +147,18 @@
   margin: 0 0 12px;
 }
 
+.charCount {
+  align-self: flex-end;
+  margin-top: 4px;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.charCountOver {
+  color: var(--danger);
+  font-weight: 600;
+}
+
 .hint {
   font-size: 0.78rem;
   color: var(--text-faint);

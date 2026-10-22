@@ -67,6 +67,7 @@
     "birthdayPublicLabel": "Fediverse에 공개",
     "bioLabel": "바이오",
     "bioPlaceholder": "자신에 대해 알려주세요",
+    "remainingCount": "{{count}} 남음",
     "fieldsLabel": "프로필 필드(링크 등 - 최대 {{count}})",
     "fieldNamePlaceholder": "라벨(예: 웹사이트)",
     "fieldValuePlaceholder": "값(예: https://example.com)",

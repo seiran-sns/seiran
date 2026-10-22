@@ -90,5 +90,7 @@
   "USERNAME_RESERVED": "Ce nom d'utilisateur est réservé et ne peut pas être utilisé",
   "USERNAME_TAKEN": "Ce nom d'utilisateur est déjà pris",
   "USER_ID_OR_USERNAME_REQUIRED": "Veuillez spécifier un identifiant ou un nom d'utilisateur",
-  "USER_NOT_FOUND": "Utilisateur introuvable"
+  "USER_NOT_FOUND": "Utilisateur introuvable",
+  "DISPLAY_NAME_TOO_LONG": "Le nom d'affichage est trop long (64 caractères max.)",
+  "BIO_TOO_LONG": "La bio est trop longue (256 caractères max.)"
 }

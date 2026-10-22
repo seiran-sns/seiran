@@ -161,6 +161,23 @@ export function calcRemaining(text: string, deliverBsky: boolean): number {
   return Math.min(maxGraphemes - graphemes, Math.floor((maxBytes - bytes) / 3));
 }
 
+/**
+ * 書記素数とUTF-8バイト数の両方の上限に対する残数と、超過しているかを返す。
+ * 残数は `calcRemaining` と同じく、バイト側は1文字3バイトとみなして書記素数に換算する。
+ */
+export function calcLimit(
+  text: string,
+  maxGraphemes: number,
+  maxBytes: number,
+): { remaining: number; over: boolean } {
+  const graphemes = countGraphemes(text);
+  const bytes = countUtf8Bytes(text);
+  return {
+    remaining: Math.min(maxGraphemes - graphemes, Math.floor((maxBytes - bytes) / 3)),
+    over: graphemes > maxGraphemes || bytes > maxBytes,
+  };
+}
+
 const BODY_URL_RE = /https?:\/\/[^\s<>()[\]]+/g;
 
 /**

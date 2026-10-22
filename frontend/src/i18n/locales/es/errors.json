@@ -90,5 +90,7 @@
   "USERNAME_RESERVED": "Este nombre de usuario está reservado y no se puede utilizar.",
   "USERNAME_TAKEN": "Este nombre de usuario ya está en uso",
   "USER_ID_OR_USERNAME_REQUIRED": "Por favor especifique una ID de usuario o nombre de usuario",
-  "USER_NOT_FOUND": "Usuario no encontrado"
+  "USER_NOT_FOUND": "Usuario no encontrado",
+  "DISPLAY_NAME_TOO_LONG": "El nombre para mostrar es demasiado largo (máx. 64 caracteres)",
+  "BIO_TOO_LONG": "La biografía es demasiado larga (máx. 256 caracteres)"
 }

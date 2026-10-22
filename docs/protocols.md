@@ -268,6 +268,7 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 - `deleteRecord`/`applyWrites#delete` の `app.bsky.feed.post` は `post_from_record::delete_post_by_rkey` が `DELETE /api/notes/:id` と同じ処理をする（本人以外は `NOT_YOUR_POST`、論理削除、Fedi 配送済みなら `DeleteNote`、最後に ATP から削除）。
 - その他のコレクションは `commit_generic_record`/`delete_atp_record_generic` が汎用に扱う（`json_to_ipld` で DAG-CBOR 化。blob 参照は `collect_blob_cids` が再帰的に集めて `subscribeRepos` の `blobs` に載せる）。
 - `applyWrites` は要素ごとに別 commit で順に処理する（仕様と異なる簡易実装。途中で失敗すると前の要素はコミット済みのまま残る）。
+- `app.bsky.actor.profile` の `displayName`（64書記素・640バイト）と `description`（256書記素・2560バイト）には lexicon の上限があり、超過したレコードは AppView にプロフィールごと採用されない（表示名・アイコン・Bio がすべて出なくなる）。そのため `users::update_profile` は、これを超える `display_name`・`bio` を `DISPLAY_NAME_TOO_LONG`・`BIO_TOO_LONG`（400）で拒否する（Mastodon 互換の `update_credentials` も同じ関数を通る）。
 - `app.bsky.actor.profile` はコミットに加えて `sync_profile_to_actors` が `actors`（`display_name`/`bio`/`avatar_media_id`/`banner_media_id`）にも反映する。`commit_profile` は `actors` → レコードの片方向なので、これが無いと外部クライアントでの編集が seiran に反映されず、次に seiran でプロフィールを編集したとき NULL の `avatar_media_id` で再コミットして画像が消える。avatar/banner の blob は `resolve_blob_media_id` で `media_files` に解決する。逆方向の `commit_profile`/`encode_bsky_actor_profile` も banner を含める（DAG-CBOR のキー順は `avatar` の後、`createdAt` の前）。AP 側も Actor 文書と Update(Person) の `image` に banner を載せる。
 
 ### uploadBlob の2つの呼び出し元
