@@ -5,6 +5,7 @@ use axum::{
     Json,
 };
 use serde::{Deserialize, Serialize};
+use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
@@ -1493,6 +1494,35 @@ pub struct UpdateProfileResponse {
 const MAX_PROFILE_FIELD_NAME_LEN: usize = 50;
 const MAX_PROFILE_FIELD_VALUE_LEN: usize = 255;
 
+/// 表示名・自己紹介の上限。Bsky に `app.bsky.actor.profile` としてそのままコミットするため、
+/// lexicon の `displayName`（64 書記素・640 バイト）・`description`（256 書記素・2560 バイト）
+/// に合わせる。超過したレコードは AppView にプロフィールごと採用されない。
+const MAX_DISPLAY_NAME_GRAPHEMES: usize = 64;
+const MAX_DISPLAY_NAME_BYTES: usize = 640;
+const MAX_BIO_GRAPHEMES: usize = 256;
+const MAX_BIO_BYTES: usize = 2_560;
+
+fn exceeds_profile_text_limit(text: &str, max_graphemes: usize, max_bytes: usize) -> bool {
+    text.len() > max_bytes || text.graphemes(true).count() > max_graphemes
+}
+
+/// リクエストで指定された表示名・自己紹介が Bsky プロフィールの上限内かを検証する
+/// （未指定の項目は現在値を保持するので対象外）。
+fn validate_profile_text_lengths(
+    display_name: Option<&str>,
+    bio: Option<&str>,
+) -> Result<(), ApiError> {
+    if display_name.is_some_and(|s| {
+        exceeds_profile_text_limit(s, MAX_DISPLAY_NAME_GRAPHEMES, MAX_DISPLAY_NAME_BYTES)
+    }) {
+        return Err(ApiError::BadRequest("DISPLAY_NAME_TOO_LONG".to_owned()));
+    }
+    if bio.is_some_and(|s| exceeds_profile_text_limit(s, MAX_BIO_GRAPHEMES, MAX_BIO_BYTES)) {
+        return Err(ApiError::BadRequest("BIO_TOO_LONG".to_owned()));
+    }
+    Ok(())
+}
+
 /// リクエストで指定された `profile_fields` を検証し、DB へ保存する JSON 値を組み立てる。
 /// 前後空白を除去し、ラベル・値のどちらかが空になった行は無視する（フォームの空欄行を
 /// 気にせず送信できるようにするため）。件数・長さの上限超過は 400 を返す。
@@ -1558,6 +1588,10 @@ pub async fn update_profile(
         Ok(u) => u,
         Err(e) => return e.into_response(),
     };
+
+    if let Err(e) = validate_profile_text_lengths(req.display_name.as_deref(), req.bio.as_deref()) {
+        return e.into_response();
+    }
 
     // 現在のプロフィールを取得
     let current: ActorProfileRow = match state
@@ -2056,4 +2090,59 @@ fn parse_handle_from_uri(uri: &str) -> (String, String) {
     let path = parts.next().unwrap_or("");
     let handle = path.rsplit('/').next().unwrap_or(path).to_string();
     (handle, domain)
+}
+
+#[cfg(test)]
+mod profile_text_length_tests {
+    use super::*;
+
+    fn code(r: Result<(), ApiError>) -> Option<String> {
+        match r {
+            Err(ApiError::BadRequest(c)) => Some(c),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn accepts_values_at_the_limit_and_unspecified_fields() {
+        let name = "あ".repeat(MAX_DISPLAY_NAME_GRAPHEMES);
+        let bio = "a".repeat(MAX_BIO_GRAPHEMES);
+        assert!(validate_profile_text_lengths(Some(&name), Some(&bio)).is_ok());
+        assert!(validate_profile_text_lengths(None, None).is_ok());
+    }
+
+    #[test]
+    fn rejects_display_name_over_grapheme_limit() {
+        let name = "a".repeat(MAX_DISPLAY_NAME_GRAPHEMES + 1);
+        assert_eq!(
+            code(validate_profile_text_lengths(Some(&name), None)).as_deref(),
+            Some("DISPLAY_NAME_TOO_LONG")
+        );
+    }
+
+    #[test]
+    fn rejects_bio_over_grapheme_limit() {
+        let bio = "あ".repeat(MAX_BIO_GRAPHEMES + 1);
+        assert_eq!(
+            code(validate_profile_text_lengths(None, Some(&bio))).as_deref(),
+            Some("BIO_TOO_LONG")
+        );
+    }
+
+    #[test]
+    fn rejects_bio_over_byte_limit_even_within_grapheme_limit() {
+        // ZWJ 結合絵文字は 1 書記素でも 25 バイトあり、256 書記素以内でも 2560 バイトを超えうる。
+        let bio = "👨‍👩‍👧‍👦".repeat(MAX_BIO_GRAPHEMES);
+        assert!(bio.graphemes(true).count() <= MAX_BIO_GRAPHEMES);
+        assert_eq!(
+            code(validate_profile_text_lengths(None, Some(&bio))).as_deref(),
+            Some("BIO_TOO_LONG")
+        );
+    }
+
+    #[test]
+    fn counts_combined_emoji_as_one_grapheme() {
+        let name = "👨‍👩‍👧‍👦".repeat(MAX_DISPLAY_NAME_GRAPHEMES / 4);
+        assert!(validate_profile_text_lengths(Some(&name), None).is_ok());
+    }
 }

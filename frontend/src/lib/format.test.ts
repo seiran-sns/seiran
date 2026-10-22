@@ -3,6 +3,7 @@ import type { Note } from "../api/client";
 import {
   acct,
   calcRemaining,
+  calcLimit,
   countGraphemes,
   countUtf8Bytes,
   deliveryBadges,
@@ -317,5 +318,17 @@ describe("pollRemainingTime", () => {
 
   it("不正な日時文字列ならnull", () => {
     expect(pollRemainingTime("not-a-date", Date.now())).toBeNull();
+  });
+});
+
+describe("calcLimit", () => {
+  it("上限ちょうどは超過扱いにならない", () => {
+    expect(calcLimit("a".repeat(256), 256, 2560)).toEqual({ remaining: 0, over: false });
+  });
+  it("書記素数が上限を超えると超過", () => {
+    expect(calcLimit("a".repeat(257), 256, 2560).over).toBe(true);
+  });
+  it("書記素数が上限内でもバイト数が超えると超過", () => {
+    expect(calcLimit("👨‍👩‍👧‍👦".repeat(256), 256, 2560).over).toBe(true);
   });
 });

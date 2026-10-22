@@ -90,5 +90,7 @@
   "USERNAME_RESERVED": "このユーザー名は予約されているため使用できません",
   "USERNAME_TAKEN": "このユーザー名はすでに使用されています",
   "USER_ID_OR_USERNAME_REQUIRED": "ユーザーIDまたはユーザー名を指定してください",
-  "USER_NOT_FOUND": "ユーザーが見つかりません"
+  "USER_NOT_FOUND": "ユーザーが見つかりません",
+  "DISPLAY_NAME_TOO_LONG": "表示名が長すぎます（64文字まで）",
+  "BIO_TOO_LONG": "自己紹介が長すぎます（256文字まで）"
 }
