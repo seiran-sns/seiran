@@ -39,9 +39,9 @@ pub use repo::{
     cid_from_sha256_hex, cid_from_str, cid_to_string, collect_blob_cids, create_commit,
     decode_dagcbor_to_json, encode_bsky_actor_profile, encode_bsky_feed_like,
     encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_follow, encode_car,
-    encode_generic_record, generate_tid, ipld_to_json, json_to_ipld, BskyEmbed, BskyFacet,
-    BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention, BskyImage, BskyPostReply,
-    BskyRefRecord, Cid, CommitEvtOp, RepoError,
+    encode_generic_record, generate_tid, ipld_to_json, json_to_ipld, sha256_hexes_of_blob_cids,
+    BskyEmbed, BskyFacet, BskyFacetFeature, BskyFacetIndex, BskyFacetLink, BskyFacetMention,
+    BskyImage, BskyPostReply, BskyRefRecord, Cid, CommitEvtOp, RepoError,
 };
 pub use service::{AtpCommitError, AtpCommitEvent, AtpCommitService};
 pub use service_auth::{sign_service_auth_jwt, ServiceAuthError};

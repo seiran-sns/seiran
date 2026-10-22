@@ -166,6 +166,15 @@ fn collect_blob_cids_inner(value: &serde_json::Value, out: &mut Vec<Cid>) {
     }
 }
 
+/// blob の CID のうち sha256 multihash のものを、`media_files.sha256` と同じ hex にして返す
+/// （blob の raw CID は multihash がバイト列の sha256 そのもの）。
+pub fn sha256_hexes_of_blob_cids(cids: &[Cid]) -> Vec<String> {
+    cids.iter()
+        .filter(|cid| cid.hash().code() == 0x12)
+        .map(|cid| hex::encode(cid.hash().digest()))
+        .collect()
+}
+
 /// CID 文字列をパースする。
 pub fn cid_from_str(s: &str) -> Result<Cid, RepoError> {
     s.parse::<Cid>()
@@ -1357,6 +1366,19 @@ pub fn build_error_frame(name: &str, message: &str) -> Result<Vec<u8>, RepoError
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_sha256_hexes_of_blob_cids_roundtrip() {
+        let sha256 = "a".repeat(64);
+        let cids = vec![
+            cid_from_sha256_hex(&sha256).unwrap(),
+            cid_from_dagcbor(b"\xa0"),
+        ];
+        // dag-cbor の CID も multihash は sha256 なので同じく hex になる
+        let hexes = sha256_hexes_of_blob_cids(&cids);
+        assert_eq!(hexes.len(), 2);
+        assert_eq!(hexes[0], sha256);
+    }
 
     #[test]
     fn test_generate_tid_length() {

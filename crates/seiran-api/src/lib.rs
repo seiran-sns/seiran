@@ -939,6 +939,7 @@ pub async fn init_state(
 pub fn spawn_startup_tasks(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
+        backfill_post_record_blobs(&state).await;
         resume_running_follow_imports(&state).await;
         resume_running_migrations(&state).await;
         resume_account_withdraw_unfollow_all(&state).await;
@@ -955,6 +956,72 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_seiran_actor_declarations(&state).await;
         backfill_remote_instance_meta(&state).await;
     });
+}
+
+/// `post_record_blobs` 導入前の投稿について、ATP レコードの blob 参照を記録する。
+/// 投稿レコードの CBOR は `atp_blocks` にしか無く SQL で読めないため、ここで1件ずつ
+/// デコードする。終わるまで孤立ファイル GC は止まる（`ORPHANED_MEDIA_FILE_CONDITION`）。
+async fn backfill_post_record_blobs(state: &AppState) {
+    use seiran_common::repository::{atp, maintenance};
+
+    if let Err(e) = maintenance::drop_post_record_blobs_backfill_without_record(&state.db).await {
+        tracing::error!(
+            "[startup] post_record_blobs バックフィル対象の整理失敗: {}",
+            e
+        );
+        return;
+    }
+    let mut done = 0usize;
+    loop {
+        let batch = match maintenance::post_record_blobs_backfill_batch(&state.db, 500).await {
+            Ok(batch) => batch,
+            Err(e) => {
+                tracing::error!(
+                    "[startup] post_record_blobs バックフィル対象取得失敗: {}",
+                    e
+                );
+                return;
+            }
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for (post_id, actor_id, at_cid) in batch {
+            let sha256s = match atp::block_bytes(&state.db, actor_id, &at_cid).await {
+                Ok(Some(bytes)) => seiran_common::atp::decode_dagcbor_to_json(&bytes)
+                    .map(|record| {
+                        seiran_common::atp::sha256_hexes_of_blob_cids(
+                            &seiran_common::atp::collect_blob_cids(&record),
+                        )
+                    })
+                    .unwrap_or_default(),
+                // ブロックが無い（転入途中等）なら参照する blob も分からないので記録しない
+                Ok(None) => Vec::new(),
+                Err(e) => {
+                    tracing::error!("[startup] post_record_blobs ブロック取得失敗: {}", e);
+                    return;
+                }
+            };
+            let result = match maintenance::insert_post_record_blobs(&state.db, post_id, &sha256s)
+                .await
+            {
+                Ok(()) => maintenance::finish_post_record_blobs_backfill(&state.db, post_id).await,
+                Err(e) => Err(e),
+            };
+            if let Err(e) = result {
+                tracing::error!(
+                    "[startup] post_record_blobs バックフィル失敗 post_id={}: {}",
+                    post_id,
+                    e
+                );
+                return;
+            }
+            done += 1;
+        }
+    }
+    if done > 0 {
+        tracing::info!("[startup] post_record_blobs バックフィル完了: {} 件", done);
+    }
 }
 
 /// 起動時リカバリ: プロセス再起動で停止したフォローインポートのジョブチェーンを再開する。

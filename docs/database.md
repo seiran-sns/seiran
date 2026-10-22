@@ -36,6 +36,7 @@ ID の採番は2系統:
 | `hashtags` / `post_hashtags` / `pinned_hashtags` | ハッシュタグ、ポストとの m:n、ホームへのピン留め |
 | `post_recipients` / `dm_read_states` / `bsky_convo_links` | DM の宛先、既読カーソル、Bsky convoId の対応 |
 | `atp_records` / `atp_blocks` / `atp_repo_events` | ATP の非 post レコード、MST のブロックストア、`subscribeRepos` のイベントログ |
+| `post_record_blobs` / `post_record_blobs_backfill` | ローカル投稿の ATP レコードが参照する blob の `media_files` 行、その既存投稿分のバックフィル待ち |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
 | `at_migration_requests` / `at_migration_records` / `at_migration_blobs` | DID 転入の状態機械とステージング |
 | `pending_did_provisions` | 「DNS TXT 登録完了待ち」の新規ローカルアカウント（DID 発行前） |
@@ -263,7 +264,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `post_attachments`: `media_file_id`（ローカル）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート）のどちらかが埋まる。
   - `is_sensitive`: AP の `attachment[].sensitive`。投稿全体の `sensitive=true` は全添付に伝播させる。
   - `is_gif`: GIF アニメ由来（GIF ピッカー、または `presentation:"gif"`）。フロントは自動再生・ミュート・ループ・コントロール無しで表示する。
-- **孤立ファイル GC**（`run_media_gc`、7日周期）: `post_attachments`（論理削除されていないポストのもの）/`actors`/`custom_emojis` 等のどこからも参照されず、`last_uploaded_at` から7日以上経った行を消す。論理削除済みポストの添付は参照に数えず、`PostRepository::soft_delete_by_id` がポスト削除と同じ1文でその添付メディアの `last_uploaded_at` を更新して7日の猶予を与える（削除して編集再投稿が、削除直後でも同じメディアを使い回せる）。猶予を過ぎた行は、死んだ `post_attachments` 行（外部キーが残るため）と同じ文でまとめて消す。参照の有無は `NOT EXISTS` で判定する（`post_attachments.media_file_id` はリモート添付で NULL の行が大半で、`NOT IN` だと結果が常に UNKNOWN になり1件も消せない）。削除は、その瞬間に孤立条件を再評価する単一の `DELETE ... RETURNING` で DB を先に確定させてから S3 を消す（DB → S3）。これで「行があれば実体もある」を保ち、途中で参照が増えるレースにも安全（削除0件になるだけ）。S3 の削除に失敗するとゴミが残るが実害は小さい。
+- **孤立ファイル GC**（`run_media_gc`、7日周期）: `post_attachments`・`post_record_blobs`（どちらも論理削除されていないポストのもの）/`actors`/`custom_emojis` 等のどこからも参照されず、`last_uploaded_at` から7日以上経った行を消す。論理削除済みポストの添付は参照に数えず、`PostRepository::soft_delete_by_id` がポスト削除と同じ1文でその添付メディアの `last_uploaded_at` を更新して7日の猶予を与える（削除して編集再投稿が、削除直後でも同じメディアを使い回せる）。猶予を過ぎた行は、死んだ `post_attachments` 行（外部キーが残るため）と同じ文でまとめて消す。参照の有無は `NOT EXISTS` で判定する（`post_attachments.media_file_id` はリモート添付で NULL の行が大半で、`NOT IN` だと結果が常に UNKNOWN になり1件も消せない）。削除は、その瞬間に孤立条件を再評価する単一の `DELETE ... RETURNING` で DB を先に確定させてから S3 を消す（DB → S3）。これで「行があれば実体もある」を保ち、途中で参照が増えるレースにも安全（削除0件になるだけ）。S3 の削除に失敗するとゴミが残るが実害は小さい。
 
 ### `post_link_cards`（URLカード）
 投稿ごとに0件以上のカードを `(post_id, position)`（UNIQUE）で持つ。
@@ -274,6 +275,11 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 
 ### ATP リポジトリ関連（`atp_records` / `atp_blocks` / `atp_repo_events`)
 `app.bsky.feed.post` は `posts` で管理し、`atp_records` にはそれ以外のコレクション（`app.bsky.actor.profile` 等）だけを持つ。`atp_blocks` は CAR ブロックの実体。`atp_repo_events` は Relay に配る `subscribeRepos` フレームのログで、`id`（BIGSERIAL）がそのままカーソル（seq）になる。`frame_bytes` にコミット時のフレームをそのまま保存し、再送時に作り直さない（バイト列の差で Relay が切断するのを避ける）。
+
+### `post_record_blobs`（投稿レコードの blob 参照）
+ローカル投稿の `app.bsky.feed.post` レコードが参照する blob の `media_files` 行（`(post_id, media_file_id)` が主キー、どちらも `ON DELETE CASCADE`）。URL カードのサムネイル（`embed.external.thumb`）は seiran で取得・再ホストしても外部クライアントが `uploadBlob` しても `post_attachments` に載らないため、これが無いと孤立ファイル GC に消され、AppView/CDN が `getBlob` で取り直すと 404 になる。
+- 書き込みは `try_apply_write` が `posts.at_uri` を埋めるのと同じトランザクションで、コミットの `blob_cids` の sha256 に一致する `media_files` 行をすべて入れる（`blurhash` 違いで同じ sha256 の行が複数あっても `getBlob` はどれも使いうる）。画像添付も入るが、`post_attachments` と二重に数えるだけで害は無い。
+- `post_record_blobs_backfill`: 導入前の既存ローカル投稿（`at_cid` あり・未削除）の `post_id`。レコードの CBOR は `atp_blocks` にしか無く SQL で読めないので、起動時の `backfill_post_record_blobs` がデコードして `post_record_blobs` を埋め、行を消す。1行でも残っている間は孤立ファイル GC が1件も消さない（参照を数え漏らすため）。
 
 ### ATP セッション認証関連（`atp_app_passwords` / `atp_refresh_tokens`）
 - `atp_app_passwords`: `createAppPassword` のアプリパスワードの argon2 ハッシュと `revoked_at`。

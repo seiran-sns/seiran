@@ -13,8 +13,8 @@ use crate::atp::repo::{
     encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
     encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
-    encode_seiran_actor_declaration, generate_tid, BskyEmbed, BskyFacet, BskyPostReply, Cid,
-    CommitEvtOp, RepoError,
+    encode_seiran_actor_declaration, generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet,
+    BskyPostReply, Cid, CommitEvtOp, RepoError,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -558,6 +558,14 @@ impl AtpCommitService {
                     .bind(&record.rkey)
                     .bind(pid)
                     .execute(&mut *tx)
+                    .await?;
+                    // URLカードのサムネイルは post_attachments に載らないので、ここで参照を
+                    // 残さないと孤立ファイルGCに消されて getBlob が 404 になる。
+                    crate::repository::maintenance::insert_post_record_blobs(
+                        &mut *tx,
+                        pid,
+                        &sha256_hexes_of_blob_cids(&record.blob_cids),
+                    )
                     .await?;
                 }
                 (

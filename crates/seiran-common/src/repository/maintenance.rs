@@ -130,6 +130,11 @@ pub struct OrphanedMediaFile {
 /// 削除直後の再投稿（削除して編集再投稿）で添付を使い回せるよう、ポスト削除時に
 /// `PostRepository::soft_delete_by_id` が `last_uploaded_at` を更新して猶予期間を与える。
 ///
+/// URLカードのサムネイル等、投稿の ATP レコードだけが参照する blob は `post_record_blobs`
+/// で数える（`post_attachments` に載らないため、これが無いと AppView/CDN が `getBlob` で
+/// 取り直したときに 404 になる）。既存投稿の分を起動時バックフィルが埋め終わる
+/// （`post_record_blobs_backfill` が空になる）までは、参照を数え漏らすので1件も消さない。
+///
 /// `site_settings` はキーごとに用途の異なる汎用 Key-Value のため外部キーを張れない。
 /// favicon（`site_icon_media_file_id`）・ログイン画面背景（`login_bg_media_file_id`）は
 /// `media_files.id` を文字列化した値をこのテーブルへ保存しており、他の参照
@@ -141,6 +146,12 @@ const ORPHANED_MEDIA_FILE_CONDITION: &str = "
         JOIN posts p ON p.id = pa.post_id
         WHERE pa.media_file_id = media_files.id AND p.deleted_at IS NULL
     )
+    AND NOT EXISTS (
+        SELECT 1 FROM post_record_blobs prb
+        JOIN posts p ON p.id = prb.post_id
+        WHERE prb.media_file_id = media_files.id AND p.deleted_at IS NULL
+    )
+    AND NOT EXISTS (SELECT 1 FROM post_record_blobs_backfill)
     AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.avatar_media_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.banner_media_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM custom_emojis ce WHERE ce.media_file_id = media_files.id)
@@ -150,6 +161,74 @@ const ORPHANED_MEDIA_FILE_CONDITION: &str = "
           AND ss.value = media_files.id::text
     )
 ";
+
+/// 投稿の ATP レコードが参照する blob（sha256 hex）を `post_record_blobs` に記録する。
+/// 同じ sha256 の `media_files` 行が複数あっても（`blurhash` 違いの重複排除）、`getBlob` は
+/// sha256 で引くのでどれも実体として使われうるため、すべて記録する。
+pub async fn insert_post_record_blobs<'e, E: sqlx::PgExecutor<'e>>(
+    executor: E,
+    post_id: i64,
+    sha256_hexes: &[String],
+) -> Result<(), sqlx::Error> {
+    if sha256_hexes.is_empty() {
+        return Ok(());
+    }
+    sqlx::query(
+        "INSERT INTO post_record_blobs (post_id, media_file_id)
+         SELECT $1, mf.id FROM media_files mf WHERE mf.sha256 = ANY($2)
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(post_id)
+    .bind(sha256_hexes)
+    .execute(executor)
+    .await?;
+    Ok(())
+}
+
+/// `post_record_blobs_backfill` に残る投稿 `(post_id, actor_id, at_cid)` を最大 `limit` 件。
+pub async fn post_record_blobs_backfill_batch(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<(i64, i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT p.id, p.actor_id, p.at_cid
+         FROM post_record_blobs_backfill b
+         JOIN posts p ON p.id = b.post_id
+         WHERE p.at_cid IS NOT NULL
+         ORDER BY b.post_id
+         LIMIT $1",
+    )
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
+/// 処理し終えた投稿をバックフィル対象から外す。
+pub async fn finish_post_record_blobs_backfill(
+    pool: &PgPool,
+    post_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM post_record_blobs_backfill WHERE post_id = $1")
+        .bind(post_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// `at_cid` が NULL になってバッチに出てこない投稿をバックフィル対象から外す。
+pub async fn drop_post_record_blobs_backfill_without_record(
+    pool: &PgPool,
+) -> Result<u64, sqlx::Error> {
+    sqlx::query(
+        "DELETE FROM post_record_blobs_backfill b
+         WHERE NOT EXISTS (
+             SELECT 1 FROM posts p WHERE p.id = b.post_id AND p.at_cid IS NOT NULL
+         )",
+    )
+    .execute(pool)
+    .await
+    .map(|r| r.rows_affected())
+}
 
 /// 孤立メディアファイルの候補を最大 `limit` 件。
 pub async fn orphaned_media_files(
