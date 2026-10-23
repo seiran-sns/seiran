@@ -836,7 +836,8 @@ pub async fn ogp_profile(
          FROM actors a \
          LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
-         WHERE a.username = $1 AND a.domain = $2 AND a.withdrawn_at IS NULL LIMIT 1",
+         WHERE a.username = $1 AND a.domain = $2 AND a.withdrawn_at IS NULL \
+           AND a.actor_type = 'local' LIMIT 1",
     )
     .bind(username)
     .bind(domain)

@@ -588,6 +588,9 @@ pub async fn user_profile(
             // DID 形式 → DB で検索し、なければ AppView へ
             return match state.actors.find_by_did(q).await {
                 Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
+                Ok(None) if my_user_id.is_none() => {
+                    ApiError::NotFound("USER_NOT_FOUND").into_response()
+                }
                 Ok(None) => fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
                 Err(e) => {
                     tracing::error!("[profile] DB エラー: {}", e);
@@ -603,6 +606,9 @@ pub async fn user_profile(
                     local_username.to_string(),
                     Some(state.local_domain.to_string()),
                 ),
+                None if my_user_id.is_none() => {
+                    return ApiError::NotFound("USER_NOT_FOUND").into_response()
+                }
                 None => return fetch_bsky_profile_from_appview(q, my_user_id, &state).await,
             }
         } else {
@@ -627,9 +633,10 @@ pub async fn user_profile(
     {
         Ok(Some(actor)) => build_profile_response(actor, my_user_id, &state).await,
         Ok(None)
-            if lookup_domain
-                .as_deref()
-                .is_some_and(|d| d != state.local_domain) =>
+            if my_user_id.is_some()
+                && lookup_domain
+                    .as_deref()
+                    .is_some_and(|d| d != state.local_domain) =>
         {
             // DB にいない → AP から取得して返す（DB には保存しない）
             fetch_remote_profile(
@@ -758,6 +765,9 @@ async fn build_profile_response(
     my_user_id: Option<i64>,
     state: &AppState,
 ) -> Response {
+    if my_user_id.is_none() && actor.actor_type != "local" {
+        return ApiError::NotFound("USER_NOT_FOUND").into_response();
+    }
     build_profile_response_inner(actor, my_user_id, state, false)
         .await
         .into_response()

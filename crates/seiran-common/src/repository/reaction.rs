@@ -340,6 +340,7 @@ impl ReactionRepository for PgReactionRepository {
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
              WHERE r.post_id = $1 AND r.content = $2 AND a.withdrawn_at IS NULL AND a.suspended_at IS NULL
                AND ($4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($4, a.id))
+               AND ($4::bigint IS NOT NULL OR a.actor_type = 'local')
              ORDER BY r.created_at DESC
              LIMIT $3",
         )

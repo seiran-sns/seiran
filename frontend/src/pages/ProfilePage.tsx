@@ -26,6 +26,7 @@ import ProfileFeedFilterBar, {
 import ProfileFeedList from "../components/note/ProfileFeedList";
 import FollowListPanel from "../components/right/FollowListPanel";
 import { useAuth } from "../contexts/AuthContext";
+import { useLogoutCount } from "../hooks/useLogoutCount";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
@@ -123,11 +124,16 @@ export default function ProfilePage() {
     feedFilterKey,
   );
 
+  const { user } = useAuth();
+  const logoutCount = useLogoutCount();
+
   useEffect(() => {
     if (!q) return;
     let cancelled = false;
     setLoading(true);
     setError("");
+    setProfile(null);
+    setPosts([]);
     setRightTab(0);
     setNarrowTab(0);
     setFeedFilter(EMPTY_PROFILE_FEED_FILTER);
@@ -184,7 +190,7 @@ export default function ProfilePage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [q]);
+  }, [q, logoutCount]);
 
   // 絞り込み条件が変わったら、その条件で先頭ページから取得し直す（プロフィール取得前は何もしない）。
   useEffect(() => {
@@ -207,8 +213,6 @@ export default function ProfilePage() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [feedFilterKey]);
-
-  const { user } = useAuth();
 
   const isLocal = profile?.actor_type === "local";
   const isBridge = !!profile?.bridge_real_handle;

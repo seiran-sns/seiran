@@ -489,9 +489,14 @@ pub async fn get_list(
         Err(e) => return ApiError::Internal(format!("メンバー取得失敗: {}", e)).into_response(),
     };
 
+    // 未ログインにはリモートアクターを見せない（キャッシュはローカルユーザーのためのもの）。
+    let members = members
+        .into_iter()
+        .filter(|m| viewer_actor_id.is_some() || m.actor_type == "local");
+
     Json(ListDetailResponse {
         list: ListResponse::from(row),
-        members: members.into_iter().map(ListMemberResponse::from).collect(),
+        members: members.map(ListMemberResponse::from).collect(),
         is_owner,
     })
     .into_response()
