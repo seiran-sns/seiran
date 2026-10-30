@@ -1,7 +1,7 @@
-use p256::elliptic_curve::Generate;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use p256::ecdsa::{signature::Signer, SigningKey};
+use p256::elliptic_curve::Generate;
 use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
