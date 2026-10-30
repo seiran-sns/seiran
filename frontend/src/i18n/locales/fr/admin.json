@@ -9,7 +9,8 @@
       "emojis": "Émojis",
       "relays": "Relays",
       "authIpBlocks": "IP bloquées",
-      "suspendedActors": "Utilisateurs suspendus"
+      "suspendedActors": "Utilisateurs suspendus",
+      "roleRateLimits": "Limites de débit"
     },
     "rightPanelDescription": "Gérez l'instance à partir de cet écran. Chaque action est également vérifiée pour l'autorisation d'administrateur sur le serveur."
   },
@@ -128,21 +129,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "Limites de taux par rôle",
-    "roleRateLimitHint": "Ces limites ne s'appliquent pas aux administrateurs. Les modérateurs ont une limite plus élevée ; les utilisateurs et éditeurs d'emojis partagent la même limite.",
-    "postRateLimitWindowMinutesLabel": "Fenêtre de limite de publication (minutes)",
-    "postRateLimitMaxUserLabel": "Max. publications (utilisateur)",
-    "postRateLimitMaxModeratorLabel": "Max. publications (modérateur)",
-    "followRateLimitWindowHoursLabel": "Fenêtre de limite d'abonnements (heures)",
-    "followRateLimitMaxUserLabel": "Max. nouveaux abonnements (utilisateur)",
-    "followRateLimitMaxModeratorLabel": "Max. nouveaux abonnements (modérateur)",
-    "listMaxCountUserLabel": "Max. listes (utilisateur)",
-    "listMaxCountModeratorLabel": "Max. listes (modérateur)",
-    "listMemberMaxUserLabel": "Max. membres par liste (utilisateur)",
-    "listMemberMaxModeratorLabel": "Max. membres par liste (modérateur)",
-    "searchRateLimitWindowMinutesLabel": "Fenêtre de limite de recherche (minutes)",
-    "searchRateLimitMaxUserLabel": "Max. recherches (utilisateur)",
-    "searchRateLimitMaxModeratorLabel": "Max. recherches (modérateur)",
     "oembedSectionTitle": "Lecteur intégré des cartes URL",
     "oembedAllowedDomainsLabel": "Domaines autorisés (un par ligne)",
     "oembedAllowedDomainsHint": "Indiquer un domaine sur lequel n'importe qui peut héberger du contenu (ex. github.io, amazonaws.com) risque de permettre l'intégration de scripts malveillants sur votre site.",
@@ -305,5 +291,24 @@
     "blockedUntilLabel": "Bloquée jusqu'à : {{date}}",
     "unblockButton": "Débloquer",
     "unblockConfirm": "Débloquer l'IP {{ip}} ?"
+  },
+  "roleRateLimitPanel": {
+    "title": "Limites de débit par rôle",
+    "hint": "Les colonnes sont les rôles et les lignes les limites. Les valeurs grisées suivent le réglage user. Ne s'applique pas aux administrateurs.",
+    "itemHeader": "Limite",
+    "windowHeader": "Période",
+    "rows": {
+      "post": "Publications",
+      "follow": "Nouveaux abonnements",
+      "listCount": "Listes",
+      "listMember": "Membres par liste",
+      "search": "Recherches"
+    },
+    "minutesUnit": "min",
+    "hoursUnit": "h",
+    "inheritedFromUser": "Identique à user",
+    "unlimited": "Illimité",
+    "noWindow": "—",
+    "savedMessage": "Enregistré."
   }
 }

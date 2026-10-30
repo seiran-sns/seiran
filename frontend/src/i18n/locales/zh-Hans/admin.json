@@ -9,7 +9,8 @@
       "emojis": "表情符号",
       "relays": "Relays",
       "authIpBlocks": "已封锁IP",
-      "suspendedActors": "已冻结用户"
+      "suspendedActors": "已冻结用户",
+      "roleRateLimits": "速率限制"
     },
     "rightPanelDescription": "从此屏幕管理实例。每个操作都会经过服务器管理员权限的验证。"
   },
@@ -128,21 +129,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "按角色的速率限制",
-    "roleRateLimitHint": "这些限制不适用于admin。moderator的上限更高；user与emoji-editor共用同一上限。",
-    "postRateLimitWindowMinutesLabel": "发帖限制窗口（分钟）",
-    "postRateLimitMaxUserLabel": "发帖数上限（user）",
-    "postRateLimitMaxModeratorLabel": "发帖数上限（moderator）",
-    "followRateLimitWindowHoursLabel": "关注限制窗口（小时）",
-    "followRateLimitMaxUserLabel": "新增关注数上限（user）",
-    "followRateLimitMaxModeratorLabel": "新增关注数上限（moderator）",
-    "listMaxCountUserLabel": "列表创建数上限（user）",
-    "listMaxCountModeratorLabel": "列表创建数上限（moderator）",
-    "listMemberMaxUserLabel": "列表最大人数（user）",
-    "listMemberMaxModeratorLabel": "列表最大人数（moderator）",
-    "searchRateLimitWindowMinutesLabel": "搜索限制窗口（分钟）",
-    "searchRateLimitMaxUserLabel": "搜索次数上限（user）",
-    "searchRateLimitMaxModeratorLabel": "搜索次数上限（moderator）",
     "oembedSectionTitle": "URL卡片嵌入播放器",
     "oembedAllowedDomainsLabel": "允许的域名（每行一个）",
     "oembedAllowedDomainsHint": "指定任何人都可以托管内容的域名（例如 github.io、amazonaws.com）可能会导致恶意脚本被嵌入到您的网站上。",
@@ -305,5 +291,24 @@
     "blockedUntilLabel": "解封时间：{{date}}",
     "unblockButton": "解除封锁",
     "unblockConfirm": "确定要解除IP {{ip}} 的封锁吗？"
+  },
+  "roleRateLimitPanel": {
+    "title": "按角色的速率限制",
+    "hint": "横轴为角色，纵轴为限制项目。灰色的值沿用 user 的设置。不适用于 admin。",
+    "itemHeader": "项目",
+    "windowHeader": "期间",
+    "rows": {
+      "post": "发帖数",
+      "follow": "新关注数",
+      "listCount": "列表数",
+      "listMember": "每个列表最多人数",
+      "search": "搜索次数"
+    },
+    "minutesUnit": "分钟",
+    "hoursUnit": "小时",
+    "inheritedFromUser": "与 user 相同",
+    "unlimited": "无限制",
+    "noWindow": "—",
+    "savedMessage": "已保存。"
   }
 }

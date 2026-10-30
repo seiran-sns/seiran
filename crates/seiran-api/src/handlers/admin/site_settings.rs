@@ -63,6 +63,7 @@ pub struct SiteSettingsResponse {
     pub follow_rate_limit_window_hours: String,
     pub follow_rate_limit_max_user: String,
     pub follow_rate_limit_max_moderator: String,
+    pub follow_rate_limit_max_quarantine: String,
     pub list_max_count_user: String,
     pub list_max_count_moderator: String,
     pub list_member_max_user: String,
@@ -191,6 +192,10 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("follow_rate_limit_max_moderator")
             .cloned()
             .unwrap_or_else(|| "300".to_string()),
+        follow_rate_limit_max_quarantine: settings
+            .get("follow_rate_limit_max_quarantine")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
         list_max_count_user: settings
             .get("list_max_count_user")
             .cloned()
@@ -273,6 +278,7 @@ pub struct UpdateSiteSettingsRequest {
     pub follow_rate_limit_window_hours: Option<String>,
     pub follow_rate_limit_max_user: Option<String>,
     pub follow_rate_limit_max_moderator: Option<String>,
+    pub follow_rate_limit_max_quarantine: Option<String>,
     pub list_max_count_user: Option<String>,
     pub list_max_count_moderator: Option<String>,
     pub list_member_max_user: Option<String>,
@@ -361,6 +367,10 @@ pub async fn update_site_settings(
         (
             "follow_rate_limit_max_moderator",
             &req.follow_rate_limit_max_moderator,
+        ),
+        (
+            "follow_rate_limit_max_quarantine",
+            &req.follow_rate_limit_max_quarantine,
         ),
         ("list_max_count_user", &req.list_max_count_user),
         ("list_max_count_moderator", &req.list_max_count_moderator),
@@ -506,6 +516,9 @@ pub async fn update_site_settings(
         req.follow_rate_limit_max_moderator
             .as_deref()
             .map(|v| ("follow_rate_limit_max_moderator", v.to_string())),
+        req.follow_rate_limit_max_quarantine
+            .as_deref()
+            .map(|v| ("follow_rate_limit_max_quarantine", v.to_string())),
         req.list_max_count_user
             .as_deref()
             .map(|v| ("list_max_count_user", v.to_string())),

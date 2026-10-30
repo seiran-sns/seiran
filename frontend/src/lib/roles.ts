@@ -2,6 +2,7 @@
 export type AdminTopic =
   | "users"
   | "siteSettings"
+  | "roleRateLimits"
   | "storage"
   | "emojis"
   | "reports"
@@ -12,6 +13,7 @@ export type AdminTopic =
 const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "users",
   "siteSettings",
+  "roleRateLimits",
   "storage",
   "emojis",
   "reports",

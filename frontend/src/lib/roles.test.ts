@@ -28,6 +28,7 @@ describe("getAdminTopics", () => {
     expect(getAdminTopics("admin")).toEqual([
       "users",
       "siteSettings",
+      "roleRateLimits",
       "storage",
       "emojis",
       "reports",

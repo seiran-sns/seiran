@@ -56,21 +56,6 @@ export default function SiteSettingsPanel() {
   const [maxUserAccounts, setMaxUserAccounts] = useState("");
   const [registrationClosed, setRegistrationClosed] = useState(false);
 
-  // ロール別レート制限（#223フォローアップ）
-  const [postRateLimitWindowMinutes, setPostRateLimitWindowMinutes] = useState("");
-  const [postRateLimitMaxUser, setPostRateLimitMaxUser] = useState("");
-  const [postRateLimitMaxModerator, setPostRateLimitMaxModerator] = useState("");
-  const [followRateLimitWindowHours, setFollowRateLimitWindowHours] = useState("");
-  const [followRateLimitMaxUser, setFollowRateLimitMaxUser] = useState("");
-  const [followRateLimitMaxModerator, setFollowRateLimitMaxModerator] = useState("");
-  const [listMaxCountUser, setListMaxCountUser] = useState("");
-  const [listMaxCountModerator, setListMaxCountModerator] = useState("");
-  const [listMemberMaxUser, setListMemberMaxUser] = useState("");
-  const [listMemberMaxModerator, setListMemberMaxModerator] = useState("");
-  const [searchRateLimitWindowMinutes, setSearchRateLimitWindowMinutes] = useState("");
-  const [searchRateLimitMaxUser, setSearchRateLimitMaxUser] = useState("");
-  const [searchRateLimitMaxModerator, setSearchRateLimitMaxModerator] = useState("");
-
   // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン
   const [oembedAllowedDomains, setOembedAllowedDomains] = useState("");
 
@@ -107,19 +92,6 @@ export default function SiteSettingsPanel() {
         setPasswordResetMaxActive(s.password_reset_max_active);
         setAccountCreationIpWindowMinutes(s.account_creation_ip_window_minutes);
         setAccountCreationIpMax(s.account_creation_ip_max);
-        setPostRateLimitWindowMinutes(s.post_rate_limit_window_minutes);
-        setPostRateLimitMaxUser(s.post_rate_limit_max_user);
-        setPostRateLimitMaxModerator(s.post_rate_limit_max_moderator);
-        setFollowRateLimitWindowHours(s.follow_rate_limit_window_hours);
-        setFollowRateLimitMaxUser(s.follow_rate_limit_max_user);
-        setFollowRateLimitMaxModerator(s.follow_rate_limit_max_moderator);
-        setListMaxCountUser(s.list_max_count_user);
-        setListMaxCountModerator(s.list_max_count_moderator);
-        setListMemberMaxUser(s.list_member_max_user);
-        setListMemberMaxModerator(s.list_member_max_moderator);
-        setSearchRateLimitWindowMinutes(s.search_rate_limit_window_minutes);
-        setSearchRateLimitMaxUser(s.search_rate_limit_max_user);
-        setSearchRateLimitMaxModerator(s.search_rate_limit_max_moderator);
         setOembedAllowedDomains(s.oembed_allowed_domains);
         setMaxUserAccounts(s.max_user_accounts);
         setRegistrationClosed(s.registration_closed === "true");
@@ -198,19 +170,6 @@ export default function SiteSettingsPanel() {
         password_reset_max_active: passwordResetMaxActive,
         account_creation_ip_window_minutes: accountCreationIpWindowMinutes,
         account_creation_ip_max: accountCreationIpMax,
-        post_rate_limit_window_minutes: postRateLimitWindowMinutes,
-        post_rate_limit_max_user: postRateLimitMaxUser,
-        post_rate_limit_max_moderator: postRateLimitMaxModerator,
-        follow_rate_limit_window_hours: followRateLimitWindowHours,
-        follow_rate_limit_max_user: followRateLimitMaxUser,
-        follow_rate_limit_max_moderator: followRateLimitMaxModerator,
-        list_max_count_user: listMaxCountUser,
-        list_max_count_moderator: listMaxCountModerator,
-        list_member_max_user: listMemberMaxUser,
-        list_member_max_moderator: listMemberMaxModerator,
-        search_rate_limit_window_minutes: searchRateLimitWindowMinutes,
-        search_rate_limit_max_user: searchRateLimitMaxUser,
-        search_rate_limit_max_moderator: searchRateLimitMaxModerator,
         oembed_allowed_domains: oembedAllowedDomains,
         max_user_accounts: maxUserAccounts,
         registration_closed: registrationClosed ? "true" : "false",
@@ -465,63 +424,6 @@ export default function SiteSettingsPanel() {
             <input className={styles.input} value={cloudflareZoneId} onChange={(e) => setCloudflareZoneId(e.target.value)} />
           </label>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.cloudflareDnsHint")}</p>
-        </div>
-
-        <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.roleRateLimitSectionTitle")}</div>
-        <div className={styles.card}>
-          <p className={styles.hint}>{t("admin:siteSettingsPanel.roleRateLimitHint")}</p>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.postRateLimitWindowMinutesLabel")}
-            <input className={styles.input} type="number" min={1} value={postRateLimitWindowMinutes} onChange={(e) => setPostRateLimitWindowMinutes(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.postRateLimitMaxUserLabel")}
-            <input className={styles.input} type="number" min={1} value={postRateLimitMaxUser} onChange={(e) => setPostRateLimitMaxUser(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.postRateLimitMaxModeratorLabel")}
-            <input className={styles.input} type="number" min={1} value={postRateLimitMaxModerator} onChange={(e) => setPostRateLimitMaxModerator(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.followRateLimitWindowHoursLabel")}
-            <input className={styles.input} type="number" min={1} value={followRateLimitWindowHours} onChange={(e) => setFollowRateLimitWindowHours(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.followRateLimitMaxUserLabel")}
-            <input className={styles.input} type="number" min={1} value={followRateLimitMaxUser} onChange={(e) => setFollowRateLimitMaxUser(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.followRateLimitMaxModeratorLabel")}
-            <input className={styles.input} type="number" min={1} value={followRateLimitMaxModerator} onChange={(e) => setFollowRateLimitMaxModerator(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.listMaxCountUserLabel")}
-            <input className={styles.input} type="number" min={1} value={listMaxCountUser} onChange={(e) => setListMaxCountUser(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.listMaxCountModeratorLabel")}
-            <input className={styles.input} type="number" min={1} value={listMaxCountModerator} onChange={(e) => setListMaxCountModerator(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.listMemberMaxUserLabel")}
-            <input className={styles.input} type="number" min={1} value={listMemberMaxUser} onChange={(e) => setListMemberMaxUser(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.listMemberMaxModeratorLabel")}
-            <input className={styles.input} type="number" min={1} value={listMemberMaxModerator} onChange={(e) => setListMemberMaxModerator(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.searchRateLimitWindowMinutesLabel")}
-            <input className={styles.input} type="number" min={1} value={searchRateLimitWindowMinutes} onChange={(e) => setSearchRateLimitWindowMinutes(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.searchRateLimitMaxUserLabel")}
-            <input className={styles.input} type="number" min={1} value={searchRateLimitMaxUser} onChange={(e) => setSearchRateLimitMaxUser(e.target.value)} />
-          </label>
-          <label className={styles.label}>
-            {t("admin:siteSettingsPanel.searchRateLimitMaxModeratorLabel")}
-            <input className={styles.input} type="number" min={1} value={searchRateLimitMaxModerator} onChange={(e) => setSearchRateLimitMaxModerator(e.target.value)} />
-          </label>
         </div>
 
         <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.oembedSectionTitle")}</div>

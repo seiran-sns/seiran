@@ -140,6 +140,7 @@ export interface SiteSettings {
   follow_rate_limit_window_hours: string;
   follow_rate_limit_max_user: string;
   follow_rate_limit_max_moderator: string;
+  follow_rate_limit_max_quarantine: string;
   list_max_count_user: string;
   list_max_count_moderator: string;
   list_member_max_user: string;

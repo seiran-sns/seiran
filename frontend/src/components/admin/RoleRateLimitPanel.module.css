@@ -1,0 +1,94 @@
+/* 狭幅ではシートだけを横スクロールさせ、ページ自体は横に広げない。 */
+.scroller {
+  overflow-x: auto;
+  min-width: 0;
+}
+
+.sheet {
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.sheet th,
+.sheet td {
+  border-bottom: 1px solid var(--border);
+  padding: 6px 3px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.itemHeader,
+.windowHeader {
+  color: var(--text-dim);
+  font-weight: 700;
+  vertical-align: bottom;
+}
+
+.itemHeader,
+.itemCell {
+  text-align: left !important;
+  white-space: nowrap;
+}
+
+.itemCell {
+  font-weight: 700;
+}
+
+/* 狭幅で横スクロールしても、どの行か分かるよう項目名の列を左端に固定する。 */
+.itemHeader,
+.itemCell {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--bg-elev);
+  padding-right: 8px !important;
+}
+
+/* ロール名は縦書きにして列幅を数値入力の幅に収める。 */
+.roleHeader {
+  vertical-align: bottom;
+  color: var(--text-dim);
+  font-weight: 700;
+}
+
+.vertical {
+  writing-mode: vertical-rl;
+  white-space: nowrap;
+  display: inline-block;
+}
+
+.cell {
+  min-width: 44px;
+}
+
+/* 列幅を詰めるため増減ボタンは出さない（キーボードの上下キーでは増減できる）。 */
+.cellInput {
+  width: 56px;
+  padding: 6px;
+  text-align: right;
+  appearance: textfield;
+  -moz-appearance: textfield;
+}
+
+.cellInput::-webkit-outer-spin-button,
+.cellInput::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
+.windowInput {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  white-space: nowrap;
+  color: var(--text-dim);
+}
+
+.inherited {
+  color: var(--text-faint);
+}
+
+.unlimited {
+  color: var(--text-faint);
+  white-space: nowrap;
+}

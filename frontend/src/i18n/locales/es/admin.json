@@ -9,7 +9,8 @@
       "emojis": "emojis",
       "relays": "Relays",
       "authIpBlocks": "IPs bloqueadas",
-      "suspendedActors": "Usuarios suspendidos"
+      "suspendedActors": "Usuarios suspendidos",
+      "roleRateLimits": "Límites de uso"
     },
     "rightPanelDescription": "Administre la instancia desde esta pantalla. También se verifica que cada acción tenga permiso de administrador en el servidor."
   },
@@ -128,21 +129,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "Límites de tasa por rol",
-    "roleRateLimitHint": "Estos límites no se aplican a los administradores. Los moderadores tienen un límite más alto; los usuarios y editores de emojis comparten el mismo límite.",
-    "postRateLimitWindowMinutesLabel": "Ventana de límite de publicaciones (minutos)",
-    "postRateLimitMaxUserLabel": "Máx. publicaciones (usuario)",
-    "postRateLimitMaxModeratorLabel": "Máx. publicaciones (moderador)",
-    "followRateLimitWindowHoursLabel": "Ventana de límite de seguimientos (horas)",
-    "followRateLimitMaxUserLabel": "Máx. nuevos seguimientos (usuario)",
-    "followRateLimitMaxModeratorLabel": "Máx. nuevos seguimientos (moderador)",
-    "listMaxCountUserLabel": "Máx. listas (usuario)",
-    "listMaxCountModeratorLabel": "Máx. listas (moderador)",
-    "listMemberMaxUserLabel": "Máx. miembros por lista (usuario)",
-    "listMemberMaxModeratorLabel": "Máx. miembros por lista (moderador)",
-    "searchRateLimitWindowMinutesLabel": "Ventana de límite de búsquedas (minutos)",
-    "searchRateLimitMaxUserLabel": "Máx. búsquedas (usuario)",
-    "searchRateLimitMaxModeratorLabel": "Máx. búsquedas (moderador)",
     "oembedSectionTitle": "Reproductor incrustado de tarjetas URL",
     "oembedAllowedDomainsLabel": "Dominios permitidos (uno por línea)",
     "oembedAllowedDomainsHint": "Especificar un dominio donde cualquiera puede alojar contenido (p. ej. github.io, amazonaws.com) puede permitir que se incrusten scripts maliciosos en tu sitio.",
@@ -305,5 +291,24 @@
     "blockedUntilLabel": "Bloqueada hasta: {{date}}",
     "unblockButton": "Desbloquear",
     "unblockConfirm": "¿Desbloquear la IP {{ip}}?"
+  },
+  "roleRateLimitPanel": {
+    "title": "Límites de uso por rol",
+    "hint": "Las columnas son roles y las filas son límites. Los valores en gris siguen la configuración de user. No se aplica a los administradores.",
+    "itemHeader": "Límite",
+    "windowHeader": "Periodo",
+    "rows": {
+      "post": "Publicaciones",
+      "follow": "Nuevos seguimientos",
+      "listCount": "Listas",
+      "listMember": "Miembros por lista",
+      "search": "Búsquedas"
+    },
+    "minutesUnit": "min",
+    "hoursUnit": "h",
+    "inheritedFromUser": "Igual que user",
+    "unlimited": "Ilimitado",
+    "noWindow": "—",
+    "savedMessage": "Guardado."
   }
 }
