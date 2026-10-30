@@ -389,7 +389,7 @@ pub fn create_commit(
     // low-S 形式を必須としており、high-S のまま送ると about 50% の確率で
     // 「cryptographic signature invalid」としてリジェクトされる。normalize_s() で矯正する。
     let sig: p256::ecdsa::Signature = signing_key.sign(&unsigned_cbor);
-    let sig = sig.normalize_s().unwrap_or(sig);
+    let sig = sig.normalize_s();
     let sig_bytes = sig.to_bytes().to_vec(); // IEEE P1363: R(32) || S(32) = 64 bytes
 
     let signed = SignedCommit {

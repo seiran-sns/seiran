@@ -16,9 +16,14 @@ use p256::ecdsa::SigningKey;
 use p256::pkcs8::{
     EncodePrivateKey as P256EncodePrivateKey, EncodePublicKey as P256EncodePublicKey, LineEnding,
 };
-// p256 と argon2 は同じ rand_core v0.6.x を使うため、
-// argon2 が再エクスポートする OsRng を利用してバージョン競合を回避する。
+// rsa と argon2 は同じ rand_core v0.6.x を使うため、argon2 が再エクスポートする OsRng を
+// RSA 鍵生成・乱数バイト生成に使う。p256 は rand_core 0.10 系なので `Generate` で鍵を作る。
 use argon2::password_hash::rand_core::OsRng;
+// rsa は pkcs8 0.10 系、p256 は 0.11 系で、同名のトレイトが別物になる。
+use rsa::pkcs8::{
+    EncodePrivateKey as RsaEncodePrivateKey, EncodePublicKey as RsaEncodePublicKey,
+    LineEnding as RsaLineEnding,
+};
 use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
@@ -67,7 +72,7 @@ impl Secrets {
         let jwt_secret = hex::encode(jwt_bytes);
 
         // --- AT Protocol P-256 鍵ペア ---
-        let signing_key = SigningKey::random(&mut rng);
+        let signing_key = <SigningKey as p256::elliptic_curve::Generate>::generate();
         let verifying_key = signing_key.verifying_key();
 
         let atproto_private_key_pem = signing_key
@@ -253,12 +258,12 @@ fn generate_rsa_key_pair(rng: &mut OsRng) -> Result<(String, String), SecretsErr
     let public_key = private_key.to_public_key();
 
     let private_pem = private_key
-        .to_pkcs8_pem(LineEnding::LF)
+        .to_pkcs8_pem(RsaLineEnding::LF)
         .map_err(|e| SecretsError::KeyGen(format!("RSA秘密鍵PEM変換失敗: {}", e)))?
         .to_string();
 
     let public_pem = public_key
-        .to_public_key_pem(LineEnding::LF)
+        .to_public_key_pem(RsaLineEnding::LF)
         .map_err(|e| SecretsError::KeyGen(format!("RSA公開鍵PEM変換失敗: {}", e)))?;
 
     Ok((private_pem, public_pem))

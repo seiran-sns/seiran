@@ -65,7 +65,7 @@ fn normalize_jwt_es256_signature(jwt: &str) -> Result<String, ServiceAuthError> 
         .map_err(|e| ServiceAuthError::Sign(format!("署名デコード失敗: {}", e)))?;
     let sig = Signature::try_from(sig_bytes.as_slice())
         .map_err(|e| ServiceAuthError::Sign(format!("署名パース失敗: {}", e)))?;
-    let normalized = sig.normalize_s().unwrap_or(sig);
+    let normalized = sig.normalize_s();
     let normalized_b64 = URL_SAFE_NO_PAD.encode(normalized.to_bytes());
 
     Ok(format!("{}.{}", header_payload, normalized_b64))

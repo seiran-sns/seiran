@@ -118,7 +118,7 @@ async fn process_one(
         .await
         .map_err(|e| format!("現在のDIDドキュメント取得失敗: {e}"))?;
 
-    let new_account_key = SigningKey::random(&mut argon2::password_hash::rand_core::OsRng);
+    let new_account_key = <SigningKey as p256::elliptic_curve::Generate>::generate();
     let new_account_did_key = p256_to_did_key(new_account_key.verifying_key());
     let new_rotation_keys = vec![
         new_account_did_key.clone(),
