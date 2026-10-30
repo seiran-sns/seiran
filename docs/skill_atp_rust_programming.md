@@ -346,7 +346,7 @@ PLC genesis operation、Service Auth JWT も含む。1箇所直して終わり�
 ```rust
 // MST commit 署名（crates/seiran-common/src/atp/repo.rs）
 let sig: p256::ecdsa::Signature = signing_key.sign(&unsigned_cbor);
-let sig = sig.normalize_s().unwrap_or(sig);
+let sig = sig.normalize_s();
 
 // PLC genesis operation 署名（crates/seiran-common/src/atp/plc.rs）も同様
 ```
@@ -363,7 +363,7 @@ fn normalize_jwt_es256_signature(jwt: &str) -> Result<String, ServiceAuthError> 
 
     let sig_bytes = URL_SAFE_NO_PAD.decode(sig_b64)?;
     let sig = Signature::try_from(sig_bytes.as_slice())?;
-    let normalized = sig.normalize_s().unwrap_or(sig);
+    let normalized = sig.normalize_s();
     let normalized_b64 = URL_SAFE_NO_PAD.encode(normalized.to_bytes());
 
     Ok(format!("{}.{}", header_payload, normalized_b64))

@@ -249,7 +249,7 @@ mod tests {
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
 
         let (mst_root, mst_blocks) = build_mst(&entries).unwrap();
-        let signing_key = SigningKey::random(&mut rand_core_shim());
+        let signing_key = <SigningKey as p256::elliptic_curve::Generate>::generate();
         let (commit_cid, commit_cbor) = create_commit(
             "did:plc:test1234",
             "3jxyz000000",
@@ -287,12 +287,6 @@ mod tests {
             .collect();
         want.sort();
         assert_eq!(got, want);
-    }
-
-    // p256::ecdsa::SigningKey::random は rand_core 0.6 系の RngCore を要求する。
-    // argon2 が再エクスポートする OsRng を使い、secrets.rs と同じ回避策を踏襲する。
-    fn rand_core_shim() -> argon2::password_hash::rand_core::OsRng {
-        argon2::password_hash::rand_core::OsRng
     }
 
     /// `@testimport.bsky.social`（did:plc:n3tpur22sxb57zgzwe3lkl5m、実PDS
