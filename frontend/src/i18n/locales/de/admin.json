@@ -9,7 +9,8 @@
       "emojis": "Emojis",
       "relays": "Relays",
       "authIpBlocks": "Gesperrte IPs",
-      "suspendedActors": "Gesperrte Nutzer"
+      "suspendedActors": "Gesperrte Nutzer",
+      "roleRateLimits": "Ratenlimits"
     },
     "rightPanelDescription": "Verwalten Sie die Instanz über diesen Bildschirm. Für jede Aktion wird auch die Administratorberechtigung auf dem Server überprüft."
   },
@@ -128,21 +129,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "Rollenbasierte Ratenbegrenzungen",
-    "roleRateLimitHint": "Diese Grenzwerte gelten nicht für Admins. Moderatoren erhalten ein höheres Limit; User und Emoji-Editoren teilen sich dasselbe Limit.",
-    "postRateLimitWindowMinutesLabel": "Zeitfenster für Beitragslimit (Minuten)",
-    "postRateLimitMaxUserLabel": "Max. Beiträge (User)",
-    "postRateLimitMaxModeratorLabel": "Max. Beiträge (Moderator)",
-    "followRateLimitWindowHoursLabel": "Zeitfenster für Folgen-Limit (Stunden)",
-    "followRateLimitMaxUserLabel": "Max. neue Follows (User)",
-    "followRateLimitMaxModeratorLabel": "Max. neue Follows (Moderator)",
-    "listMaxCountUserLabel": "Max. Listen (User)",
-    "listMaxCountModeratorLabel": "Max. Listen (Moderator)",
-    "listMemberMaxUserLabel": "Max. Mitglieder pro Liste (User)",
-    "listMemberMaxModeratorLabel": "Max. Mitglieder pro Liste (Moderator)",
-    "searchRateLimitWindowMinutesLabel": "Zeitfenster für Suchlimit (Minuten)",
-    "searchRateLimitMaxUserLabel": "Max. Suchen (User)",
-    "searchRateLimitMaxModeratorLabel": "Max. Suchen (Moderator)",
     "oembedSectionTitle": "URL-Karten-Einbettungsplayer",
     "oembedAllowedDomainsLabel": "Erlaubte Domains (eine pro Zeile)",
     "oembedAllowedDomainsHint": "Die Angabe einer Domain, auf der beliebige Personen Inhalte hosten können (z. B. github.io, amazonaws.com), birgt das Risiko, dass bösartige Skripte auf Ihrer Website eingebettet werden.",
@@ -305,5 +291,24 @@
     "blockedUntilLabel": "Gesperrt bis: {{date}}",
     "unblockButton": "Entsperren",
     "unblockConfirm": "IP {{ip}} entsperren?"
+  },
+  "roleRateLimitPanel": {
+    "title": "Ratenlimits nach Rolle",
+    "hint": "Spalten sind Rollen, Zeilen sind Limits. Ausgegraute Werte folgen der user-Einstellung. Für Admins gelten keine Limits.",
+    "itemHeader": "Limit",
+    "windowHeader": "Zeitraum",
+    "rows": {
+      "post": "Beiträge",
+      "follow": "Neue Follows",
+      "listCount": "Listen",
+      "listMember": "Mitglieder pro Liste",
+      "search": "Suchen"
+    },
+    "minutesUnit": "Min.",
+    "hoursUnit": "Std.",
+    "inheritedFromUser": "Wie user",
+    "unlimited": "Unbegrenzt",
+    "noWindow": "—",
+    "savedMessage": "Gespeichert."
   }
 }

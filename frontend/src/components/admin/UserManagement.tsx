@@ -7,7 +7,7 @@ import EmojiText from "../note/EmojiText";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
-const ROLES = ["user", "emoji-editor", "moderator", "admin"];
+const ROLES = ["quarantine", "silence", "user", "emoji-editor", "moderator", "admin"];
 const PAGE_SIZE = 30;
 
 export default function UserManagement() {

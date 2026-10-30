@@ -5,6 +5,7 @@ import AppShell from "../components/layout/AppShell";
 import Tabs from "../components/common/Tabs";
 import UserManagement from "../components/admin/UserManagement";
 import SiteSettingsPanel from "../components/admin/SiteSettingsPanel";
+import RoleRateLimitPanel from "../components/admin/RoleRateLimitPanel";
 import StorageProvidersPanel from "../components/admin/StorageProvidersPanel";
 import EmojisPanel from "../components/admin/EmojisPanel";
 import ReportsPanel from "../components/admin/ReportsPanel";
@@ -24,6 +25,7 @@ import TwemojiEmoji from "../components/common/TwemojiEmoji";
 const TAB_DEFS: { topic: AdminTopic; slug: string; labelKey: string; Panel: () => JSX.Element }[] = [
   { topic: "users", slug: "users", labelKey: "admin:adminPage.tabs.users", Panel: UserManagement },
   { topic: "siteSettings", slug: "site-settings", labelKey: "admin:adminPage.tabs.siteSettings", Panel: SiteSettingsPanel },
+  { topic: "roleRateLimits", slug: "rate-limits", labelKey: "admin:adminPage.tabs.roleRateLimits", Panel: RoleRateLimitPanel },
   { topic: "storage", slug: "storage", labelKey: "admin:adminPage.tabs.storage", Panel: StorageProvidersPanel },
   { topic: "emojis", slug: "emojis", labelKey: "admin:adminPage.tabs.emojis", Panel: EmojisPanel },
   { topic: "reports", slug: "reports", labelKey: "admin:adminPage.tabs.reports", Panel: ReportsPanel },

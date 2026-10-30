@@ -2,7 +2,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
-  role: string; // "user" | "moderator" | "admin"
+  role: string; // "quarantine" | "silence" | "user" | "emoji-editor" | "moderator" | "admin"
   /** ローカル actors.id（Snowflake ID）。noteUpdated ストリームイベントの reactorActorId
    * との突き合わせに使う。JS の53bit整数精度を超えるため文字列で返る。 */
   actor_id: string;
@@ -140,6 +140,7 @@ export interface SiteSettings {
   follow_rate_limit_window_hours: string;
   follow_rate_limit_max_user: string;
   follow_rate_limit_max_moderator: string;
+  follow_rate_limit_max_quarantine: string;
   list_max_count_user: string;
   list_max_count_moderator: string;
   list_member_max_user: string;

@@ -805,6 +805,34 @@ pub(crate) async fn resolve_blob_media_id(
         .flatten()
 }
 
+/// `app.bsky.feed.post` 以外のレコードを汎用経路でコミットする前に、ロールによる働きかけの
+/// 制限（`crate::role_restriction`）を確かめる。いいね（`app.bsky.feed.like`）はネイティブ API の
+/// リアクションと同じく、quarantine ではフォロワー以外の投稿に付けられない。
+async fn check_generic_record_restriction(
+    state: &AppState,
+    actor: &Actor,
+    collection: &str,
+    record: &serde_json::Value,
+) -> Result<(), ApiError> {
+    if collection != "app.bsky.feed.like" {
+        return Ok(());
+    }
+    let restriction = crate::role_restriction::restriction_of(state, actor.id).await;
+    let subject_did = record
+        .get("subject")
+        .and_then(|s| s.get("uri"))
+        .and_then(|v| v.as_str())
+        .and_then(crate::role_restriction::did_of_at_uri)
+        .unwrap_or("");
+    crate::role_restriction::require_can_interact_with_dids(
+        state,
+        actor.id,
+        restriction,
+        &[subject_did],
+    )
+    .await
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateRecordRequest {
@@ -846,6 +874,11 @@ pub async fn xrpc_create_record(
         };
     }
 
+    if let Err(e) =
+        check_generic_record_restriction(&state, &actor, &req.collection, &req.record).await
+    {
+        return e.into_response();
+    }
     let at_did = actor
         .at_did
         .clone()
@@ -917,6 +950,11 @@ pub async fn xrpc_put_record(
         };
     }
 
+    if let Err(e) =
+        check_generic_record_restriction(&state, &actor, &req.collection, &req.record).await
+    {
+        return e.into_response();
+    }
     let at_did = actor
         .at_did
         .clone()
@@ -1058,6 +1096,11 @@ pub async fn xrpc_apply_writes(
                         Err(e) => return e.into_response(),
                     }
                 }
+                if let Err(e) =
+                    check_generic_record_restriction(&state, &actor, &collection, &value).await
+                {
+                    return e.into_response();
+                }
                 match state
                     .atp_service
                     .commit_generic_record(
@@ -1107,6 +1150,11 @@ pub async fn xrpc_apply_writes(
                         }
                         Err(e) => return e.into_response(),
                     }
+                }
+                if let Err(e) =
+                    check_generic_record_restriction(&state, &actor, &collection, &value).await
+                {
+                    return e.into_response();
                 }
                 match state
                     .atp_service

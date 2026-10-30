@@ -136,6 +136,7 @@
     "replyModalTitle": "回覆",
     "quoteModalTitle": "引用貼文",
     "quoteUnlistedPublicConflict": "不列出貼文的引用只能以不列出或私密發布。",
+    "publicPostRestricted": "您的帳號受到限制，無法公開發布。",
     "bskyOffToPrivateHint": "關閉 Bluesky 傳送後即可發布私密貼文",
     "placeholder": "發生什麼事了？",
     "replyPlaceholder": "寫下回覆",

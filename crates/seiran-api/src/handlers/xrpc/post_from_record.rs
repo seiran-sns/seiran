@@ -12,7 +12,9 @@ use chrono::{DateTime, Utc};
 use seiran_common::repository::NewNotification;
 use serde_json::Value as JsonValue;
 
-use seiran_common::atp::{apply_bsky_facets, parse_bsky_embed_quote_uri, ParsedFacet};
+use seiran_common::atp::{
+    apply_bsky_facets, parse_bsky_embed_quote_uri, ParsedFacet, ParsedFacetFeature,
+};
 use seiran_common::repository::{
     extract_shortcode_candidates, Actor, InsertFullParams, NotificationKind,
 };
@@ -115,7 +117,46 @@ pub async fn create_post_from_record(
         .get("facets")
         .and_then(|v| serde_json::from_value(v.clone()).ok())
         .unwrap_or_default();
+    let mention_dids: Vec<String> = facets
+        .iter()
+        .flat_map(|f| &f.features)
+        .filter_map(|feature| match feature {
+            ParsedFacetFeature::Mention { did } => Some(did.clone()),
+            _ => None,
+        })
+        .collect();
     let (body_text, mention_facets) = apply_bsky_facets(&text, facets);
+    let quote_uri = embed.and_then(parse_bsky_embed_quote_uri);
+    let reply_parent_uri = record
+        .get("reply")
+        .and_then(|r| r.get("parent"))
+        .and_then(|p| p.get("uri"))
+        .and_then(|v| v.as_str());
+
+    // ATP クライアントは公開範囲を選べない（常にパブリック）ので、パブリック投稿を禁じられた
+    // ロールはひかえめに読み替える。働きかけの相手は AT URI・mention facet の DID と本文の
+    // メンション表記で確かめる（`crate::role_restriction`）。
+    let restriction = crate::role_restriction::restriction_of(state, actor.id).await;
+    let visibility = restriction.cap_visibility("public");
+    let target_dids: Vec<&str> = mention_dids
+        .iter()
+        .map(String::as_str)
+        .chain(
+            quote_uri
+                .as_deref()
+                .and_then(crate::role_restriction::did_of_at_uri),
+        )
+        .chain(reply_parent_uri.and_then(crate::role_restriction::did_of_at_uri))
+        .collect();
+    crate::role_restriction::require_can_interact_with_dids(
+        state,
+        actor.id,
+        restriction,
+        &target_dids,
+    )
+    .await?;
+    crate::role_restriction::require_mentions_allowed(state, actor.id, restriction, &body_text)
+        .await?;
 
     let resolved_attachments = resolve_embed_attachments(state, embed, actor.id).await;
 
@@ -124,8 +165,8 @@ pub async fn create_post_from_record(
     let mut quote_of_post_id: Option<i64> = None;
     let mut quote_notif_recipient: Option<i64> = None;
     let mut ap_quote = None;
-    if let Some(quote_uri) = embed.and_then(parse_bsky_embed_quote_uri) {
-        if let Ok(Some(qid)) = state.posts.find_id_by_at_uri(&quote_uri).await {
+    if let Some(quote_uri) = &quote_uri {
+        if let Ok(Some(qid)) = state.posts.find_id_by_at_uri(quote_uri).await {
             match state.posts.find_delivery_meta(qid).await {
                 Ok(Some(meta)) => {
                     crate::handlers::target_resolve::check_not_blocked(
@@ -147,13 +188,8 @@ pub async fn create_post_from_record(
     }
 
     // リプライ先の解決。ローカルDBに存在する場合のみ reply_to_post_id を設定する
-    // （Bskyプロトコルには可視性の概念が無く、この経路の投稿は常にpublicのため、
+    // （Bskyプロトコルには可視性の概念が無く、この経路の投稿は常にpublic（ロールによってはunlisted）のため、
     // `resolve_reply_context` の親可視性チェックは実質発生しない）。
-    let reply_parent_uri = record
-        .get("reply")
-        .and_then(|r| r.get("parent"))
-        .and_then(|p| p.get("uri"))
-        .and_then(|v| v.as_str());
     let mut reply_to_post_id: Option<i64> = None;
     let mut ap_in_reply_to: Option<String> = None;
     let mut parent_local_actor_id: Option<i64> = None;
@@ -203,7 +239,7 @@ pub async fn create_post_from_record(
             reply_to_post_id,
             quote_of_post_id,
             created_at,
-            visibility: "public",
+            visibility,
             deliver_fedi: true,
             deliver_bsky: true,
             thread_root_post_id: None,

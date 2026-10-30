@@ -9,7 +9,8 @@
       "emojis": "表情符號",
       "relays": "Relays",
       "authIpBlocks": "已封鎖IP",
-      "suspendedActors": "已凍結使用者"
+      "suspendedActors": "已凍結使用者",
+      "roleRateLimits": "速率限制"
     },
     "rightPanelDescription": "從此畫面管理此實例。每項操作都會驗證伺服器管理員權限。"
   },
@@ -128,21 +129,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "依角色設定速率限制",
-    "roleRateLimitHint": "這些限制不適用於admin。moderator的上限較高；user與emoji-editor共用同一上限。",
-    "postRateLimitWindowMinutesLabel": "發文限制時間窗（分鐘）",
-    "postRateLimitMaxUserLabel": "發文數上限（user）",
-    "postRateLimitMaxModeratorLabel": "發文數上限（moderator）",
-    "followRateLimitWindowHoursLabel": "追蹤限制時間窗（小時）",
-    "followRateLimitMaxUserLabel": "新增追蹤數上限（user）",
-    "followRateLimitMaxModeratorLabel": "新增追蹤數上限（moderator）",
-    "listMaxCountUserLabel": "列表建立數上限（user）",
-    "listMaxCountModeratorLabel": "列表建立數上限（moderator）",
-    "listMemberMaxUserLabel": "列表最大人數（user）",
-    "listMemberMaxModeratorLabel": "列表最大人數（moderator）",
-    "searchRateLimitWindowMinutesLabel": "搜尋限制時間窗（分鐘）",
-    "searchRateLimitMaxUserLabel": "搜尋次數上限（user）",
-    "searchRateLimitMaxModeratorLabel": "搜尋次數上限（moderator）",
     "oembedSectionTitle": "URL卡片嵌入播放器",
     "oembedAllowedDomainsLabel": "允許的網域（每行一個）",
     "oembedAllowedDomainsHint": "指定任何人都能託管內容的網域（例如 github.io、amazonaws.com）可能導致惡意指令碼被嵌入您的網站。",
@@ -305,5 +291,24 @@
     "blockedUntilLabel": "解除封鎖時間：{{date}}",
     "unblockButton": "解除封鎖",
     "unblockConfirm": "確定要解除IP {{ip}} 的封鎖嗎？"
+  },
+  "roleRateLimitPanel": {
+    "title": "依角色的速率限制",
+    "hint": "橫軸為角色，縱軸為限制項目。灰色的值沿用 user 的設定。不適用於 admin。",
+    "itemHeader": "項目",
+    "windowHeader": "期間",
+    "rows": {
+      "post": "發文數",
+      "follow": "新追蹤數",
+      "listCount": "列表數",
+      "listMember": "每個列表最多人數",
+      "search": "搜尋次數"
+    },
+    "minutesUnit": "分鐘",
+    "hoursUnit": "小時",
+    "inheritedFromUser": "與 user 相同",
+    "unlimited": "無限制",
+    "noWindow": "—",
+    "savedMessage": "已儲存。"
   }
 }

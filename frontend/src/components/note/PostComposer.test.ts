@@ -50,6 +50,13 @@ describe("replyVisibilityConstraint", () => {
     });
   });
 
+  it("パブリック投稿を禁じられたロールでは、返信先がpublicでもunlisted/followers_only", () => {
+    expect(replyVisibilityConstraint(makeNote(undefined), false)).toEqual({
+      options: ["unlisted", "followers_only"],
+      defaultValue: "unlisted",
+    });
+  });
+
   it("返信先がdirectの場合も制約なし（public扱い）", () => {
     expect(replyVisibilityConstraint(makeNote("direct"))).toEqual({
       options: ["public", "unlisted", "followers_only"],

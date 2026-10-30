@@ -2,6 +2,7 @@
 export type AdminTopic =
   | "users"
   | "siteSettings"
+  | "roleRateLimits"
   | "storage"
   | "emojis"
   | "reports"
@@ -12,6 +13,7 @@ export type AdminTopic =
 const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "users",
   "siteSettings",
+  "roleRateLimits",
   "storage",
   "emojis",
   "reports",
@@ -22,7 +24,7 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
 
 /**
  * ロールごとにアクセス可能な管理画面トピック（#179）。
- * 権限の強さ: admin > moderator > emoji-editor > user。
+ * 権限の強さ: admin > moderator > emoji-editor > user > silence > quarantine。
  * moderator は調停者として「通報」対応（凍結・投稿削除・連合転送を含む）・
  * 「凍結済みユーザー」一覧（バックエンドの`report_moderator_only`と対応、#凍結リモート対応）・
  * 「絵文字」管理にアクセス可能。emoji-editor は「絵文字」トピックのみ。
@@ -42,4 +44,12 @@ export function getAdminTopics(role: string | undefined): AdminTopic[] {
 /** 管理画面に（いずれかのトピックだけでも）アクセスできる役割か。 */
 export function canAccessAdminPage(role: string | undefined): boolean {
   return getAdminTopics(role).length > 0;
+}
+
+/**
+ * パブリック投稿ができるロールか。silence / quarantine はひかえめ以下でしか投稿できない
+ * （バックエンドの`role_restriction::RoleRestriction::cap_visibility`と対応）。
+ */
+export function canPostPublic(role: string | undefined): boolean {
+  return role !== "silence" && role !== "quarantine";
 }

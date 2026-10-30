@@ -9,7 +9,8 @@
       "emojis": "Emojis",
       "relays": "Relays",
       "authIpBlocks": "Blocked IPs",
-      "suspendedActors": "Suspended Users"
+      "suspendedActors": "Suspended Users",
+      "roleRateLimits": "Rate limits"
     },
     "rightPanelDescription": "Manage the instance from this screen. Every action is also verified for admin permission on the server."
   },
@@ -136,21 +137,6 @@
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "When both are set, an _atproto.{handle} TXT record is created automatically on sign-up and similar events. Otherwise only /.well-known/atproto-did is used. The token needs Zone > DNS > Edit permission on the target zone.",
-    "roleRateLimitSectionTitle": "Role-based rate limits",
-    "roleRateLimitHint": "These limits do not apply to admins. Moderators get a higher limit; users and emoji-editors share the same limit.",
-    "postRateLimitWindowMinutesLabel": "Post limit window (minutes)",
-    "postRateLimitMaxUserLabel": "Max posts (user)",
-    "postRateLimitMaxModeratorLabel": "Max posts (moderator)",
-    "followRateLimitWindowHoursLabel": "Follow limit window (hours)",
-    "followRateLimitMaxUserLabel": "Max new follows (user)",
-    "followRateLimitMaxModeratorLabel": "Max new follows (moderator)",
-    "listMaxCountUserLabel": "Max lists (user)",
-    "listMaxCountModeratorLabel": "Max lists (moderator)",
-    "listMemberMaxUserLabel": "Max members per list (user)",
-    "listMemberMaxModeratorLabel": "Max members per list (moderator)",
-    "searchRateLimitWindowMinutesLabel": "Search limit window (minutes)",
-    "searchRateLimitMaxUserLabel": "Max searches (user)",
-    "searchRateLimitMaxModeratorLabel": "Max searches (moderator)",
     "oembedSectionTitle": "URL card embed player",
     "oembedAllowedDomainsLabel": "Allowed domains (one per line)",
     "oembedAllowedDomainsHint": "Specifying a domain that anyone can host content on (e.g. github.io, amazonaws.com) risks embedding malicious scripts on your site.",
@@ -305,5 +291,24 @@
     "passkeyCount": "Passkeys: {{count}}",
     "disableTotpButton": "Force-disable TOTP",
     "disableTotpConfirm": "Force-disable TOTP for {{username}}?"
+  },
+  "roleRateLimitPanel": {
+    "title": "Role-based rate limits",
+    "hint": "Columns are roles and rows are limits. Grayed values follow the user setting. Admins are exempt.",
+    "itemHeader": "Limit",
+    "windowHeader": "Window",
+    "rows": {
+      "post": "Posts",
+      "follow": "New follows",
+      "listCount": "Lists",
+      "listMember": "Members per list",
+      "search": "Searches"
+    },
+    "minutesUnit": "min",
+    "hoursUnit": "h",
+    "inheritedFromUser": "Same as user",
+    "unlimited": "Unlimited",
+    "noWindow": "—",
+    "savedMessage": "Saved."
   }
 }

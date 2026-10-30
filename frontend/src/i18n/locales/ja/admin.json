@@ -9,7 +9,8 @@
       "emojis": "絵文字",
       "relays": "リレー",
       "authIpBlocks": "認証ブロック",
-      "suspendedActors": "凍結済みユーザー"
+      "suspendedActors": "凍結済みユーザー",
+      "roleRateLimits": "レート制限"
     },
     "rightPanelDescription": "管理操作はこの画面から行えます。各操作はサーバー側でも管理者権限を検証します。"
   },
@@ -136,21 +137,6 @@
     "cloudflareApiTokenLabel": "API トークン",
     "cloudflareZoneIdLabel": "Zone ID",
     "cloudflareDnsHint": "両方設定すると、アカウント作成時などに _atproto.{ハンドル} の TXT レコードを自動で作成します。未設定の場合は /.well-known/atproto-did のみで検証されます。トークンには対象ゾーンの Zone > DNS > Edit 権限が必要です。",
-    "roleRateLimitSectionTitle": "ロール別レート制限",
-    "roleRateLimitHint": "adminには適用されません。moderatorはuser/emoji-editorより緩い上限になります。",
-    "postRateLimitWindowMinutesLabel": "投稿数制限ウィンドウ（分）",
-    "postRateLimitMaxUserLabel": "投稿数上限（user）",
-    "postRateLimitMaxModeratorLabel": "投稿数上限（moderator）",
-    "followRateLimitWindowHoursLabel": "フォロー数制限ウィンドウ（時間）",
-    "followRateLimitMaxUserLabel": "新規フォロー数上限（user）",
-    "followRateLimitMaxModeratorLabel": "新規フォロー数上限（moderator）",
-    "listMaxCountUserLabel": "リスト作成数上限（user）",
-    "listMaxCountModeratorLabel": "リスト作成数上限（moderator）",
-    "listMemberMaxUserLabel": "リスト最大人数（user）",
-    "listMemberMaxModeratorLabel": "リスト最大人数（moderator）",
-    "searchRateLimitWindowMinutesLabel": "検索回数制限ウィンドウ（分）",
-    "searchRateLimitMaxUserLabel": "検索回数上限（user）",
-    "searchRateLimitMaxModeratorLabel": "検索回数上限（moderator）",
     "oembedSectionTitle": "URLカード埋め込みプレーヤー",
     "oembedAllowedDomainsLabel": "許可ドメイン（1行1ドメイン）",
     "oembedAllowedDomainsHint": "不特定多数がサイトをホスティングできるドメイン（例：github.io, amazonaws.com など）を指定すると悪意あるスクリプトをサイト上に埋め込まれるおそれがあります",
@@ -305,5 +291,24 @@
     "passkeyCount": "パスキー: {{count}}件",
     "disableTotpButton": "TOTP強制解除",
     "disableTotpConfirm": "{{username}} のTOTPを強制解除しますか？"
+  },
+  "roleRateLimitPanel": {
+    "title": "ロール別レート制限",
+    "hint": "横軸がロール、縦軸が制限項目です。グレーの値は user の設定がそのまま適用されます。admin には適用されません。",
+    "itemHeader": "項目",
+    "windowHeader": "期間",
+    "rows": {
+      "post": "投稿数",
+      "follow": "新規フォロー数",
+      "listCount": "リスト作成数",
+      "listMember": "リスト最大人数",
+      "search": "検索回数"
+    },
+    "minutesUnit": "分",
+    "hoursUnit": "時間",
+    "inheritedFromUser": "user と同じ",
+    "unlimited": "無制限",
+    "noWindow": "—",
+    "savedMessage": "保存しました。"
   }
 }

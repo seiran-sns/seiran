@@ -46,6 +46,23 @@ pub trait FollowRepository: Send + Sync {
         target_actor_id: i64,
     ) -> Result<Option<String>, sqlx::Error>;
 
+    /// `target_actor_id` を accepted でフォローしているアクターに、Fediverse 表記
+    /// `@username@domain` に一致するものがいるか。
+    async fn has_follower_with_fedi_handle(
+        &self,
+        target_actor_id: i64,
+        username: &str,
+        domain: &str,
+    ) -> Result<bool, sqlx::Error>;
+
+    /// `target_actor_id` を accepted でフォローしているアクターに、AT Protocol ハンドル
+    /// `handle` を持つものがいるか（`bsky` は `username`、`remote_seiran` は `at_handle` に持つ）。
+    async fn has_follower_with_atproto_handle(
+        &self,
+        target_actor_id: i64,
+        handle: &str,
+    ) -> Result<bool, sqlx::Error>;
+
     /// リモートからのフォロー受信時に accepted で挿入する（重複なら何もしない）。
     async fn insert_accepted(
         &self,
@@ -285,6 +302,46 @@ impl FollowRepository for PgFollowRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
+    }
+
+    async fn has_follower_with_fedi_handle(
+        &self,
+        target_actor_id: i64,
+        username: &str,
+        domain: &str,
+    ) -> Result<bool, sqlx::Error> {
+        // フォロワー側から絞り込む（actors を表記で全件探すより、自分のフォロワーの中を探す方が狭い）。
+        sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM follows f JOIN actors a ON a.id = f.follower_actor_id
+                 WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+                   AND LOWER(a.username) = LOWER($2) AND LOWER(a.domain) = LOWER($3)
+             )",
+        )
+        .bind(target_actor_id)
+        .bind(username)
+        .bind(domain)
+        .fetch_one(&self.pool)
+        .await
+    }
+
+    async fn has_follower_with_atproto_handle(
+        &self,
+        target_actor_id: i64,
+        handle: &str,
+    ) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM follows f JOIN actors a ON a.id = f.follower_actor_id
+                 WHERE f.target_actor_id = $1 AND f.status = 'accepted'
+                   AND ((a.actor_type = 'bsky' AND LOWER(a.username) = LOWER($2))
+                        OR LOWER(a.at_handle) = LOWER($2))
+             )",
+        )
+        .bind(target_actor_id)
+        .bind(handle)
+        .fetch_one(&self.pool)
+        .await
     }
 
     async fn find_statuses_among(

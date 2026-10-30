@@ -136,6 +136,7 @@
     "replyModalTitle": "Répondre",
     "quoteModalTitle": "Article de citation",
     "quoteUnlistedPublicConflict": "Les citations de messages non répertoriés ne peuvent être publiées qu'en mode non répertorié ou privé.",
+    "publicPostRestricted": "Votre compte est restreint, vous ne pouvez donc pas publier publiquement.",
     "bskyOffToPrivateHint": "Désactivez Bluesky pour publier en privé",
     "placeholder": "Ce qui se passe?",
     "replyPlaceholder": "Écrivez une réponse",

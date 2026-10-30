@@ -136,6 +136,7 @@
     "replyModalTitle": "Antwort",
     "quoteModalTitle": "Beitrag zitieren",
     "quoteUnlistedPublicConflict": "Zitate von nicht gelisteten Beiträgen können nur als nicht gelistet oder privat gepostet werden.",
+    "publicPostRestricted": "Ihr Konto ist eingeschränkt, daher können Sie nicht öffentlich posten.",
     "bskyOffToPrivateHint": "Schalten Sie Bluesky aus, um privat zu posten",
     "placeholder": "Was passiert?",
     "replyPlaceholder": "Schreiben Sie eine Antwort",

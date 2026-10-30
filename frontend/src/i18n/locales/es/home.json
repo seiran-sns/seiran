@@ -136,6 +136,7 @@
     "replyModalTitle": "Responder",
     "quoteModalTitle": "Publicación de cotización",
     "quoteUnlistedPublicConflict": "Las citas de publicaciones no listadas solo se pueden publicar como no listadas o privadas.",
+    "publicPostRestricted": "Tu cuenta está restringida, así que no puedes publicar públicamente.",
     "bskyOffToPrivateHint": "Desactiva Bluesky para poder publicar en privado",
     "placeholder": "¿Lo que está sucediendo?",
     "replyPlaceholder": "Escribe una respuesta",

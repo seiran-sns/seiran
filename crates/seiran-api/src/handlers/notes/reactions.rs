@@ -360,6 +360,9 @@ async fn create_reaction_inner(
     let (content, emoji_url) = resolve_reaction_content(state, raw_content).await?;
     let post = find_reactable_post(state, note_id, me.actor_id).await?;
     crate::handlers::target_resolve::check_not_blocked(state, me.actor_id, post.actor_id).await?;
+    let restriction = crate::role_restriction::restriction_of(state, me.actor_id).await;
+    crate::role_restriction::require_can_interact(state, me.actor_id, restriction, [post.actor_id])
+        .await?;
 
     // AP へ配送する Like/EmojiReact 自身の activity id を発行し、Undo で参照できるよう保存する。
     let activity_id = format!(

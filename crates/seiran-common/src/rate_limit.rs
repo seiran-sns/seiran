@@ -26,7 +26,7 @@ pub async fn setting_i64(
         .unwrap_or(default)
 }
 
-/// actor_id からロール文字列（"user" / "emoji-editor" / "moderator" / "admin"）を取得する。
+/// actor_id からロール文字列（"quarantine" / "silence" / "user" / "emoji-editor" / "moderator" / "admin"）を取得する。
 /// 取得失敗・未特定時は最も制限が強い "user" にフォールバックする。
 pub async fn actor_role(pool: &PgPool, actor_id: i64) -> String {
     let role: Option<(String,)> = sqlx::query_as(
@@ -41,7 +41,7 @@ pub async fn actor_role(pool: &PgPool, actor_id: i64) -> String {
 }
 
 /// ロール別のレート制限上限値を`site_settings`から取得する。admin は常に無制限（`None`）。
-/// user/emoji-editorは`user_key`、moderatorは`moderator_key`の設定値（無ければデフォルト）を使う。
+/// moderatorは`moderator_key`、それ以外（user/emoji-editor/silence/quarantine）は`user_key`の設定値（無ければデフォルト）を使う。
 pub async fn role_limit(
     site_settings: &dyn SiteSettingsRepository,
     role: &str,
@@ -68,7 +68,8 @@ pub enum CheckFollowRateLimitError {
     Db(sqlx::Error),
 }
 
-/// user/emoji-editorロールの24時間あたり新規フォロー数を制限する（既定100人、moderatorは既定300人）。
+/// 24時間あたり新規フォロー数を制限する（既定: user/emoji-editor/silence 100人、moderator 300人、
+/// quarantine 10人）。quarantine は働きかけ先を広げにくくするため user より厳しい独自の上限を持つ。
 /// フォロー成立状態（accepted/pending問わず）を`follows`テーブルの行数でカウントする。
 pub async fn check_follow_rate_limit(
     pool: &PgPool,
@@ -76,17 +77,22 @@ pub async fn check_follow_rate_limit(
     actor_id: i64,
 ) -> Result<(), CheckFollowRateLimitError> {
     let role = actor_role(pool, actor_id).await;
-    let Some(max) = role_limit(
-        site_settings,
-        &role,
-        "follow_rate_limit_max_user",
-        100,
-        "follow_rate_limit_max_moderator",
-        300,
-    )
-    .await
-    else {
-        return Ok(());
+    let max = if role == "quarantine" {
+        setting_i64(site_settings, "follow_rate_limit_max_quarantine", 10).await
+    } else {
+        let Some(max) = role_limit(
+            site_settings,
+            &role,
+            "follow_rate_limit_max_user",
+            100,
+            "follow_rate_limit_max_moderator",
+            300,
+        )
+        .await
+        else {
+            return Ok(());
+        };
+        max
     };
     let window_hours = setting_i64(site_settings, "follow_rate_limit_window_hours", 24)
         .await

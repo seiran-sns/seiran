@@ -137,7 +137,7 @@ pub async fn change_user_role(
 ) -> Result<StatusCode, ApiError> {
     if !matches!(
         req.role.as_str(),
-        "user" | "moderator" | "emoji-editor" | "admin"
+        "quarantine" | "silence" | "user" | "moderator" | "emoji-editor" | "admin"
     ) {
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
     }

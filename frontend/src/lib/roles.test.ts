@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { canAccessAdminPage, getAdminTopics } from "./roles";
+import { canAccessAdminPage, canPostPublic, getAdminTopics } from "./roles";
 
 describe("canAccessAdminPage", () => {
   it("admin を許可する", () => {
@@ -28,6 +28,7 @@ describe("getAdminTopics", () => {
     expect(getAdminTopics("admin")).toEqual([
       "users",
       "siteSettings",
+      "roleRateLimits",
       "storage",
       "emojis",
       "reports",
@@ -51,5 +52,18 @@ describe("getAdminTopics", () => {
 
   it("undefined はどのトピックにもアクセスできない", () => {
     expect(getAdminTopics(undefined)).toEqual([]);
+  });
+});
+
+describe("canPostPublic", () => {
+  it("silence と quarantine はパブリック投稿できない", () => {
+    expect(canPostPublic("silence")).toBe(false);
+    expect(canPostPublic("quarantine")).toBe(false);
+  });
+
+  it("user 以上と未ログインはパブリック投稿できる", () => {
+    expect(canPostPublic("user")).toBe(true);
+    expect(canPostPublic("admin")).toBe(true);
+    expect(canPostPublic(undefined)).toBe(true);
   });
 });
