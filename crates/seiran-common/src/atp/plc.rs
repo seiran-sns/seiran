@@ -1,7 +1,7 @@
-use argon2::password_hash::rand_core::OsRng;
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
 use p256::ecdsa::{signature::Signer, SigningKey};
+use p256::elliptic_curve::Generate;
 use p256::pkcs8::{DecodePrivateKey, EncodePrivateKey, LineEnding};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -22,7 +22,7 @@ pub enum PlcError {
 /// P-256 公開鍵を `did:key` 形式に変換する
 /// multicodec: p256-pub = 0x1200 → varint [0x80, 0x24]
 pub fn p256_to_did_key(verifying_key: &p256::ecdsa::VerifyingKey) -> String {
-    let compressed = verifying_key.to_encoded_point(true);
+    let compressed = verifying_key.to_sec1_point(true);
     let mut buf = vec![0x80u8, 0x24u8];
     buf.extend_from_slice(compressed.as_bytes());
     format!("did:key:z{}", bs58::encode(&buf).into_string())
@@ -37,7 +37,7 @@ pub fn signing_key_from_pem(pem: &str) -> Result<SigningKey, PlcError> {
 /// `prepare_plc_genesis`のuser_signing_key生成と同じロジックだが、既存DIDの
 /// `verificationMethod`差し替え（アカウント転入フロー）でも使うため単体関数として切り出す。
 pub fn generate_new_signing_key() -> Result<(SigningKey, String), PlcError> {
-    let key = SigningKey::random(&mut OsRng);
+    let key = SigningKey::generate();
     let pem = key
         .to_pkcs8_pem(LineEnding::LF)
         .map_err(|e| PlcError::KeyGen(e.to_string()))?
@@ -149,7 +149,7 @@ pub fn prepare_plc_genesis(
     pds_domain: &str,
     server_shared_rotation_key: &SigningKey,
 ) -> Result<PlcGenesis, PlcError> {
-    let account_rotation_key = SigningKey::random(&mut OsRng);
+    let account_rotation_key = SigningKey::generate();
     let account_rotation_did_key = p256_to_did_key(account_rotation_key.verifying_key());
     let server_shared_rotation_did_key =
         p256_to_did_key(server_shared_rotation_key.verifying_key());
@@ -164,7 +164,7 @@ pub fn prepare_plc_genesis(
     );
     let pds_endpoint = format!("https://{}", pds_domain);
 
-    let user_signing_key = SigningKey::random(&mut OsRng);
+    let user_signing_key = SigningKey::generate();
     let user_did_key = p256_to_did_key(user_signing_key.verifying_key());
 
     let mut verification_methods = BTreeMap::new();
@@ -196,7 +196,7 @@ pub fn prepare_plc_genesis(
     // low-S 正規化（AT Protocol/PLC の検証は low-S 必須。crates/seiran-common/src/atp/repo.rs の
     // create_commit と同じ理由）。
     let raw_sig: p256::ecdsa::Signature = account_rotation_key.sign(&unsigned_cbor);
-    let raw_sig = raw_sig.normalize_s().unwrap_or(raw_sig);
+    let raw_sig = raw_sig.normalize_s();
     let sig_str = URL_SAFE_NO_PAD.encode(raw_sig.to_bytes().as_slice());
 
     // ② 署名済みオペレーションを DAG-CBOR エンコード → SHA-256 → DID
@@ -397,7 +397,7 @@ pub fn prepare_plc_rotation_update(
         serde_ipld_dagcbor::to_vec(&unsigned_op).map_err(|e| PlcError::Cbor(e.to_string()))?;
 
     let raw_sig: p256::ecdsa::Signature = signing_key.sign(&unsigned_cbor);
-    let raw_sig = raw_sig.normalize_s().unwrap_or(raw_sig);
+    let raw_sig = raw_sig.normalize_s();
     let sig_str = URL_SAFE_NO_PAD.encode(raw_sig.to_bytes().as_slice());
 
     let signed_op = UpdateOpSigned {
