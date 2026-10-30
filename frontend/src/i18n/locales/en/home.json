@@ -136,6 +136,7 @@
     "replyModalTitle": "Reply",
     "quoteModalTitle": "Quote post",
     "quoteUnlistedPublicConflict": "Quotes of unlisted posts can only be posted as unlisted or private.",
+    "publicPostRestricted": "Your account is restricted, so you can't post publicly.",
     "bskyOffToPrivateHint": "Turn off Bluesky to enable private posts",
     "placeholder": "What's happening?",
     "replyPlaceholder": "Write a reply",

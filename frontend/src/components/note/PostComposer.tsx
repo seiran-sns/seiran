@@ -29,6 +29,7 @@ import {
 } from "../../lib/format";
 import { containsKnownCustomEmojiShortcode, fetchCustomEmojis } from "../../lib/customEmojis";
 import { useAuth } from "../../contexts/AuthContext";
+import { canPostPublic } from "../../lib/roles";
 import {
   clearComposerDraft,
   DraftPollExpiry,
@@ -122,7 +123,10 @@ const VISIBILITY_NARROWING_ORDER: Visibility[] = ["public", "unlisted", "followe
  * 技術的には許容するが、UIでは「狭めることはできるべき」という要件に合わせて狭める方向の
  * 選択肢のみ提示する。
  */
-export function replyVisibilityConstraint(replyTo?: Note): {
+export function replyVisibilityConstraint(
+  replyTo?: Note,
+  publicAllowed = true,
+): {
   options: Visibility[];
   defaultValue: Visibility;
 } {
@@ -131,6 +135,10 @@ export function replyVisibilityConstraint(replyTo?: Note): {
     return { options: ["followers_only"], defaultValue: "followers_only" };
   }
   if (parent === "unlisted") {
+    return { options: ["unlisted", "followers_only"], defaultValue: "unlisted" };
+  }
+  // パブリック投稿を禁じられたロール（silence / quarantine）は、ひかえめ以下だけを出す。
+  if (!publicAllowed) {
     return { options: ["unlisted", "followers_only"], defaultValue: "unlisted" };
   }
   // undefined(public) / "direct" / 想定外値 → 制約なし（3段階すべて選択可）
@@ -231,7 +239,8 @@ export default function PostComposer({
 }: PostComposerProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
-  const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo) : null;
+  const publicAllowed = canPostPublic(user?.role);
+  const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo, publicAllowed) : null;
   // 返信の配送先トグルは、返信先ポストが実際に持つプロトコル実体のみ表示する（持たない
   // プロトコルへ配送すると親と無関係な独立ポストとして誤配信されるため）。Bsky は
   // followers_only 可視性を配信できないため、親自体が非公開（＝この返信も非公開固定）
@@ -534,7 +543,7 @@ export default function PostComposer({
   // ため、ここでは含めない。
   function isVisibilityDisabled(v: Visibility): boolean {
     if (v === "followers_only") return deliverBsky;
-    if (v === "public") return quoteTo?.visibility === "unlisted";
+    if (v === "public") return !publicAllowed || quoteTo?.visibility === "unlisted";
     return false;
   }
 
@@ -743,9 +752,13 @@ export default function PostComposer({
     draftVisibility && replyConstraint?.options.includes(draftVisibility)
       ? draftVisibility
       : replyConstraint?.defaultValue;
+  // パブリック投稿を禁じられたロールでは、記憶した既定値がパブリックでもひかえめを既定にする
+  // （パブリックのボタンは押せないので、ショートカット送信が何もしなくなるのを避ける）。
+  const composeDefaultVisibility = draftVisibility ?? defaultVisibility;
   const effectiveDefaultVisibility: Visibility = replyTo
     ? focusedVisibility ?? replyDefaultVisibility ?? "public"
-    : focusedVisibility ?? draftVisibility ?? defaultVisibility;
+    : focusedVisibility ??
+      (!publicAllowed && composeDefaultVisibility === "public" ? "unlisted" : composeDefaultVisibility);
 
   function handlePost(e: FormEvent) {
     e.preventDefault();
@@ -1432,13 +1445,15 @@ export default function PostComposer({
                   embedChoiceMissing ||
                   pollInvalid ||
                   cwInvalid ||
-                  quoteTo?.visibility === "unlisted" ||
+                  isVisibilityDisabled("public") ||
                   user?.did_moved_out
                 }
                 title={
-                  quoteTo?.visibility === "unlisted"
-                    ? t("home:postComposer.quoteUnlistedPublicConflict")
-                    : undefined
+                  !publicAllowed
+                    ? t("home:postComposer.publicPostRestricted")
+                    : quoteTo?.visibility === "unlisted"
+                      ? t("home:postComposer.quoteUnlistedPublicConflict")
+                      : undefined
                 }
                 onClick={() => submitWithVisibility("public")}
                 onFocus={() => handleSubmitBtnFocus("public")}

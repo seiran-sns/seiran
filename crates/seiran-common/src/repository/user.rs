@@ -111,7 +111,7 @@ pub trait UserRepository: Send + Sync {
     /// 登録済みユーザー総数を返す（セットアップ状態チェック用）。
     async fn count(&self) -> Result<i64, sqlx::Error>;
 
-    /// 新規ユーザーを挿入し、その user_id を返す。role は 'user' / 'emoji-editor' / 'moderator' / 'admin'。
+    /// 新規ユーザーを挿入し、その user_id を返す。role は 'quarantine' / 'silence' / 'user' / 'emoji-editor' / 'moderator' / 'admin'。
     async fn insert(
         &self,
         email: &str,
@@ -119,7 +119,7 @@ pub trait UserRepository: Send + Sync {
         role: &str,
     ) -> Result<i64, sqlx::Error>;
 
-    /// ユーザー ID からロール文字列（"user" / "emoji-editor" / "moderator" / "admin"）を取得する。
+    /// ユーザー ID からロール文字列（"quarantine" / "silence" / "user" / "emoji-editor" / "moderator" / "admin"）を取得する。
     async fn find_role_by_user_id(&self, user_id: i64) -> Result<Option<String>, sqlx::Error>;
 
     /// ログイン用にメールアドレスでユーザー + ローカルアクターを取得する。
@@ -169,7 +169,7 @@ pub trait UserRepository: Send + Sync {
     /// アカウントの凍結状態を更新する（実体は対応するローカル `actors.suspended_at`）。
     async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
 
-    /// ロール（`user` / `emoji-editor` / `moderator` / `admin`）を更新する。
+    /// ロール（`quarantine` / `silence` / `user` / `emoji-editor` / `moderator` / `admin`）を更新する。
     async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error>;
 
     /// 表示言語設定（`ja` / `en`）を取得する。`None` は「自動」（ブラウザ設定に従う）。

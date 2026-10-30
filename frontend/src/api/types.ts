@@ -2,7 +2,7 @@ export interface User {
   id: number;
   username: string;
   email: string;
-  role: string; // "user" | "moderator" | "admin"
+  role: string; // "quarantine" | "silence" | "user" | "emoji-editor" | "moderator" | "admin"
   /** ローカル actors.id（Snowflake ID）。noteUpdated ストリームイベントの reactorActorId
    * との突き合わせに使う。JS の53bit整数精度を超えるため文字列で返る。 */
   actor_id: string;

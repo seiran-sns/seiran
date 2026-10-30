@@ -26,7 +26,7 @@ pub async fn setting_i64(
         .unwrap_or(default)
 }
 
-/// actor_id からロール文字列（"user" / "emoji-editor" / "moderator" / "admin"）を取得する。
+/// actor_id からロール文字列（"quarantine" / "silence" / "user" / "emoji-editor" / "moderator" / "admin"）を取得する。
 /// 取得失敗・未特定時は最も制限が強い "user" にフォールバックする。
 pub async fn actor_role(pool: &PgPool, actor_id: i64) -> String {
     let role: Option<(String,)> = sqlx::query_as(
@@ -41,7 +41,7 @@ pub async fn actor_role(pool: &PgPool, actor_id: i64) -> String {
 }
 
 /// ロール別のレート制限上限値を`site_settings`から取得する。admin は常に無制限（`None`）。
-/// user/emoji-editorは`user_key`、moderatorは`moderator_key`の設定値（無ければデフォルト）を使う。
+/// moderatorは`moderator_key`、それ以外（user/emoji-editor/silence/quarantine）は`user_key`の設定値（無ければデフォルト）を使う。
 pub async fn role_limit(
     site_settings: &dyn SiteSettingsRepository,
     role: &str,

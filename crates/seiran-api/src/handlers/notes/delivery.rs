@@ -713,6 +713,8 @@ pub struct ReplyContext {
     pub parent_thread_root_post_id: Option<i64>,
     /// 親ポストの投稿者がローカルユーザーの場合のみ、その actor_id（リプライ通知の宛先に使う）。
     pub parent_local_actor_id: Option<i64>,
+    /// 親ポストの投稿者の actor_id（ローカル・リモートを問わない。非リプライは `None`）。
+    pub parent_actor_id: Option<i64>,
 }
 
 impl ReplyContext {
@@ -726,6 +728,7 @@ impl ReplyContext {
             parent_visibility: None,
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
+            parent_actor_id: None,
         }
     }
 
@@ -867,6 +870,7 @@ pub async fn resolve_reply_context(
         parent_visibility: Some(meta.visibility.clone()),
         parent_thread_root_post_id: meta.thread_root_post_id,
         parent_local_actor_id,
+        parent_actor_id: Some(meta.actor_id),
     })
 }
 
@@ -1232,6 +1236,7 @@ mod tests {
             parent_visibility: parent_visibility.map(str::to_owned),
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
+            parent_actor_id: None,
         }
     }
 

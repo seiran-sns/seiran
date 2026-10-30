@@ -92,5 +92,6 @@
   "USER_ID_OR_USERNAME_REQUIRED": "Por favor especifique una ID de usuario o nombre de usuario",
   "USER_NOT_FOUND": "Usuario no encontrado",
   "DISPLAY_NAME_TOO_LONG": "El nombre para mostrar es demasiado largo (máx. 64 caracteres)",
-  "BIO_TOO_LONG": "La biografía es demasiado larga (máx. 256 caracteres)"
+  "BIO_TOO_LONG": "La biografía es demasiado larga (máx. 256 caracteres)",
+  "INTERACTION_RESTRICTED": "Tu cuenta está restringida: solo puedes responder, citar, mencionar o reaccionar a tus seguidores."
 }

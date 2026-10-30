@@ -9,6 +9,7 @@ pub mod handlers;
 pub mod mailer;
 pub mod middleware;
 pub mod rate_limit;
+pub mod role_restriction;
 mod routes;
 pub use routes::router;
 pub mod search;

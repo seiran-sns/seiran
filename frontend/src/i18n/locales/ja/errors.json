@@ -92,5 +92,6 @@
   "USER_ID_OR_USERNAME_REQUIRED": "ユーザーIDまたはユーザー名を指定してください",
   "USER_NOT_FOUND": "ユーザーが見つかりません",
   "DISPLAY_NAME_TOO_LONG": "表示名が長すぎます（64文字まで）",
-  "BIO_TOO_LONG": "自己紹介が長すぎます（256文字まで）"
+  "BIO_TOO_LONG": "自己紹介が長すぎます（256文字まで）",
+  "INTERACTION_RESTRICTED": "このアカウントは制限されているため、フォロワー以外への返信・引用・メンション・リアクションはできません"
 }

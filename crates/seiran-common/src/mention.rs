@@ -410,9 +410,91 @@ pub async fn extract_local_mention_actor_ids(
     local_domain: &str,
     pool: &PgPool,
 ) -> Vec<i64> {
-    let text_chars: Vec<char> = text.chars().collect();
+    let local_suffix = format!(".{}", local_domain);
     let mut seen: std::collections::HashSet<i64> = std::collections::HashSet::new();
     let mut result_ids: Vec<i64> = Vec::new();
+
+    for token in scan_mention_tokens(text) {
+        let local_username: Option<&str> = match &token.domain {
+            // `@user@domain` 形式。ローカルドメイン宛てのみ対象。
+            Some(domain) => domain
+                .eq_ignore_ascii_case(local_domain)
+                .then_some(token.username.as_str()),
+            // `@username.{local_domain}` 形式（自ドメインの正規ハンドル表記）のみ対象。
+            // 他ドメインの AT Protocol ハンドルはローカルアクターではないのでスキップ。
+            None if is_atproto_handle_like(&token.username) => {
+                token.username.strip_suffix(&local_suffix)
+            }
+            // `@username` 形式（ドメイン省略）
+            None => Some(token.username.as_str()),
+        };
+        if let Some(username) = local_username {
+            if let Some(id) = get_local_actor_id(username, pool).await {
+                if seen.insert(id) {
+                    result_ids.push(id);
+                }
+            }
+        }
+    }
+
+    result_ids
+}
+
+/// 本文中のリモートアクター宛てメンションの表記。
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteMentionHandle {
+    /// `@user@domain`（domain は自ドメイン以外）。
+    Fedi { username: String, domain: String },
+    /// `@handle.tld`（`.{local_domain}` で終わらない AT Protocol ハンドル形式）。
+    Atproto { handle: String },
+}
+
+/// 本文中のリモートアクター宛てメンション表記を重複除去して返す（DB を引かない）。
+/// ローカルアクター宛ての表記は [`extract_local_mention_actor_ids`] が扱うので含めない。
+pub fn extract_remote_mention_handles(text: &str, local_domain: &str) -> Vec<RemoteMentionHandle> {
+    let local_suffix = format!(".{}", local_domain.to_ascii_lowercase());
+    let mut result: Vec<RemoteMentionHandle> = Vec::new();
+    for token in scan_mention_tokens(text) {
+        let handle = match token.domain {
+            Some(domain) if !domain.is_empty() && !domain.eq_ignore_ascii_case(local_domain) => {
+                RemoteMentionHandle::Fedi {
+                    username: token.username,
+                    domain,
+                }
+            }
+            None if is_atproto_handle_like(&token.username)
+                && !token.username.to_ascii_lowercase().ends_with(&local_suffix) =>
+            {
+                RemoteMentionHandle::Atproto {
+                    handle: token.username,
+                }
+            }
+            _ => continue,
+        };
+        if !result.contains(&handle) {
+            result.push(handle);
+        }
+    }
+    result
+}
+
+/// 本文中の `@` で始まるメンション表記1件。`domain` は `@user@domain` 形式のときだけ持つ。
+struct MentionToken {
+    username: String,
+    domain: Option<String>,
+}
+
+/// `@username` 部分がドット区切りで AT Protocol ハンドルに見えるか（最後のラベルが2文字以上）。
+fn is_atproto_handle_like(username: &str) -> bool {
+    let parts: Vec<&str> = username.split('.').collect();
+    parts.len() >= 2 && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
+}
+
+/// 本文からメンション表記を順に取り出す。URL・ハッシュタグの中の `@` と、直前が英数字・
+/// アンダースコアの `@`（メールアドレス）は読み飛ばす。
+fn scan_mention_tokens(text: &str) -> Vec<MentionToken> {
+    let text_chars: Vec<char> = text.chars().collect();
+    let mut tokens: Vec<MentionToken> = Vec::new();
     let mut i = 0;
 
     while i < text_chars.len() {
@@ -463,13 +545,7 @@ pub async fn extract_local_mention_actor_ids(
 
         let username: String = text_chars[username_start..i].iter().collect();
 
-        let is_atproto_handle = {
-            let parts: Vec<&str> = username.split('.').collect();
-            parts.len() >= 2 && parts.last().map(|t| t.len() >= 2).unwrap_or(false)
-        };
-
-        if i < text_chars.len() && text_chars[i] == '@' {
-            // `@user@domain` 形式。ローカルドメイン宛てのみ対象。
+        let domain = if i < text_chars.len() && text_chars[i] == '@' {
             i += 1;
             let domain_start = i;
             while i < text_chars.len()
@@ -477,36 +553,14 @@ pub async fn extract_local_mention_actor_ids(
             {
                 i += 1;
             }
-            let domain: String = text_chars[domain_start..i].iter().collect();
-            if domain.eq_ignore_ascii_case(local_domain) {
-                if let Some(id) = get_local_actor_id(&username, pool).await {
-                    if seen.insert(id) {
-                        result_ids.push(id);
-                    }
-                }
-            }
-        } else if is_atproto_handle {
-            // `@username.{local_domain}` 形式（自ドメインの正規ハンドル表記）のみ対象。
-            // 他ドメインの AT Protocol ハンドルはローカルアクターではないのでスキップ。
-            let local_suffix = format!(".{}", local_domain);
-            if let Some(local_username) = username.strip_suffix(&local_suffix) {
-                if let Some(id) = get_local_actor_id(local_username, pool).await {
-                    if seen.insert(id) {
-                        result_ids.push(id);
-                    }
-                }
-            }
+            Some(text_chars[domain_start..i].iter().collect())
         } else {
-            // `@username` 形式（ドメイン省略）
-            if let Some(id) = get_local_actor_id(&username, pool).await {
-                if seen.insert(id) {
-                    result_ids.push(id);
-                }
-            }
-        }
+            None
+        };
+        tokens.push(MentionToken { username, domain });
     }
 
-    result_ids
+    tokens
 }
 
 /// Fediverse メンション（`@user@domain`）を brid.gy 経由で AT Protocol ハンドルと DID に解決する。
@@ -905,7 +959,25 @@ async fn resolve_fedi_mention_href(
 
 #[cfg(test)]
 mod tests {
-    use super::{scan_hashtag, scan_url};
+    use super::{extract_remote_mention_handles, scan_hashtag, scan_url, RemoteMentionHandle};
+
+    #[test]
+    fn remote_mention_handles_exclude_local_and_non_mentions() {
+        let text = "@alice @bob@local.test @carol.local.test @dave@remote.example \
+                    @erin.bsky.social mail@x.example https://h.example/@frank #tag@ @dave@remote.example";
+        assert_eq!(
+            extract_remote_mention_handles(text, "local.test"),
+            vec![
+                RemoteMentionHandle::Fedi {
+                    username: "dave".to_owned(),
+                    domain: "remote.example".to_owned(),
+                },
+                RemoteMentionHandle::Atproto {
+                    handle: "erin.bsky.social".to_owned(),
+                },
+            ]
+        );
+    }
 
     #[test]
     fn scan_url_detects_https() {

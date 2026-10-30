@@ -298,7 +298,7 @@ pub async fn build_users_detailed(
 /// 本家Misskeyの`MeDetailed`に`isFollowing`等の関係フィールドは存在しないため、常に
 /// `viewer_actor_id: None`で呼び`relations`をJSON上省略させる。
 pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDetailed {
-    let detailed = build_user_detailed(state, actor, None).await;
+    let mut detailed = build_user_detailed(state, actor, None).await;
 
     let role = match actor.user_id {
         Some(uid) => state
@@ -310,6 +310,10 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
             .unwrap_or_else(|| "user".to_string()),
         None => "user".to_string(),
     };
+
+    // パブリック投稿を禁じられたロールは本家のサイレンスとして見せる（クライアントが
+    // 公開範囲の選択肢から public を外す）。
+    detailed.is_silenced = matches!(role.as_str(), "silence" | "quarantine");
 
     MisskeyMeDetailed {
         detailed,

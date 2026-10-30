@@ -92,5 +92,6 @@
   "USER_ID_OR_USERNAME_REQUIRED": "请指定用户 ID 或用户名",
   "USER_NOT_FOUND": "未找到用户",
   "DISPLAY_NAME_TOO_LONG": "显示名称过长（最多 64 个字符）",
-  "BIO_TOO_LONG": "简介过长（最多 256 个字符）"
+  "BIO_TOO_LONG": "简介过长（最多 256 个字符）",
+  "INTERACTION_RESTRICTED": "您的账户受到限制，只能回复、引用、提及或回应您的关注者。"
 }

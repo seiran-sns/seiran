@@ -136,6 +136,7 @@
     "replyModalTitle": "返信",
     "quoteModalTitle": "引用ポスト",
     "quoteUnlistedPublicConflict": "ひかえめな投稿の引用は、ひかえめまたはプライベートでのみ投稿できます。",
+    "publicPostRestricted": "このアカウントは制限されているため、パブリック投稿はできません",
     "bskyOffToPrivateHint": "Blueskyをオフにするとプライベート投稿ができます",
     "placeholder": "いまどうしてる？",
     "replyPlaceholder": "返信を入力",

@@ -70,7 +70,7 @@ ID の採番は2系統:
 
 ### `users.role`（ENUM `user_role`）
 
-`user` < `emoji-editor` < `moderator` < `admin`。管理画面のトピック（ユーザー管理・サイト設定・ストレージ・絵文字・通報・リレー）ごとにロールで可否が決まり、フロントの `lib/roles.ts::getAdminTopics` とバックエンドの `require_admin`（admin）/`require_emoji_admin`（admin・moderator・emoji-editor）/`require_report_moderator`（admin・moderator）が対応する。`moderator` は「通報」（凍結・投稿削除・転送を含む）と「絵文字」、`emoji-editor` は「絵文字」だけ。
+`quarantine` < `silence` < `user` < `emoji-editor` < `moderator` < `admin`。管理画面のトピック（ユーザー管理・サイト設定・ストレージ・絵文字・通報・リレー）ごとにロールで可否が決まり、フロントの `lib/roles.ts::getAdminTopics` とバックエンドの `require_admin`（admin）/`require_emoji_admin`（admin・moderator・emoji-editor）/`require_report_moderator`（admin・moderator）が対応する。`moderator` は「通報」（凍結・投稿削除・転送を含む）と「絵文字」、`emoji-editor` は「絵文字」だけ。`silence`・`quarantine` は `user` より制限されたロールで、投稿・働きかけの制限は `docs/architecture.md` の「制限ロール」を参照。
 
 ### `users` / `actors` の分離
 「魂」（`users`、このサーバーの認証アカウント）と「肉体」（`actors`、各プロトコルでの登場人物）を分ける（`docs/concept.md`）。ローカルユーザーは基本的に1つの `actors` 行（AP/ATP 両方の識別子を持つ）に対応する。`actors.user_id` はローカル以外 NULL。

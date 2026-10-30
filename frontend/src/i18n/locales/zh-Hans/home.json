@@ -136,6 +136,7 @@
     "replyModalTitle": "回复",
     "quoteModalTitle": "引用帖子",
     "quoteUnlistedPublicConflict": "不列出帖子的引用只能发布为不列出或私密。",
+    "publicPostRestricted": "您的账户受到限制，无法公开发布。",
     "bskyOffToPrivateHint": "关闭 Bluesky 后即可发布私密帖子",
     "placeholder": "发生什么事了？",
     "replyPlaceholder": "写回复",

@@ -69,11 +69,15 @@ async fn create_repost(
 
     // リポスト自身の可視性はクライアントが選べず、元ポストから自動決定する。
     // ここに到達する時点で meta.visibility は "public" か "unlisted" のいずれかのみ。
-    let repost_visibility: &str = if meta.visibility == "unlisted" {
-        "unlisted"
-    } else {
-        "public"
-    };
+    // パブリック投稿を禁じられたロールのリポストはひかえめにする（リポストもパブリック
+    // タイムラインに流れるため）。
+    let repost_visibility: &str = crate::role_restriction::restriction_of(state, actor_id)
+        .await
+        .cap_visibility(if meta.visibility == "unlisted" {
+            "unlisted"
+        } else {
+            "public"
+        });
 
     let origin = classify_post(
         meta.ap_object_id.as_deref(),
@@ -313,7 +317,9 @@ async fn validate_create_regular_post_input<'a>(
     };
     // 可視性の決定(リプライ先の制約を含む)。新規パラメータのため後方互換は考慮不要
     // (不正値はエラーでよい)。
-    let visibility: &'static str = reply_ctx.resolve_visibility(req.visibility.as_deref())?;
+    let restriction = crate::role_restriction::restriction_of(state, actor_id).await;
+    let visibility: &'static str =
+        restriction.cap_visibility(reply_ctx.resolve_visibility(req.visibility.as_deref())?);
     let recipient_actors = resolve_dm_recipients(state, req, visibility).await?;
     let recipient_actor_ids: Vec<i64> = recipient_actors.iter().map(|a| a.id).collect();
     let has_bsky_recipient = recipient_actors.iter().any(|a| a.actor_type == "bsky");
@@ -338,15 +344,25 @@ async fn validate_create_regular_post_input<'a>(
     validate_link_card_urls(&req.link_card_urls)?;
 
     let reply_to_id_i64: Option<i64> = req.reply_to_id.as_deref().and_then(|s| s.parse().ok());
-    let (quote_of_id_i64, quote_notif_recipient) =
-        match req.quote_of_id.as_deref().and_then(|s| s.parse().ok()) {
-            Some(quote_id) => {
-                let (id, recipient) =
-                    resolve_quote_target(state, actor_id, quote_id, visibility).await?;
-                (Some(id), recipient)
-            }
-            None => (None, None),
-        };
+    let quote_target = match req.quote_of_id.as_deref().and_then(|s| s.parse().ok()) {
+        Some(quote_id) => Some(resolve_quote_target(state, actor_id, quote_id, visibility).await?),
+        None => None,
+    };
+    let quote_of_id_i64 = quote_target.as_ref().map(|q| q.post_id);
+    let quote_notif_recipient = quote_target.as_ref().and_then(|q| q.notif_recipient);
+
+    crate::role_restriction::require_can_interact(
+        state,
+        actor_id,
+        restriction,
+        recipient_actor_ids
+            .iter()
+            .copied()
+            .chain(reply_ctx.parent_actor_id)
+            .chain(quote_target.as_ref().map(|q| q.author_actor_id)),
+    )
+    .await?;
+    crate::role_restriction::require_mentions_allowed(state, actor_id, restriction, &text).await?;
 
     if visibility != "direct" {
         let mut contact_targets =
@@ -577,15 +593,24 @@ fn validate_content_warning(
     validate_cw(cw).map(Some)
 }
 
-/// 引用先を検証し、（内部的な引用先ID, 引用通知の宛先）を返す。引用先とブロック関係にある場合、
-/// および公開範囲制約違反の場合は拒否する。引用先がブリッジポストなら、内部的には常に元ポストへの
-/// 引用として扱う（`crate::bridge_post`・`docs/protocols.md`参照）。
+/// [`resolve_quote_target`] が確定した引用先。
+struct QuoteTarget {
+    /// 内部的な引用先ID（ブリッジポストなら元ポスト）。
+    post_id: i64,
+    author_actor_id: i64,
+    /// 引用通知の宛先（引用先がローカルユーザーの他人の投稿のときだけ）。
+    notif_recipient: Option<i64>,
+}
+
+/// 引用先を検証する。引用先とブロック関係にある場合、および公開範囲制約違反の場合は拒否する。
+/// 引用先がブリッジポストなら、内部的には常に元ポストへの引用として扱う
+/// （`crate::bridge_post`・`docs/protocols.md`参照）。
 async fn resolve_quote_target(
     state: &AppState,
     actor_id: i64,
     quote_id: i64,
     visibility: &str,
-) -> Result<(i64, Option<i64>), ApiError> {
+) -> Result<QuoteTarget, ApiError> {
     let meta = state
         .posts
         .find_delivery_meta(quote_id)
@@ -597,7 +622,11 @@ async fn resolve_quote_target(
     validate_quote_visibility(&meta.visibility, visibility)?;
     let notif_recipient =
         (meta.actor_type == "local" && meta.actor_id != actor_id).then_some(meta.actor_id);
-    Ok((redirected_id, notif_recipient))
+    Ok(QuoteTarget {
+        post_id: redirected_id,
+        author_actor_id: meta.actor_id,
+        notif_recipient,
+    })
 }
 
 /// 通常投稿・リプライ・引用投稿を処理する（`renote_id` を持たないケース）。

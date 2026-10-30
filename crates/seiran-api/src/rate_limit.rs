@@ -227,15 +227,19 @@ pub async fn check_search_rate_limit(
     Ok(())
 }
 
-/// user / emoji-editor が、DM以外のメンション・返信・引用で1時間に話しかけられる
-/// ユニークユーザー数を30人に制限する。既に窓内で話しかけた相手は再度数えない。
+/// user / emoji-editor と、それより制限されたロール（silence / quarantine）が、DM以外の
+/// メンション・返信・引用で1時間に話しかけられるユニークユーザー数を30人に制限する。
+/// 既に窓内で話しかけた相手は再度数えない。
 pub async fn check_and_record_contacts(
     state: &AppState,
     actor_id: i64,
     targets: impl IntoIterator<Item = i64>,
 ) -> Result<(), ApiError> {
     let role = actor_role(state, actor_id).await;
-    if !matches!(role.as_str(), "user" | "emoji-editor") {
+    if !matches!(
+        role.as_str(),
+        "user" | "emoji-editor" | "silence" | "quarantine"
+    ) {
         return Ok(());
     }
     let targets: HashSet<i64> = targets.into_iter().filter(|id| *id != actor_id).collect();
