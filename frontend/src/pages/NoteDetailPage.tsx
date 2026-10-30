@@ -12,6 +12,7 @@ import ReplyThreadPanel from "../components/right/ReplyThreadPanel";
 import RepostListPanel from "../components/right/RepostListPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
+import { useLogoutCount } from "../hooks/useLogoutCount";
 import panel from "../components/common/Panel.module.css";
 import styles from "./NoteDetailPage.module.css";
 
@@ -33,6 +34,7 @@ export default function NoteDetailPage() {
   const [searchParams] = useSearchParams();
   const location = useLocation();
   const navigate = useNavigate();
+  const logoutCount = useLogoutCount();
   // 右ペインが無い狭幅表示かどうか（#56/#61と同じ判定）。返信タブは3ペイン表示のときだけ
   // 中央ペイン下部の常設セクションへ移し、狭幅ではこれまで通り右ペインのタブの1つとする。
   const isNarrow = useIsNarrowViewport();
@@ -83,6 +85,7 @@ export default function NoteDetailPage() {
     let cancelled = false;
     setLoading(true);
     setError("");
+    setNote(null);
     api.notes
       .get(id)
       .then((n) => {
@@ -101,7 +104,7 @@ export default function NoteDetailPage() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id]);
+  }, [id, logoutCount]);
 
   // `#open_cw` ハッシュ付きでの遷移を検出する（#229）。タブ同期effect（下記）が
   // URLへ書き戻す際にハッシュを保持するため、ここで読んでも消えていない。
@@ -165,7 +168,7 @@ export default function NoteDetailPage() {
     return () => {
       cancelled = true;
     };
-  }, [id]);
+  }, [id, logoutCount]);
 
   // 対象ポストが返信だった場合、返信先ポストのNoteCard（small表示）を本体の上に積み上げる。
   // ブラウザバックで戻った際は、セッション内に記憶済みの遡り済みチェーン（noteAncestorIds）
