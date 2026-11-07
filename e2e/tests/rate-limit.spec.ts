@@ -204,7 +204,7 @@ test.describe("IPブロック（管理画面の一覧・解除含む）", () => 
 });
 
 test.describe("Cloudflare Turnstile", () => {
-  test("site key設定時はログイン・登録画面にTurnstileウィジェット領域が表示され送信ボタンが無効化される", async ({
+  test("site key設定時は登録画面だけ送信ボタンが無効化され、ログイン画面はTurnstileを求めない", async ({
     page,
     request,
   }) => {
@@ -225,8 +225,8 @@ test.describe("Cloudflare Turnstile", () => {
       const loginButton = page.getByRole("button", { name: "ログイン", exact: true });
       await page.getByLabel("メールアドレス / ユーザーネーム").fill("someone");
       await page.getByLabel("パスワード").fill("some-password");
-      // Turnstileトークン未取得のため送信ボタンが無効。
-      await expect(loginButton).toBeDisabled({ timeout: 10_000 });
+      // ログインはTurnstileを課さないので、トークンが無くても送信できる。
+      await expect(loginButton).toBeEnabled({ timeout: 10_000 });
 
       // E2E環境はrequireEmailVerification=falseのため直接登録フローが表示される。
       await page.goto("/register");

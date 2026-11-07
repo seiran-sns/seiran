@@ -192,8 +192,6 @@ async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
 pub struct LoginRequest {
     pub identifier: String, // メールアドレス OR ユーザーネーム
     pub password: String,
-    /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
-    pub turnstile_token: Option<String>,
 }
 
 /// 登録リクエストの形式検証（パスワード長・ユーザー名の書式・予約語）。
@@ -560,8 +558,9 @@ pub async fn login(
     ip: ClientIp,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
+    // Turnstile は課さない。同じ ID/PW を受け付ける ATP の createSession には Turnstile を
+    // 付けられず、総当たり対策としてはこの回数制限（両経路共通）が実体になるため。
     rate_limit::check_ip_not_blocked(&state, &ip).await?;
-    verify_turnstile(&state, req.turnstile_token.as_deref(), &ip).await?;
 
     let row = if req.identifier.contains('@') {
         state.users.find_login_by_email(&req.identifier).await

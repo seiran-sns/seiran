@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
-import Turnstile from "../components/Turnstile";
+import Turnstile, { useTurnstileToken } from "../components/Turnstile";
 import TermsOfServiceField from "../components/auth/TermsOfServiceField";
 import styles from "./Auth.module.css";
 
@@ -26,7 +26,7 @@ export default function VerifyEmail() {
   const [formError, setFormError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
-  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstile = useTurnstileToken();
 
   useEffect(() => {
     api.meta().then((meta) => setTurnstileSiteKey(meta.turnstileSiteKey ?? ""));
@@ -65,7 +65,7 @@ export default function VerifyEmail() {
         username,
         password,
         state.registrationToken,
-        turnstileToken,
+        turnstile.token,
         birthday,
         agreeTos
       );
@@ -73,6 +73,7 @@ export default function VerifyEmail() {
       navigate("/");
     } catch (err) {
       setFormError(getErrorMessage(err));
+      turnstile.reset();
     } finally {
       setSubmitting(false);
     }
@@ -147,9 +148,9 @@ export default function VerifyEmail() {
         />
       </label>
       <TermsOfServiceField agreed={agreeTos} onChange={setAgreeTos} />
-      <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+      <Turnstile siteKey={turnstileSiteKey} onToken={turnstile.onToken} resetKey={turnstile.resetKey} />
       {formError && <p className={styles.error}>{formError}</p>}
-      <button type="submit" className={styles.button} disabled={submitting || (!!turnstileSiteKey && !turnstileToken)}>
+      <button type="submit" className={styles.button} disabled={submitting || (!!turnstileSiteKey && !turnstile.token)}>
             {submitting ? t("auth:verifyEmail.submitting") : t("auth:verifyEmail.submit")}
           </button>
         </form>
