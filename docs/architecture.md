@@ -151,7 +151,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 `seiran-common::traits` に `Job`（enum）と `JobQueue` trait（`enqueue`/`enqueue_retry`/`dequeue_blocking`）を定義する。`WorkerEngine` は trait だけに依存する。
 
-**バックエンド**（`create_job_queue`、3節の `Messaging` が作る）: `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua による遅延リトライの昇格）、無ければ `InMemoryJobQueue`。
+**バックエンド**（`create_job_queue`、3節の `Messaging` が作る）: `REDIS_URL` があれば `RedisJobQueue`（優先度付き Sorted Set + `BZPOPMIN` + Lua による遅延リトライの昇格）、無ければ `InMemoryJobQueue`。`RedisJobQueue` は投入用（`ConnectionManager`、自動で再接続する）と `BZPOPMIN` 専用の占有接続を分けて持つ。占有接続は自分では張り直さないため、`BZPOPMIN` が失敗したら捨てて次の取り出しで張り直す（そうしないと Redis の再起動後、投入だけが成功し続けて取り出しが止まったままになる）。
 
 **主なジョブ**:
 | Job | 用途 | 優先度 |

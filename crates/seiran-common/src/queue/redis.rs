@@ -73,7 +73,11 @@ pub struct RedisJobQueue {
     conn: ConnectionManager,
     /// BZPOPMIN 専用の占有コネクション。ブロッキングコマンドは Redis 側で同一コネクション上の
     /// 後続コマンドをせき止めるため、`conn`（enqueue 等が使う）とは分離が必須。
-    blocking_conn: Mutex<MultiplexedConnection>,
+    /// `MultiplexedConnection` は切れても自分では張り直さないため、エラー時に `None` へ戻し、
+    /// 次の取り出しで `client` から張り直す（そうしないと Redis の再起動後、enqueue だけが
+    /// 成功し続けて取り出しが永久に止まる）。
+    blocking_conn: Mutex<Option<MultiplexedConnection>>,
+    client: redis::Client,
     promote_script: redis::Script,
     ready_key: String,
     delayed_key: String,
@@ -100,12 +104,25 @@ impl RedisJobQueue {
             .map_err(|e| format!("Redis接続に失敗しました（blocking用）: {}", e))?;
         Ok(Self {
             conn,
-            blocking_conn: Mutex::new(blocking_conn),
+            blocking_conn: Mutex::new(Some(blocking_conn)),
+            client,
             promote_script: redis::Script::new(PROMOTE_DUE_LUA),
             ready_key: format!("{}:ready", prefix),
             delayed_key: format!("{}:delayed", prefix),
             seq_key: format!("{}:seq", prefix),
         })
+    }
+
+    /// 占有コネクションで BZPOPMIN を1回実行する。接続が無ければ先に張り直す。
+    async fn bzpopmin_once(
+        &self,
+        slot: &mut Option<MultiplexedConnection>,
+    ) -> redis::RedisResult<Option<(String, String, f64)>> {
+        let conn = match slot {
+            Some(conn) => conn,
+            None => slot.insert(self.client.get_multiplexed_async_connection().await?),
+        };
+        conn.bzpopmin(&self.ready_key, BLOCK_TIMEOUT_SECS).await
     }
 
     async fn next_seq(&self) -> Result<u64, String> {
@@ -204,15 +221,17 @@ impl JobQueue for RedisJobQueue {
             }
 
             let popped: Option<(String, String, f64)> = {
-                let mut conn = self.blocking_conn.lock().await;
-                match conn.bzpopmin(&self.ready_key, BLOCK_TIMEOUT_SECS).await {
+                let mut slot = self.blocking_conn.lock().await;
+                match self.bzpopmin_once(&mut slot).await {
                     Ok(v) => v,
                     Err(e) => {
+                        // 切れた接続を使い回すと同じエラーを返し続けるため捨てて張り直させる
+                        *slot = None;
+                        drop(slot);
                         tracing::error!(
-                            "[RedisJobQueue] BZPOPMIN に失敗しました: {} → 1秒後にリトライ",
+                            "[RedisJobQueue] BZPOPMIN に失敗しました: {} → 1秒後に接続を張り直してリトライ",
                             e
                         );
-                        drop(conn);
                         tokio::time::sleep(Duration::from_secs(1)).await;
                         None
                     }
@@ -334,6 +353,41 @@ mod tests {
         assert_eq!(actor_id_of(&qj.job), 9001);
         assert_eq!(qj.priority, 10);
         assert_eq!(qj.attempt, 0);
+    }
+
+    #[tokio::test]
+    async fn dequeue_recovers_after_blocking_connection_is_killed() {
+        // Redis の再起動相当: 取り出し用の占有コネクションをサーバー側から切っても、
+        // 張り直して取り出しを再開できること
+        let Some(q) = connect_for_test().await else {
+            tracing::warn!("SEIRAN_TEST_REDIS_URL 未設定のため skip");
+            return;
+        };
+        let blocking_id: i64 = {
+            let mut slot = q.blocking_conn.lock().await;
+            let conn = slot.as_mut().expect("接続直後は占有コネクションがある");
+            redis::cmd("CLIENT")
+                .arg("ID")
+                .query_async(conn)
+                .await
+                .unwrap()
+        };
+        let mut admin = q.conn.clone();
+        let killed: i64 = redis::cmd("CLIENT")
+            .arg("KILL")
+            .arg("ID")
+            .arg(blocking_id)
+            .query_async(&mut admin)
+            .await
+            .unwrap();
+        assert_eq!(killed, 1);
+
+        q.enqueue(job(9100), 10).await.unwrap();
+        let qj = tokio::time::timeout(Duration::from_secs(5), q.dequeue(&CancellationToken::new()))
+            .await
+            .expect("占有コネクションが切れた後に dequeue が復帰しなかった")
+            .unwrap();
+        assert_eq!(actor_id_of(&qj.job), 9100);
     }
 
     #[tokio::test]
