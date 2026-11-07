@@ -1,9 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, isTotpRequired } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
-import Turnstile from "../../components/Turnstile";
 import styles from "../Auth.module.css";
 
 /**
@@ -25,13 +24,6 @@ export default function LoginPanel() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-  const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
-  const [turnstileToken, setTurnstileToken] = useState("");
-
-  useEffect(() => {
-    api.meta().then((meta) => setTurnstileSiteKey(meta.turnstileSiteKey ?? "")).catch(() => {});
-  }, []);
-
   // #65: TOTP有効化済みユーザーの場合、パスワード検証後にこのstateへ切り替わり
   // 二段階目（コード入力）を表示する。
   const [pendingToken, setPendingToken] = useState<string | null>(null);
@@ -57,7 +49,7 @@ export default function LoginPanel() {
     setError("");
     setLoading(true);
     try {
-      const res = await api.auth.login(identifier, password, turnstileToken);
+      const res = await api.auth.login(identifier, password);
       if (isTotpRequired(res)) {
         setPendingToken(res.pending_token);
       } else {
@@ -227,13 +219,8 @@ export default function LoginPanel() {
             required
           />
         </label>
-        <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
         {error && <p className={styles.error}>{error}</p>}
-        <button
-          type="submit"
-          className={styles.button}
-          disabled={loading || (!!turnstileSiteKey && !turnstileToken)}
-        >
+        <button type="submit" className={styles.button} disabled={loading}>
           {loading ? t("auth:login.submitting") : t("auth:login.submit")}
         </button>
         <button type="button" className={styles.button} disabled={loading || !window.PublicKeyCredential} onClick={handlePasskeyLogin}>

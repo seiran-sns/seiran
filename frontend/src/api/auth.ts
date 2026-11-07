@@ -71,11 +71,10 @@ export const auth = {
       agree_tos: agreeTos,
     });
   },
-  login(identifier: string, password: string, turnstileToken?: string) {
+  login(identifier: string, password: string) {
     return request<LoginResult>("POST", "/auth/login", {
       identifier,
       password,
-      turnstile_token: turnstileToken,
     });
   },
   async loginWithPasskey() {

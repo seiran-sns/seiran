@@ -3,7 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
-import Turnstile from "../../components/Turnstile";
+import Turnstile, { useTurnstileToken } from "../../components/Turnstile";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
 import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
@@ -54,7 +54,7 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
   // `/api/meta`は軽量・冪等なので問題ない。
   const [requireEmailVerification, setRequireEmailVerification] = useState<boolean | null>(null);
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
-  const [turnstileToken, setTurnstileToken] = useState("");
+  const turnstile = useTurnstileToken();
 
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
@@ -76,10 +76,11 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
     setError("");
     setLoading(true);
     try {
-      await api.auth.requestEmailVerification(state.email, turnstileToken);
+      await api.auth.requestEmailVerification(state.email, turnstile.token);
       onChange({ sent: true });
     } catch (err) {
       setError(getErrorMessage(err));
+      turnstile.reset();
     } finally {
       setLoading(false);
     }
@@ -117,12 +118,12 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
               autoFocus
             />
           </label>
-          <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+          <Turnstile siteKey={turnstileSiteKey} onToken={turnstile.onToken} resetKey={turnstile.resetKey} />
           {error && <p className={styles.error}>{error}</p>}
           <button
             type="submit"
             className={styles.button}
-            disabled={loading || (!!turnstileSiteKey && !turnstileToken)}
+            disabled={loading || (!!turnstileSiteKey && !turnstile.token)}
           >
             {loading ? t("auth:register.sending") : t("auth:register.sendVerificationEmail")}
           </button>
@@ -142,7 +143,7 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
         state.directEmail,
         state.username,
         state.password,
-        turnstileToken,
+        turnstile.token,
         state.birthday,
         state.agreeTos
       );
@@ -150,6 +151,7 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
       navigate("/");
     } catch (err) {
       setError(getErrorMessage(err));
+      turnstile.reset();
     } finally {
       setLoading(false);
     }
@@ -204,9 +206,9 @@ export default function RegisterPanel({ state, onChange }: RegisterPanelProps) {
           />
         </label>
         <TermsOfServiceField agreed={state.agreeTos} onChange={(agreeTos) => onChange({ agreeTos })} />
-        <Turnstile siteKey={turnstileSiteKey} onToken={setTurnstileToken} />
+        <Turnstile siteKey={turnstileSiteKey} onToken={turnstile.onToken} resetKey={turnstile.resetKey} />
         {error && <p className={styles.error}>{error}</p>}
-        <button type="submit" className={styles.button} disabled={loading || (!!turnstileSiteKey && !turnstileToken)}>
+        <button type="submit" className={styles.button} disabled={loading || (!!turnstileSiteKey && !turnstile.token)}>
           {loading ? t("auth:register.submitting") : t("auth:register.submit")}
         </button>
       </form>
