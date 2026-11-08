@@ -34,6 +34,7 @@ describe("getAdminTopics", () => {
       "reports",
       "suspendedActors",
       "relays",
+      "serverBlocks",
       "authIpBlocks",
     ]);
   });

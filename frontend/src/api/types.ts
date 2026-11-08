@@ -151,6 +151,10 @@ export interface SiteSettings {
   oembed_allowed_domains: string;
 }
 
+export interface DeniedHostsResponse {
+  hosts: string[];
+}
+
 export interface AuthIpBlock {
   ip_address: string;
   blocked_until: string;

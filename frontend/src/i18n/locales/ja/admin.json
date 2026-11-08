@@ -8,6 +8,7 @@
       "storage": "ストレージ",
       "emojis": "絵文字",
       "relays": "リレー",
+      "serverBlocks": "サーバーブロック",
       "authIpBlocks": "認証ブロック",
       "suspendedActors": "凍結済みユーザー",
       "roleRateLimits": "レート制限"
@@ -26,6 +27,15 @@
       "accepted": "参加中",
       "rejected": "拒否"
     }
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "拒否サーバー",
+    "deniedDescription": "ここに登録したサーバー（サブドメインを含む）のユーザーの投稿は、こちらの誰かがフォローしているかリストに入れていない限り受け取りません。フォローしていないユーザーへの返信・引用・メンション・DM・リアクションも受け取らず、フォローは自動で拒否します（Bluesky のフォローは記録だけして通知しません）。受け取った投稿もグローバルタイムラインとハッシュタグタイムラインには表示されません。こちらからの配送と、フォローしている相手との交流はこれまでどおりです。Fedi のサーバーと ATP の PDS が対象です。",
+    "deniedLabel": "1行に1ドメイン",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "保存",
+    "saving": "保存中…",
+    "savedMessage": "保存しました。"
   },
   "authIpBlocksPanel": {
     "title": "認証ブロックIP",

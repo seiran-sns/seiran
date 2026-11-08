@@ -73,7 +73,7 @@
 - [x] **フォロー承認制（`actors.is_locked`）** — `docs/protocols.md`「フォロー承認制」
 - [x] **プライバシー設定「Bskyのおすすめから除外」** — `docs/protocols.md` 3節
 - [x] **ロール `emoji-editor`・管理画面のトピック別アクセス制御（#179）** — `docs/database.md`
-- [x] **制限ロール `silence`（パブリック投稿不可）・`quarantine`（加えてフォロワー以外への働きかけ不可、新規フォロー上限24時間10人）** — `docs/architecture.md`
+- [x] **制限ロール `silence`（パブリック投稿不可）・`quarantine`（加えてフォロワー以外への働きかけ不可、新規フォロー上限24時間10人、ハッシュタグタイムラインに出ない）** — `docs/architecture.md`
 - [x] **管理画面のロール別レート制限をマトリクス形式の独立タブへ** — `docs/ui_spec.md` 2.8節
 - [x] **利用規約同意（新規登録・Bluesky転入共通、管理画面で文面設定）** — `docs/database.md`「利用規約同意」、`docs/ui_spec.md` 7節
 
@@ -133,6 +133,7 @@
 - [x] **リモートseiranへのフォローのATP同期（#238）** — `docs/protocols.md`
 - [x] **Bskyリポストのタイムライン反映・リポスト/引用通知（#206）** — `docs/protocols.md` 8節
 - [x] **ATP標準クライアントからの投稿・PDS各種XRPC（repo/sync/server/identity・プロキシ）** — `docs/protocols.md` 3・8節
+- [x] **拒否サーバー（弱いサーバーブロック。quarantine 相当の受信制限、Fedi・ATP PDS 対象）** — `docs/architecture.md`「拒否サーバー」
 
 ### サードパーティクライアント互換
 

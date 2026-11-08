@@ -12,6 +12,7 @@ import ReportsPanel from "../components/admin/ReportsPanel";
 import SuspendedActorsPanel from "../components/admin/SuspendedActorsPanel";
 import RelaysPanel from "../components/admin/RelaysPanel";
 import AuthIpBlocksPanel from "../components/admin/AuthIpBlocksPanel";
+import ServerBlocksPanel from "../components/admin/ServerBlocksPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { AdminTopic, canAccessAdminPage, getAdminTopics } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
@@ -31,6 +32,7 @@ const TAB_DEFS: { topic: AdminTopic; slug: string; labelKey: string; Panel: () =
   { topic: "reports", slug: "reports", labelKey: "admin:adminPage.tabs.reports", Panel: ReportsPanel },
   { topic: "suspendedActors", slug: "suspended-actors", labelKey: "admin:adminPage.tabs.suspendedActors", Panel: SuspendedActorsPanel },
   { topic: "relays", slug: "relays", labelKey: "admin:adminPage.tabs.relays", Panel: RelaysPanel },
+  { topic: "serverBlocks", slug: "server-blocks", labelKey: "admin:adminPage.tabs.serverBlocks", Panel: ServerBlocksPanel },
   { topic: "authIpBlocks", slug: "auth-ip-blocks", labelKey: "admin:adminPage.tabs.authIpBlocks", Panel: AuthIpBlocksPanel },
 ];
 

@@ -152,7 +152,20 @@ async fn poll_user(
                 .await
                 .map_err(|e| format!("follows INSERT失敗 follower={}: {}", follower_actor_id, e))?;
 
-            if is_baseline_done {
+            // 拒否サーバーのアクターからのフォローは、ATP では断れないので記録だけして、
+            // こちらがフォローしていなければ通知しない（通知の連打を防ぐため）。
+            let denied_unfollowed = is_baseline_done
+                && seiran_common::denied_host::atp_actor_is_denied(pool, follower_actor_id, &f.did)
+                    .await
+                && seiran_common::repository::denied_host::any_local_not_following(
+                    pool,
+                    &[local_actor_id],
+                    follower_actor_id,
+                    true,
+                )
+                .await
+                .unwrap_or(true);
+            if is_baseline_done && !denied_unfollowed {
                 stream_hub.publish_event(
                     HashSet::from([local_actor_id]),
                     "follow",

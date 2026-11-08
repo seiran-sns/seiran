@@ -8,6 +8,7 @@
       "storage": "Lagerung",
       "emojis": "Emojis",
       "relays": "Relays",
+      "serverBlocks": "Server-Sperren",
       "authIpBlocks": "Gesperrte IPs",
       "suspendedActors": "Gesperrte Nutzer",
       "roleRateLimits": "Ratenlimits"
@@ -283,6 +284,15 @@
     "passkeyCount": "Passschlüssel: {{count}}",
     "disableTotpButton": "TOTP zwangsweise deaktivieren",
     "disableTotpConfirm": "TOTP für {{username}} erzwingen?"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "Abgelehnte Server",
+    "deniedDescription": "Beiträge von Nutzern dieser Server (einschließlich Subdomains) werden nur angenommen, wenn ihnen hier jemand folgt oder sie zu einer Liste hinzugefügt hat. Antworten, Zitate, Erwähnungen, DMs und Reaktionen an Nutzer, die ihnen nicht folgen, werden ebenfalls verworfen, und ihre Folgeanfragen werden automatisch abgelehnt (Bluesky-Follows werden gespeichert, aber nicht gemeldet). Ihre Beiträge erscheinen nie in der globalen oder in Hashtag-Timelines. Die Zustellung von diesem Server und der Austausch mit Konten, denen du folgst, bleiben unverändert. Gilt für Fediverse-Server und ATP-PDS.",
+    "deniedLabel": "Eine Domain pro Zeile",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "Speichern",
+    "saving": "Wird gespeichert…",
+    "savedMessage": "Gespeichert."
   },
   "authIpBlocksPanel": {
     "title": "Gesperrte IPs",

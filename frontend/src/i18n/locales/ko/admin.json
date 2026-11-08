@@ -8,6 +8,7 @@
       "storage": "저장",
       "emojis": "이모티콘",
       "relays": "Relays",
+      "serverBlocks": "서버 차단",
       "authIpBlocks": "차단된 IP",
       "suspendedActors": "정지된 사용자",
       "roleRateLimits": "속도 제한"
@@ -283,6 +284,15 @@
     "passkeyCount": "패스키: {{count}}",
     "disableTotpButton": "TOTP 강제 비활성화",
     "disableTotpConfirm": "{{username}}에 대한 TOTP를 강제로 비활성화하시겠습니까?"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "거부 서버",
+    "deniedDescription": "여기에 등록한 서버(하위 도메인 포함) 사용자의 게시물은 이곳의 누군가가 팔로우하거나 리스트에 추가한 경우에만 받습니다. 팔로우하지 않은 사용자에게 보내는 답글·인용·멘션·DM·리액션도 받지 않으며, 팔로우 요청은 자동으로 거절합니다(Bluesky 팔로우는 기록만 하고 알리지 않습니다). 받은 게시물도 글로벌 타임라인과 해시태그 타임라인에는 표시되지 않습니다. 이 서버에서의 전송과 팔로우 중인 상대와의 교류는 그대로입니다. Fedi 서버와 ATP PDS가 대상입니다.",
+    "deniedLabel": "한 줄에 도메인 하나",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "저장",
+    "saving": "저장 중…",
+    "savedMessage": "저장했습니다."
   },
   "authIpBlocksPanel": {
     "title": "차단된 IP",

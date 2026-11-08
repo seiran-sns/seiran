@@ -97,6 +97,12 @@ async fn fetch_ap_original(ctx: &Arc<JobContext>, ap_uri: &str) -> Result<(), St
         return Ok(());
     }
 
+    if !crate::jobs::inbound_activity_process::deny::passive_reference_allowed(ap_uri, inbox)
+        .await?
+    {
+        return Ok(());
+    }
+
     let signing_key = system_signing_key(inbox);
     let note = match ctx
         .ap_client

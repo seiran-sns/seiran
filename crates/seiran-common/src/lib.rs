@@ -7,6 +7,7 @@ pub mod bridge_post;
 pub mod cloudflare;
 pub mod crypto;
 pub mod db;
+pub mod denied_host;
 pub mod did_provision;
 pub mod event_bus;
 pub mod follow_approval;

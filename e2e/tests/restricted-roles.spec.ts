@@ -331,3 +331,26 @@ test("quarantine がフォロワー以外へ返信しようとすると、返信
   });
   await expect(page.getByPlaceholder("返信を入力")).toBeVisible();
 });
+
+test("quarantine の投稿はハッシュタグタイムラインに出ない（本人には出る）", async ({ request }) => {
+  const user = await registerUserViaApi(request, "e2equartag");
+  const viewer = await registerUserViaApi(request, "e2equartagv");
+  await setRole(request, user, "quarantine");
+  const tag = `e2equar${Date.now()}`;
+
+  const id = await createdId(await createNote(request, user, { text: `隔離中 #${tag}`, visibility: "public" }));
+
+  const timelineIds = async (token: string) => {
+    const res = await request.get(`/api/hashtags/${tag}/timeline`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as { id: string }[]).map((n) => n.id);
+  };
+  expect(await timelineIds(viewer.token)).not.toContain(id);
+  expect(await timelineIds(user.token)).toContain(id);
+
+  // ロールを戻せば他の人にも出る（投稿時のロールではなく現在のロールで判定する）。
+  await setRole(request, user, "user");
+  expect(await timelineIds(viewer.token)).toContain(id);
+});

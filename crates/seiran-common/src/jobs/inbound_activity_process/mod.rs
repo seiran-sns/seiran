@@ -36,6 +36,7 @@ mod block;
 mod content;
 mod create;
 mod delete;
+pub(crate) mod deny;
 mod emoji;
 mod flag;
 mod follow;
@@ -111,6 +112,15 @@ pub async fn handle(raw_activity: String, ctx: Arc<JobContext>) -> Result<(), St
                 Err(e) => return Err(format!("凍結状態確認エラー: {}", e)),
             }
         }
+    }
+
+    if deny::should_drop(&activity, &inbox).await? {
+        tracing::debug!(
+            "[Job::InboundActivityProcess] 拒否サーバーのアクティビティを破棄 (type={}, actor={})",
+            activity["type"].as_str().unwrap_or(""),
+            activity["actor"].as_str().unwrap_or("")
+        );
+        return Ok(());
     }
 
     match activity["type"].as_str().unwrap_or("") {
