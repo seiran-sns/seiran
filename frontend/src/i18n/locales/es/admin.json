@@ -8,6 +8,7 @@
       "storage": "Almacenamiento",
       "emojis": "emojis",
       "relays": "Relays",
+      "serverBlocks": "Bloqueo de servidores",
       "authIpBlocks": "IPs bloqueadas",
       "suspendedActors": "Usuarios suspendidos",
       "roleRateLimits": "Límites de uso"
@@ -283,6 +284,15 @@
     "passkeyCount": "Claves de acceso: {{count}}",
     "disableTotpButton": "Forzar la desactivación del TOTP",
     "disableTotpConfirm": "¿Forzar la desactivación del TOTP para {{username}}?"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "Servidores denegados",
+    "deniedDescription": "Las publicaciones de usuarios de estos servidores (incluidos sus subdominios) solo se aceptan si alguien de aquí los sigue o los ha añadido a una lista. También se descartan las respuestas, citas, menciones, MD y reacciones dirigidas a usuarios que no los siguen, y sus solicitudes de seguimiento se rechazan automáticamente (los seguimientos de Bluesky se registran pero no se notifican). Sus publicaciones nunca aparecen en la línea temporal global ni en las de etiquetas. El envío desde este servidor y la interacción con las cuentas que sigues continúan como antes. Se aplica a servidores del Fediverso y a PDS de ATP.",
+    "deniedLabel": "Un dominio por línea",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "Guardar",
+    "saving": "Guardando…",
+    "savedMessage": "Guardado."
   },
   "authIpBlocksPanel": {
     "title": "IPs bloqueadas",

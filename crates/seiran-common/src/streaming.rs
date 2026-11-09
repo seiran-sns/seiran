@@ -70,6 +70,11 @@ pub struct ChannelScope {
     pub list_ids: Arc<HashSet<i64>>,
     /// 本文由来のハッシュタグ名（正規化済み）。
     pub hashtags: Arc<HashSet<String>>,
+    /// 著者が quarantine ロールか拒否サーバーのアクター（`actor_is_kept_off_public_feeds`）で、
+    /// グローバル・ハッシュタグに出さない。旧版のプロセスが Redis 経由で送るイベントには
+    /// 無いので既定値を持たせる。
+    #[serde(default)]
+    pub kept_off_public_feeds: bool,
 }
 
 impl ChannelScope {
@@ -85,10 +90,12 @@ impl ChannelScope {
             ChannelKind::HybridTimeline => {
                 (self.is_local && is_public_ish) || self.home_recipients.contains(&viewer_actor_id)
             }
-            ChannelKind::GlobalTimeline => is_public_ish,
+            ChannelKind::GlobalTimeline => is_public_ish && !self.kept_off_public_feeds,
             ChannelKind::UserList(id) => self.list_ids.contains(id),
             ChannelKind::Hashtag(tag) => {
-                self.visibility != "followers_only" && self.hashtags.contains(tag)
+                self.visibility != "followers_only"
+                    && !self.kept_off_public_feeds
+                    && self.hashtags.contains(tag)
             }
         }
     }
@@ -365,6 +372,7 @@ mod tests {
             home_recipients: Arc::new(home.iter().copied().collect()),
             list_ids: Arc::new(lists.iter().copied().collect::<HashSet<i64>>()),
             hashtags: Arc::new(tags.iter().map(|s| s.to_string()).collect()),
+            kept_off_public_feeds: false,
         }
     }
 
@@ -466,5 +474,15 @@ mod tests {
 
         let followers_only_tagged = scope(true, "followers_only", &[], &[], &["seiran"]);
         assert!(!followers_only_tagged.matches(&ChannelKind::Hashtag("seiran".to_string()), 999));
+    }
+
+    #[test]
+    fn kept_off_public_feeds_excludes_global_and_hashtag_only() {
+        let mut s = scope(false, "public", &[7], &[10], &["seiran"]);
+        s.kept_off_public_feeds = true;
+        assert!(!s.matches(&ChannelKind::GlobalTimeline, 7));
+        assert!(!s.matches(&ChannelKind::Hashtag("seiran".to_string()), 7));
+        assert!(s.matches(&ChannelKind::HomeTimeline, 7));
+        assert!(s.matches(&ChannelKind::UserList(10), 7));
     }
 }

@@ -68,7 +68,7 @@ AP には embed 概念が無いため、`save_ap_note_core` が本文（Markdown
 
 | type | 処理概要 |
 |---|---|
-| `Follow` | ローカルアクター確認 → こちらが送信者をブロック中なら無視 → アクター upsert → ターゲットが承認制（`is_locked`）なら生アクティビティごと pending で保存し承認待ち通知、そうでなければ accepted で保存し通知して `Accept` を返す |
+| `Follow` | ローカルアクター確認 → こちらが送信者をブロック中なら無視 → アクター upsert → 送信者が拒否サーバーで、こちらが送信者をフォロー（申請中を含む）しておらず既存のフォロワーでもなければ、通知せず `Reject` を返す → ターゲットが承認制（`is_locked`）なら生アクティビティごと pending で保存し承認待ち通知、そうでなければ accepted で保存し通知して `Accept` を返す |
 | `Create`(Note) | アクター upsert → HTML を内部リンクマーカー付きテキストへ変換（6節）→ 絵文字 tag 解析（欠落時は同一ドメインの `remote_emojis` で補完）→ 可視性判定 → 重複排除（5節）→ 保存 → URLカード・添付 → WS 配信 |
 | `Accept`(Follow) | `follows.status = accepted`、通知。`object` は埋め込み Follow と URI 文字列の両方を受理する。送信する Follow ID は `activities/follow/{local_actor_id}-{remote_actor_id}` なので URI 形式でも関係を復元でき、`Accept.actor` が送信先と一致するか検証する（Mitra 対応） |
 | `Block` | アクター upsert → ブロックした側へのフォロー関係を解消（`blocks` には書かず通知もしない。10節） |
@@ -112,6 +112,7 @@ AT Protocol には非公開アカウントの概念が無いため、Bluesky 側
 4. `keyId` から公開鍵 PEM を取得（既定1時間キャッシュ）して RSA-SHA256 検証。キャッシュ鍵で失敗したら1回だけ再取得して再検証する（鍵ローテーション対応）。PEM は `trim()` してからパースする（Pleroma は末尾に空行を付けることがあり、`rsa` クレートが拒否するため）
 5. 署名者が凍結済み（`actors.suspended_at`）なら 403
 6. 以降はジョブに委譲する。ジョブ側でも `activity.actor`（リレー転送では署名者と異なりうる）が凍結済みなら Follow/Create/Like/EmojiReact/Announce を破棄する
+7. ジョブ側では、`activity.actor` が拒否サーバー（`docs/architecture.md`「拒否サーバー」）なら `jobs::inbound_activity_process::deny::should_drop` で Create/Announce/Like/EmojiReact を破棄する（HTTP は 202 のまま）。返信先・宛先（`to`/`cc`）・Mention・引用元・リアクション対象から働きかけ先のローカルユーザーを集め、1人でも送信者をフォローしていなければ捨てる。第三者の Announce の対象や、Create の返信先・引用元が拒否サーバーの投稿なら、取得済みで投稿者がローカルからフォローされているときだけつなぐ（取りに行かない）
 
 ### 署名付きGET（Authorized Fetch対応）
 Authorized Fetch（secure mode）のインスタンスは未署名 GET に 401 を返す。これは公開鍵取得（受信検証）にも及ぶため、対応しないとフォロー・受信・プロフィール表示がすべて失敗する。
@@ -299,6 +300,7 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 
 - **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合を30秒ごとに確認し、変化があれば再接続する。無関係な投稿を取り込まないための必須の絞り込み。
 - **凍結アクター**: 投稿の保存対象判定に `suspended_at IS NULL` を含め、リポスト・いいねも凍結済みなら破棄する。ATP には署名アクセス拒否に相当する仕組みが無いため、取り込み抑止が実質的な enforcement。
+- **拒否サーバー**: 投稿者・リポストした人・いいねした人の PDS ホスト（`actors.pds_host`）が拒否サーバーなら、AP 受信と同じ規則で捨てる。投稿は返信先・引用元・メンション facet のローカルユーザー本人がフォローしていなければ捨て、リポストは対象投稿の著者がローカルからフォローされていなければ捨て（AppView から取得する場合も保存前に判定する）、いいねは対象投稿のローカルの著者がフォローしていなければ捨てる。フォロワー検知（`bsky_follower_poll`）は記録だけして通知せず、Bsky DM（`bsky_dm_poll`）は相手をフォローしていなければ会話を取り込まない。
 - **担当**: 複数のプロセスが動いていても1つだけが接続する（`seiran_common::leader`、advisory lock。`docs/architecture.md` 3節）。担当を降りるとき（停止・ロック接続の切断）は処理し終えたイベントまでのカーソルを保存し、引き継いだプロセスがその続きから読む。
 - **cursor**: 処理済みイベントの `time_us` を `site_settings` に5秒ごとに保存し、再接続時に引き継ぐ。
 - **投稿**: 同梱の `record.text`/`record.createdAt` をそのまま使う。`embed.images`/`video`/`recordWithMedia` は CDN URL を組み立てて添付保存する。`embed.external` のうち GIF ピッカー由来（Tenor/Klipy）は `t.gifs.bsky.app`/`k.gifs.bsky.app` の MP4（Klipy は WebM）URL に変換して添付にし、それ以外は `post_link_cards`（`position=0`）に保存する。`external` には iframe 情報が無いので、保存後に `Job::LinkCardEmbedResolve`（LOW）が oEmbed discovery で `embed_src`/`embed_type` を後から埋める。`record.facets` は6節の方式で処理する。

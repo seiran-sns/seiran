@@ -37,6 +37,15 @@ pub(super) async fn handle_announce(
         return Ok(());
     }
 
+    // 拒否サーバーの投稿のリポストは、投稿者がローカルからフォローされていなければ捨てる。
+    if !super::deny::passive_reference_allowed(object_uri, inbox).await? {
+        tracing::debug!(
+            "[Inbox/Announce] 拒否サーバーの投稿のリポストを破棄: object={}",
+            object_uri
+        );
+        return Ok(());
+    }
+
     // 公開日時を parse して snowflake ID を生成
     let created_at = published
         .parse::<chrono::DateTime<chrono::Utc>>()

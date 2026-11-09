@@ -31,6 +31,7 @@ use seiran_common::atp::{
 };
 use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::queue::worker::priority;
+use seiran_common::repository::denied_host as denied_host_repo;
 use seiran_common::repository::{
     ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository,
     PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
@@ -474,6 +475,32 @@ async fn save_new_bsky_post(
     let (body_text, mention_facets) = apply_bsky_facets(&parsed.body_text, parsed.parsed_facets);
     let emoji_map = resolve_local_emoji_map(pool, &body_text).await;
     // seiranPostがあれば本文・絵文字マップ等を上書きする（Single Source of Truth）。
+    // 拒否サーバーのアクターの投稿は、返信先・引用元・メンション先のローカルユーザー本人が
+    // フォローしていなければ投稿ごと捨てる（ローカルからのフォローかリスト所属は、
+    // `find_saveable_bsky_author`で既に確認済み）。
+    let mentioned_dids: Vec<String> = match &mention_facets {
+        JsonValue::Array(spans) => spans
+            .iter()
+            .filter_map(|span| span.get("did").and_then(|v| v.as_str()).map(str::to_string))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let referenced_posts: Vec<i64> = reply_to_post_id
+        .into_iter()
+        .chain(quote_of_post_id)
+        .collect();
+    if denied_interaction(
+        pool,
+        author.actor_id,
+        &did,
+        &referenced_posts,
+        &mentioned_dids,
+    )
+    .await
+    {
+        tracing::debug!("[Jetstream] 拒否サーバーのポストを破棄: {}", at_uri);
+        return;
+    }
     let sp = parsed.seiran_post_ext;
     let (body_text, emoji_map) = match &sp {
         Some(sp) => (sp.body.clone(), sp.emoji_map.clone()),
@@ -1101,6 +1128,10 @@ async fn publish_bsky_post_to_timelines(
         home_recipients: Arc::new(home_recipients),
         list_ids: Arc::new(list_ids),
         hashtags: Arc::new(hashtags),
+        kept_off_public_feeds:
+            seiran_common::repository::denied_host::actor_is_kept_off_public_feeds(pool, actor_id)
+                .await
+                .unwrap_or(false),
     };
     stream_hub.publish_channel_note(scope, note_json);
 }
@@ -1151,9 +1182,25 @@ async fn handle_inbound_repost_create(
         );
         return;
     }
+    if denied_and_not_followed(pool, actor_id, did).await {
+        tracing::debug!(
+            "[Jetstream/Repost] 拒否サーバーのリポストを破棄 (did={})",
+            did
+        );
+        return;
+    }
 
     let repost_of_post_id = match post_repo.find_id_by_at_uri(subject_uri).await {
-        Ok(Some(id)) => id,
+        Ok(Some(id)) => {
+            if repost_target_is_denied(pool, id).await {
+                tracing::debug!(
+                    "[Jetstream/Repost] 拒否サーバーのポストのリポストを破棄: {}",
+                    subject_uri
+                );
+                return;
+            }
+            id
+        }
         Ok(None) => {
             tracing::info!(
                 "[Jetstream/Repost] 対象ポストが DB に未存在。AppViewからフェッチします: {}",
@@ -1171,6 +1218,13 @@ async fn handle_inbound_repost_create(
                                 return;
                             }
                         };
+                    if denied_and_not_followed(pool, author_id, &post.author_did).await {
+                        tracing::debug!(
+                            "[Jetstream/Repost] 拒否サーバーのポストのリポストを破棄: {}",
+                            subject_uri
+                        );
+                        return;
+                    }
                     match seiran_common::atp::upsert_bsky_post(
                         pool, job_queue, http, author_id, &post,
                     )
@@ -1306,6 +1360,10 @@ async fn handle_inbound_like_create(
             "[Jetstream/Like] 凍結済みアクター (did={}) のいいねを破棄",
             did
         );
+        return;
+    }
+    if denied_interaction(pool, actor_id, did, &[post_id], &[]).await {
+        tracing::debug!("[Jetstream/Like] 拒否サーバーのいいねを破棄 (did={})", did);
         return;
     }
 
@@ -1458,6 +1516,44 @@ async fn handle_inbound_post_delete(pool: &PgPool, at_uri: &str) {
             tracing::error!("[Jetstream] posts (delete) UPDATE 失敗: {}", e);
         }
     }
+}
+
+/// 拒否サーバーのアクターで、ローカルからフォローもリスト追加もされていないか
+/// （`seiran_common::denied_host`）。
+async fn denied_and_not_followed(pool: &PgPool, actor_id: i64, did: &str) -> bool {
+    seiran_common::denied_host::atp_actor_is_denied(pool, actor_id, did).await
+        && !denied_host_repo::actor_is_locally_followed(pool, actor_id)
+            .await
+            .unwrap_or(false)
+}
+
+/// 拒否サーバーのアクターから、本人がフォローしていないローカルユーザーへの働きかけか。
+/// `post_ids`は返信先・引用元・いいね対象、`dids`はメンション先。
+async fn denied_interaction(
+    pool: &PgPool,
+    actor_id: i64,
+    did: &str,
+    post_ids: &[i64],
+    dids: &[String],
+) -> bool {
+    if !seiran_common::denied_host::atp_actor_is_denied(pool, actor_id, did).await {
+        return false;
+    }
+    let targets = denied_host_repo::local_actor_ids_for_atp(pool, post_ids, dids)
+        .await
+        .unwrap_or_default();
+    denied_host_repo::any_local_not_following(pool, &targets, actor_id, false)
+        .await
+        .unwrap_or(true)
+}
+
+/// 取り込み済みのリポスト対象が、ローカルからフォローされていない拒否サーバーのアクターの
+/// 投稿か（PDS ホストは記録済みの値で判定する）。
+async fn repost_target_is_denied(pool: &PgPool, post_id: i64) -> bool {
+    seiran_common::denied_host::any_denied(pool).await
+        && denied_host_repo::post_author_is_denied_and_not_followed(pool, post_id)
+            .await
+            .unwrap_or(false)
 }
 
 /// 指定アクターが凍結済みかを返す。リポスト・いいねの新規取り込みを拒否する判定に使う

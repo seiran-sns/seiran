@@ -8,6 +8,7 @@
       "storage": "存储",
       "emojis": "表情符号",
       "relays": "Relays",
+      "serverBlocks": "服务器屏蔽",
       "authIpBlocks": "已封锁IP",
       "suspendedActors": "已冻结用户",
       "roleRateLimits": "速率限制"
@@ -283,6 +284,15 @@
     "passkeyCount": "密钥：{{count}}",
     "disableTotpButton": "强制禁用 TOTP",
     "disableTotpConfirm": "强制禁用 {{username}} 的 TOTP？"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "拒绝的服务器",
+    "deniedDescription": "这些服务器（含子域名）上用户的帖子，只有在本站有人关注或将其加入列表时才会接收。发给未关注他们的用户的回复、引用、提及、私信和回应也会被丢弃，关注请求会被自动拒绝（Bluesky 的关注只记录、不通知）。他们的帖子不会出现在全局时间线和话题标签时间线上。本站的投递以及与已关注账号的互动照常进行。适用于 Fediverse 服务器和 ATP PDS。",
+    "deniedLabel": "每行一个域名",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "保存",
+    "saving": "保存中…",
+    "savedMessage": "已保存。"
   },
   "authIpBlocksPanel": {
     "title": "已封锁IP",

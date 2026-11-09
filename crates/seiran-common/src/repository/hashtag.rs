@@ -112,6 +112,7 @@ impl HashtagRepository for PgHashtagRepository {
                AND p.id > COALESCE($3::bigint, 0)
                AND ($5::bigint IS NULL OR p.actor_id = $5 OR NOT actor_is_hidden_for_viewer($5, p.actor_id))
                AND ($5::bigint IS NOT NULL OR a.actor_type = 'local')
+               AND (p.actor_id = $5 OR NOT actor_is_kept_off_public_feeds(p.actor_id))
              ORDER BY p.id DESC LIMIT $4"),
         )
         .bind(tag_name)

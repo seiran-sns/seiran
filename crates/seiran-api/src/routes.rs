@@ -112,6 +112,11 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             delete(handlers::admin::relays::delete_relay),
         )
         .route(
+            "/api/admin/denied-hosts",
+            get(handlers::admin::server_blocks::get_denied_hosts)
+                .put(handlers::admin::server_blocks::update_denied_hosts),
+        )
+        .route(
             "/api/admin/auth-ip-blocks",
             get(handlers::admin::auth_ip_blocks::list_ip_blocks),
         )

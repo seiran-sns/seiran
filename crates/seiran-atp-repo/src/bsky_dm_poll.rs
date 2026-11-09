@@ -143,6 +143,24 @@ async fn sync_convo(
     // この後の新規メッセージ取り込みでも使うため、新着有無によらず一度だけ解決する
     // （重複upsertを避ける）。
     let peer_actor_id = resolve_or_upsert_bsky_actor(pool, job_queue, http, &peer_did).await?;
+    // 拒否サーバーの相手からの DM は、こちらがフォローしていなければ取り込まない
+    // （quarantine と同じく、フォローされていない相手への働きかけを認めない）。
+    if seiran_common::denied_host::atp_actor_is_denied(pool, peer_actor_id, &peer_did).await
+        && seiran_common::repository::denied_host::any_local_not_following(
+            pool,
+            &[account.actor_id],
+            peer_actor_id,
+            false,
+        )
+        .await
+        .unwrap_or(true)
+    {
+        tracing::debug!(
+            "[BskyDmPoll] 拒否サーバーの相手との会話を取り込まない convo_id={}",
+            convo_id
+        );
+        return Ok(());
+    }
     if !all_fetched_messages.is_empty()
         && let Err(e) = sync_message_reactions(
             pool,

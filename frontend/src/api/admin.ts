@@ -1,5 +1,5 @@
 import { request, uploadFormData } from "./core";
-import type { AdminReport, AdminUser, AuthIpBlock, CustomEmoji, EmojiImportJob, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
+import type { AdminReport, AdminUser, AuthIpBlock, DeniedHostsResponse, CustomEmoji, EmojiImportJob, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
 
 export const admin = {
   listReports() {
@@ -150,6 +150,12 @@ export const admin = {
     return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
   },
 
+  getDeniedHosts() {
+    return request<DeniedHostsResponse>("GET", "/admin/denied-hosts");
+  },
+  updateDeniedHosts(text: string) {
+    return request<DeniedHostsResponse>("PUT", "/admin/denied-hosts", { text });
+  },
   listAuthIpBlocks() {
     return request<AuthIpBlock[]>("GET", "/admin/auth-ip-blocks");
   },

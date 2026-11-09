@@ -59,7 +59,21 @@ pub(super) async fn resolve_ref(
     ap_client: &ApClient,
 ) -> ReferenceOutcome {
     match mode {
-        ReferenceResolutionMode::OneHopFetch => resolve_reference(uri, inbox, ap_client).await,
+        ReferenceResolutionMode::OneHopFetch => {
+            // 拒否サーバーの投稿は取りに行かず、取得済みのものだけをつなぐ（未取得なら
+            // pending のまま残り、ユーザーが取得ボタンで能動的に取れる）。
+            let passive_fetch_allowed = match uri {
+                Some(u) => super::deny::passive_reference_allowed(u, inbox)
+                    .await
+                    .unwrap_or(false),
+                None => true,
+            };
+            if passive_fetch_allowed {
+                resolve_reference(uri, inbox, ap_client).await
+            } else {
+                resolve_reference_db_only(uri, inbox).await
+            }
+        }
         ReferenceResolutionMode::DbOnly => resolve_reference_db_only(uri, inbox).await,
     }
 }

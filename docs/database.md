@@ -29,6 +29,7 @@ ID の採番は2系統:
 | `media_files` / `post_attachments` | メディア実体と投稿との中間テーブル |
 | `custom_emojis` / `remote_emojis` | ローカルのカスタム絵文字、AP 受信で見つけたリモート絵文字のカタログ |
 | `fediverse_relays` | 参加する Fediverse リレー |
+| `denied_hosts` | 拒否サーバー（管理画面「サーバーブロック」） |
 | `storage_providers` | S3 互換ストレージの設定 |
 | `lists` / `list_members` | リスト（`app.bsky.graph.list` 相当） |
 | `actor_also_known_as` | プロフィールの「別のアカウント」 |
@@ -99,6 +100,15 @@ ID の採番は2系統:
 - `at_handle`: ATP ハンドル。`remote_seiran` の `username` は Fedi 側のまま固定されるので、Bsky ID の表示にはこれを使う。発見・再訪問のたびに最新にする（`upsert_remote_bsky`・`discover_bsky_actor`）。
 - `bridge_real_actor_id`: ブリッジユーザーから実ユーザーへのリンク。
 - `seiran_pair_actor_id`: 使っていない（常に NULL）。削除を検討中。
+
+- `pds_host`/`pds_host_checked_at`: ATP アカウントの所属サーバー（DID ドキュメントの `#atproto_pds` のホスト）と、それを確認した時刻。Bsky 行は `domain` が空なので、拒否サーバーの判定にはこちらを使う。拒否ホストが登録されているときだけ解決し、1日ごとに解決し直す（`denied_host::refresh_pds_host`）。
+
+### `denied_hosts`（拒否サーバー）
+`host` が主キー（小文字・ポートやパスを除いたホスト名）。登録したホストとそのサブドメインに属するリモートアクターの扱いは `docs/architecture.md` の「拒否サーバー」。判定の SQL 関数:
+- `host_is_denied(h)`: `h` が登録ホストそのものか、そのサブドメインか（`right(h, length(host)+1) = '.' || host`。`LIKE` だと `_`・`%` がワイルドカードになるため使わない）。
+- `actor_is_denied(actor_id)`: ローカル以外で、`domain`（AP）か `pds_host`（ATP）のどちらかが該当するか。リモート seiran はどちらの経路で届いても同じ扱いになる。
+- `actor_is_locally_followed(actor_id)`: ローカルの誰かが承認済みでフォローしているか、いずれかのリストのメンバーか（投稿を受け取る条件。Jetstream の `bsky_ingest::saveable_author` と同じ）。
+- `actor_is_kept_off_public_feeds(actor_id)`: `quarantine` ロールのローカルユーザーか、拒否サーバーのアクター。`global_timeline` とハッシュタイムラインが除外に使う。
 
 ### `actors.notes_count` / `followers_count` / `following_count`（非正規化カウンタ）
 Misskey 互換 `users/show` の一括取得やプロフィールの件数は、COUNT ではなくこれらを読む。
@@ -255,6 +265,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 
 - 抽出は出自を問わず、最終的な `posts.body` を `hashtag::extract_hashtags` で1回スキャンする（AP 由来の `[#foo](url)` もリンクテキストに `#foo` が残るので拾える、`docs/protocols.md` 6節）。INSERT 直後のベストエフォートで、失敗しても投稿は成立する。
 - `pinned_hashtags` は「ホーム画面に追加」の永続化（`pinned_posts` と同じ考え方）。ハッシュタイムラインはピン留めと無関係に誰でも `/tags/:name` で見られる。対象は `visibility IN ('public', 'unlisted')` だけ（発見用の公開フィードなので `followers_only` の例外を設けない）。
+- `quarantine` のユーザーと拒否サーバーのアクターの投稿はハッシュタイムラインに出さない（`actor_is_kept_off_public_feeds`。本人の投稿は本人には出す）。
 
 ### メディア関連（`media_files` / `post_attachments`)
 - `media_files`: `width`/`height`/`blurhash` は NULL 可（動画・音声は持たない）。`bsky_video_*` は Bsky 動画パイプラインとの連携状態。`(sha256, blurhash)` の複合 UNIQUE（`NULLS NOT DISTINCT`）で全体の重複を排除する。

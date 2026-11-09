@@ -59,6 +59,45 @@ pub(super) async fn handle_follow(
         return Ok(());
     }
 
+    // 拒否サーバーからのフォローは、相手をフォロー（申請中を含む）していない限り自動で拒絶する
+    // （通知もしない）。フォローを足がかりにした通知の連打を防ぐため。既に承認済みのフォローの
+    // 再送は通常どおり受ける（拒否する前からのフォロワーとの交流を切らないため）。
+    if crate::denied_host::is_denied_url(&inbox.db_pool, follower_uri).await {
+        let pool = &inbox.db_pool;
+        let not_following = crate::repository::denied_host::any_local_not_following(
+            pool,
+            &[local_actor_id],
+            follower_actor_id,
+            true,
+        )
+        .await
+        .map_err(|e| format!("フォロー関係確認エラー: {}", e))?;
+        let already_follower = !crate::repository::denied_host::any_local_not_following(
+            pool,
+            &[follower_actor_id],
+            local_actor_id,
+            false,
+        )
+        .await
+        .map_err(|e| format!("フォロー関係確認エラー: {}", e))?;
+        if not_following && !already_follower {
+            tracing::info!(
+                "[Follow] 拒否サーバーの {} → '{}' のフォローを拒絶します",
+                follower_uri,
+                local_username
+            );
+            return respond_to_follow(
+                "Reject",
+                &activity,
+                local_username,
+                &remote.inbox,
+                inbox,
+                ap_client,
+            )
+            .await;
+        }
+    }
+
     // ロック中（承認制）のローカルターゲット宛ては pending のまま留め、Accept を即送信
     // しない。生の Follow アクティビティを保存しておき、本人が承認/拒否した時点で
     // `follow_approval::approve_pending_follow`/`reject_pending_follow` が Accept/Reject を送る。
@@ -124,38 +163,60 @@ pub(super) async fn handle_follow(
     }
 
     // Accept アクティビティを構築して送信
-    let local_actor_uri = format!("https://{}/users/{}", inbox.local_domain, local_username);
-    let accept_id = format!(
-        "https://{}/accepts/{}",
-        inbox.local_domain,
-        generate_snowflake_id(chrono::Utc::now())
-    );
-    let actor_key_id = format!("{}#main-key", local_actor_uri);
-
-    let accept = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Accept",
-        "id": accept_id,
-        "actor": local_actor_uri,
-        "object": activity
-    });
-    let accept_body =
-        serde_json::to_string(&accept).map_err(|e| format!("Accept シリアライズ失敗: {}", e))?;
-
-    ap_client
-        .sign_and_post(
-            &remote.inbox,
-            &accept_body,
-            &actor_key_id,
-            &inbox.ap_private_key_pem,
-        )
-        .await?;
+    respond_to_follow(
+        "Accept",
+        &activity,
+        local_username,
+        &remote.inbox,
+        inbox,
+        ap_client,
+    )
+    .await?;
 
     tracing::info!(
         "[Follow] {} → {} フォロー完了・Accept 送信済み",
         follower_uri,
-        local_actor_uri
+        local_username
     );
+    Ok(())
+}
+
+/// 受信した Follow に Accept / Reject を返す。
+async fn respond_to_follow(
+    kind: &str,
+    activity: &serde_json::Value,
+    local_username: &str,
+    remote_inbox: &str,
+    inbox: &InboxContext,
+    ap_client: &ApClient,
+) -> Result<(), String> {
+    let local_actor_uri = format!("https://{}/users/{}", inbox.local_domain, local_username);
+    let response_id = format!(
+        "https://{}/{}s/{}",
+        inbox.local_domain,
+        kind.to_ascii_lowercase(),
+        generate_snowflake_id(chrono::Utc::now())
+    );
+    let actor_key_id = format!("{}#main-key", local_actor_uri);
+
+    let response = serde_json::json!({
+        "@context": "https://www.w3.org/ns/activitystreams",
+        "type": kind,
+        "id": response_id,
+        "actor": local_actor_uri,
+        "object": activity
+    });
+    let body = serde_json::to_string(&response)
+        .map_err(|e| format!("{} シリアライズ失敗: {}", kind, e))?;
+
+    ap_client
+        .sign_and_post(
+            remote_inbox,
+            &body,
+            &actor_key_id,
+            &inbox.ap_private_key_pem,
+        )
+        .await?;
     Ok(())
 }
 

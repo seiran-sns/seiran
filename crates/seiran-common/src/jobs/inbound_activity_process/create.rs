@@ -105,6 +105,12 @@ pub(super) async fn broadcast_created_note(inbox: &InboxContext, ctx: CreatedNot
             home_recipients: Arc::new(home_recipients),
             list_ids: Arc::new(list_ids),
             hashtags: Arc::new(hashtags),
+            kept_off_public_feeds: crate::repository::denied_host::actor_is_kept_off_public_feeds(
+                &inbox.db_pool,
+                ctx.actor_id,
+            )
+            .await
+            .unwrap_or(false),
         };
         inbox.stream_hub.publish_channel_note(scope, note_json);
     }

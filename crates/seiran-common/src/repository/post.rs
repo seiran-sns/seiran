@@ -1023,7 +1023,8 @@ impl PostRepository for PgPostRepository {
         since_id: Option<i64>,
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error> {
-        // local_timeline から `is_local = true` 条件のみを外したもの（#78）。
+        // local_timeline から `is_local = true` 条件のみを外し、拒否サーバーのアクター
+        // （`actor_is_kept_off_public_feeds`）を除いたもの（#78）。
         sqlx::query_as::<_, TimelinePost>(
             concat!("SELECT ", crate::timeline_post_columns!(), "
              FROM posts p ", crate::timeline_post_joins!(), "
@@ -1031,6 +1032,7 @@ impl PostRepository for PgPostRepository {
                AND p.id < COALESCE($2::bigint, 9223372036854775807)
                AND p.id > COALESCE($3::bigint, 0)
                AND p.visibility NOT IN ('unlisted', 'followers_only')
+               AND NOT actor_is_kept_off_public_feeds(p.actor_id)
                AND ($1::bigint IS NULL OR p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
                AND ($1::bigint IS NULL OR NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id)))
                AND post_is_visible_to($1, p.actor_id, p.visibility::text, p.id, $5)

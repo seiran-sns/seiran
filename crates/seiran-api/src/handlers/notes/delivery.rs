@@ -545,6 +545,12 @@ pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResp
         home_recipients: Arc::new(home_recipients),
         list_ids: Arc::new(list_ids),
         hashtags: Arc::new(hashtags),
+        kept_off_public_feeds:
+            seiran_common::repository::denied_host::actor_is_kept_off_public_feeds(
+                &state.db, actor_id,
+            )
+            .await
+            .unwrap_or(false),
     };
     if let Ok(v) = serde_json::to_value(note) {
         state.stream_hub.publish_channel_note(scope, v);

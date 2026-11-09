@@ -8,6 +8,7 @@
       "storage": "儲存空間",
       "emojis": "表情符號",
       "relays": "Relays",
+      "serverBlocks": "伺服器封鎖",
       "authIpBlocks": "已封鎖IP",
       "suspendedActors": "已凍結使用者",
       "roleRateLimits": "速率限制"
@@ -283,6 +284,15 @@
     "passkeyCount": "金鑰：{{count}}",
     "disableTotpButton": "強制停用 TOTP",
     "disableTotpConfirm": "要強制停用 {{username}} 的 TOTP 嗎？"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "拒絕的伺服器",
+    "deniedDescription": "這些伺服器（含子網域）上使用者的貼文，只有在本站有人追蹤或將其加入列表時才會接收。發給未追蹤他們的使用者的回覆、引用、提及、私訊和回應也會被捨棄，追蹤請求會被自動拒絕（Bluesky 的追蹤只記錄、不通知）。他們的貼文不會出現在全域時間軸與主題標籤時間軸上。本站的投遞以及與已追蹤帳號的互動照常進行。適用於 Fediverse 伺服器與 ATP PDS。",
+    "deniedLabel": "每行一個網域",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "儲存",
+    "saving": "儲存中…",
+    "savedMessage": "已儲存。"
   },
   "authIpBlocksPanel": {
     "title": "已封鎖IP",

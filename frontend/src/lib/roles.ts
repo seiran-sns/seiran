@@ -8,6 +8,7 @@ export type AdminTopic =
   | "reports"
   | "suspendedActors"
   | "relays"
+  | "serverBlocks"
   | "authIpBlocks";
 
 const ALL_ADMIN_TOPICS: AdminTopic[] = [
@@ -19,6 +20,7 @@ const ALL_ADMIN_TOPICS: AdminTopic[] = [
   "reports",
   "suspendedActors",
   "relays",
+  "serverBlocks",
   "authIpBlocks",
 ];
 

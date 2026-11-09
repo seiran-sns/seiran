@@ -8,6 +8,7 @@
       "storage": "Stockage",
       "emojis": "Émojis",
       "relays": "Relays",
+      "serverBlocks": "Blocage de serveurs",
       "authIpBlocks": "IP bloquées",
       "suspendedActors": "Utilisateurs suspendus",
       "roleRateLimits": "Limites de débit"
@@ -283,6 +284,15 @@
     "passkeyCount": "Clés d'accès : {{count}}",
     "disableTotpButton": "Forcer la désactivation du TOTP",
     "disableTotpConfirm": "Forcer la désactivation du TOTP pour {{username}} ?"
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "Serveurs refusés",
+    "deniedDescription": "Les publications des utilisateurs de ces serveurs (sous-domaines compris) ne sont acceptées que si quelqu’un ici les suit ou les a ajoutés à une liste. Les réponses, citations, mentions, messages privés et réactions adressés à des utilisateurs qui ne les suivent pas sont également ignorés, et leurs demandes d’abonnement sont refusées automatiquement (les abonnements Bluesky sont enregistrés sans notification). Leurs publications n’apparaissent jamais dans le fil global ni dans les fils de hashtags. L’envoi depuis ce serveur et les échanges avec les comptes que vous suivez continuent comme avant. S’applique aux serveurs du Fédivers et aux PDS ATP.",
+    "deniedLabel": "Un domaine par ligne",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "Enregistrer",
+    "saving": "Enregistrement…",
+    "savedMessage": "Enregistré."
   },
   "authIpBlocksPanel": {
     "title": "IP bloquées",

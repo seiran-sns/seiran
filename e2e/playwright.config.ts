@@ -75,6 +75,7 @@ const GLOBALS_SERIAL_SPECS = [
   "**/misskey-stats.spec.ts",
   "**/terms-of-service.spec.ts",
   "**/account-limit.spec.ts",
+  "**/server-blocks.spec.ts",
 ];
 
 export default defineConfig({

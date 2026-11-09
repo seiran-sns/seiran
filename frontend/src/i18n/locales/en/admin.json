@@ -8,6 +8,7 @@
       "storage": "Storage",
       "emojis": "Emojis",
       "relays": "Relays",
+      "serverBlocks": "Server blocks",
       "authIpBlocks": "Blocked IPs",
       "suspendedActors": "Suspended Users",
       "roleRateLimits": "Rate limits"
@@ -26,6 +27,15 @@
       "accepted": "Joined",
       "rejected": "Rejected"
     }
+  },
+  "serverBlocksPanel": {
+    "deniedTitle": "Denied servers",
+    "deniedDescription": "Posts from users on these servers (including subdomains) are only accepted if someone here follows them or has added them to a list. Replies, quotes, mentions, DMs and reactions toward users who don't follow them are also dropped, and their follow requests are rejected automatically (Bluesky follows are recorded but not notified). Their posts never appear on the global or hashtag timelines. Delivery from this server and interaction with accounts you follow continue as before. Applies to Fediverse servers and ATP PDSes.",
+    "deniedLabel": "One domain per line",
+    "deniedPlaceholder": "spam.example\nanother.example",
+    "saveButton": "Save",
+    "saving": "Saving…",
+    "savedMessage": "Saved."
   },
   "authIpBlocksPanel": {
     "title": "Blocked IPs",
