@@ -657,6 +657,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 - `uri` は Misskey に合わせローカルでは常に `null`。seiran はローカル投稿にも `ap_object_id` を持つので、出自は `domain == local_domain` で判定する。`url` は AP 優先、無ければ bsky.app URL。ローカルは両方 `null`。
 - `emojis` は `posts.emoji_map` と `actors.emoji_map` を統合する（AP 投稿では本文の絵文字が actor 側の map にしか無いことがある）。
 - `renote`/`reply` は `renoteId`/`replyId` から対象を一括取得して埋め込み（`embed_referenced_notes`、可視性は `find_visible_posts_by_ids`）、孫階層まで1回だけ追加で埋める。ID だけではクライアントが「削除されたノート」と表示するため。孫まで必要なのは、引用ポストの単純リポストでリポストが1階層を消費するから。ひ孫は埋めない。
+- 純粋リノート（本家の `isPureRenote` と同じく、本文・CW・添付・投票を持たないもの）では、ラッパー自身の `reactions` を埋め込む `renote` の `reactions` に足し、`reactionEmojis` も合わせる（`merge_wrapper_reactions`）。クロスプロトコルのリポストは別方面からは通常のノートに見えてラッパー宛てにリアクションが届くが、クライアントは純粋リノートでは `renote` のリアクションしか描画しないため。`myReaction` はリノート先の値のまま（操作はリノート先へ送られるので、ラッパー側の値だと取消が空振りする）。seiran のフロントは合算を表示時に行う（`docs/ui_spec.md` 6.4節）。
 - `cw` は `posts.content_warning`、`files[].isSensitive` は `post_attachments.is_sensitive`。
 - `poll` は `to_misskey_poll` が `{expiresAt, multiple, choices:[{isVoted,text,votes}]}` に変換する（無ければ `null`）。`isVoted` は `poll_votes` から一括取得する。
 

@@ -33,18 +33,26 @@ export function subscribeReactionState(noteId: string, listener: () => void): ()
   };
 }
 
-/** 指定ノートの現在のリアクション集計を購読する。ストア未登録なら `initialReactions` でシードする。 */
+const EMPTY: ReactionSummary[] = [];
+
+/** 指定ノートの現在のリアクション集計を購読する。ストア未登録なら `initialReactions` でシードする。
+ * `noteId` が null なら何も購読せず常に空配列を返す（フックを条件付きで呼べないため、
+ * 「対象が無いかもしれない」購読はこの形で表す）。 */
 export function useReactionState(
-  noteId: string,
+  noteId: string | null,
   initialReactions: ReactionSummary[] | undefined
 ): ReactionSummary[] {
-  if (!states.has(noteId)) {
+  if (noteId !== null && !states.has(noteId)) {
     states.set(noteId, initialReactions ?? []);
   }
   const subscribeNote = useCallback(
-    (listener: () => void) => subscribeReactionState(noteId, listener),
+    (listener: () => void) =>
+      noteId === null ? () => {} : subscribeReactionState(noteId, listener),
     [noteId]
   );
-  const getSnapshot = useCallback(() => states.get(noteId)!, [noteId]);
+  const getSnapshot = useCallback(
+    () => (noteId === null ? EMPTY : states.get(noteId)!),
+    [noteId]
+  );
   return useSyncExternalStore(subscribeNote, getSnapshot, getSnapshot);
 }

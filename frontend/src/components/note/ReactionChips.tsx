@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, ReactionActor, ReactionSummary } from "../../api/client";
+import { ReactionActor, ReactionSummary } from "../../api/client";
+import { fetchReactionActors } from "../../lib/repostReactions";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
 import RemoteImg from "../common/RemoteImg";
 
@@ -11,6 +12,9 @@ import styles from "./ReactionChips.module.css";
 
 interface ReactionChipsProps {
   noteId: string;
+  /** リポストラッパー越しに表示しているときのラッパーID。`reactions` にラッパー宛ての分が
+   * 合算されているので、リアクションした人一覧もラッパー側から取得して合わせる。 */
+  viaRepostId?: string;
   reactions?: ReactionSummary[];
   /** チップクリック時に同じ絵文字でトグル（追加/取消・切替）する（未指定なら非インタラクティブ）。 */
   onToggle?: (emoji: string) => void;
@@ -29,6 +33,7 @@ interface ReactionChipsProps {
  * 自分が既に付けている分の取消のみ許可する）。 */
 export default function ReactionChips({
   noteId,
+  viaRepostId,
   reactions,
   onToggle,
   disabled,
@@ -47,6 +52,7 @@ export default function ReactionChips({
         <ReactionChip
           key={r.emoji}
           noteId={noteId}
+          viaRepostId={viaRepostId}
           reaction={r}
           onToggle={onToggle}
           disabled={disabled}
@@ -59,6 +65,7 @@ export default function ReactionChips({
 
 interface ReactionChipProps {
   noteId: string;
+  viaRepostId?: string;
   reaction: ReactionSummary;
   onToggle?: (emoji: string) => void;
   disabled?: boolean;
@@ -66,7 +73,7 @@ interface ReactionChipProps {
   knownShortcodes: Set<string> | null;
 }
 
-function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes }: ReactionChipProps) {
+function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, knownShortcodes }: ReactionChipProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -86,15 +93,14 @@ function ReactionChip({ noteId, reaction: r, onToggle, disabled, knownShortcodes
     if (!fetchedRef.current) {
       fetchedRef.current = true;
       setLoading(true);
-      api.notes
-        .reactionActors(noteId, r.emoji)
-        .then((res) => setActors(res.actors))
+      fetchReactionActors(noteId, viaRepostId, r.emoji)
+        .then(setActors)
         .catch(() => setFailed(true))
         .finally(() => setLoading(false));
     }
     if (timerRef.current) window.clearTimeout(timerRef.current);
     setOpen(true);
-  }, [noteId, r.emoji]);
+  }, [noteId, viaRepostId, r.emoji]);
 
   const onLeave = useCallback(() => {
     // 少し遅延させてから閉じる（ポップオーバーへのカーソル移動を許容）。

@@ -169,6 +169,7 @@ function PostContent({
   forceOpenCw = false,
   onReplyIndicatorClick,
   isMainSubject = false,
+  viaRepost,
 }: {
   note: Note;
   linkToDetail: boolean;
@@ -179,6 +180,8 @@ function PostContent({
   forceOpenCw?: boolean;
   onReplyIndicatorClick?: (replyId: string) => void;
   isMainSubject?: boolean;
+  /** リポストラッパー越しに表示しているときのラッパー自身（リアクションの合算に使う）。 */
+  viaRepost?: Note;
 }) {
   const { t } = useTranslation();
   const redactSuspendedAuthor = Boolean(note.authorSuspended) && !isMainSubject;
@@ -196,7 +199,7 @@ function PostContent({
     isPrivateQuoteTarget,
     isGateReplyBlocked,
     isGateQuoteBlocked,
-    reactions,
+    displayReactions,
     reactionPending,
     toggleReaction,
     reposted,
@@ -212,7 +215,7 @@ function PostContent({
     redraftOverwritesDraft,
     redraftBlock,
     checkRedraftTargets,
-  } = useNoteCardActions(note, onUnreposted, onDeleted);
+  } = useNoteCardActions(note, onUnreposted, onDeleted, viaRepost);
 
   const targetKey = profileQuery(note.user.username, note.user.domain);
 
@@ -713,7 +716,8 @@ function PostContent({
         replyCount={note.replyCount}
         quoteCount={note.quoteCount}
         repostCount={note.repostCount}
-        reactions={reactions}
+        reactions={displayReactions}
+        viaRepostId={viaRepost?.id}
         reactionPending={reactionPending}
         onToggleReaction={handleToggleReaction}
         onReply={handleReply}
@@ -876,6 +880,7 @@ export default function NoteCard({
           onDeleted={() => setHidden(true)}
           forceOpenCw={forceOpenCw}
           onReplyIndicatorClick={onReplyIndicatorClick}
+          viaRepost={note}
         />
       </article>
     );

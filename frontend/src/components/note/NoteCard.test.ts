@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ReactionSummary } from "../../api/client";
 import type { ReactionUpdate } from "../../contexts/StreamingContext";
 import { applyReactionUpdate, optimisticSetReaction } from "../../hooks/useNoteCardActions";
+import { mergeRepostReactions } from "../../lib/repostReactions";
 import { followToggleAction } from "../../hooks/useFollowHoverSwitch";
 
 describe("followToggleAction", () => {
@@ -76,5 +77,35 @@ describe("applyReactionUpdate", () => {
   it("myActorIdがundefined（未認証）の場合は常に他人の操作として扱う", () => {
     const result = applyReactionUpdate([], baseUpdate, undefined);
     expect(result[0].reactedByMe).toBe(false);
+  });
+});
+
+describe("mergeRepostReactions", () => {
+  it("ラッパー宛てのリアクションが無ければ元ポストの配列をそのまま返す", () => {
+    const original: ReactionSummary[] = [{ emoji: "🎉", count: 1, reactedByMe: true }];
+    expect(mergeRepostReactions(original, [])).toBe(original);
+  });
+
+  it("同じ絵文字は件数を合算し、無い絵文字は追加して件数の多い順に並べる", () => {
+    const original: ReactionSummary[] = [{ emoji: "🎉", count: 1, reactedByMe: true }];
+    const wrapper: ReactionSummary[] = [
+      { emoji: "❤️", count: 3, reactedByMe: false },
+      { emoji: "🎉", count: 1, reactedByMe: false },
+    ];
+    expect(mergeRepostReactions(original, wrapper)).toEqual([
+      { emoji: "❤️", count: 3, reactedByMe: false, emojiUrl: undefined },
+      { emoji: "🎉", count: 2, reactedByMe: true },
+    ]);
+  });
+
+  it("reactedByMe は元ポスト側の値だけを使う", () => {
+    const wrapper: ReactionSummary[] = [{ emoji: "👍", count: 1, reactedByMe: true }];
+    expect(mergeRepostReactions([], wrapper)[0].reactedByMe).toBe(false);
+  });
+
+  it("元ポストの配列を書き換えない", () => {
+    const original: ReactionSummary[] = [{ emoji: "🎉", count: 1, reactedByMe: false }];
+    mergeRepostReactions(original, [{ emoji: "🎉", count: 2, reactedByMe: false }]);
+    expect(original[0].count).toBe(1);
   });
 });
