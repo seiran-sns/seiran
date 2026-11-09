@@ -5,6 +5,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { ReactionUpdate, useStreamingContext } from "../contexts/StreamingContext";
 import { getReactionState, setReactionState, useReactionState } from "../stores/reactionStore";
+import { mergeRepostReactions } from "../lib/repostReactions";
 import { useComposer } from "../contexts/ComposerContext";
 import {
   clearComposerDraft,
@@ -79,8 +80,17 @@ export function applyReactionUpdate(
  * `onUnreposted` はリポスト取消が成功した際に呼ばれる（NoteCard 側でリポスト表示自体を
  * 非表示にするために使う）。`onDeleted` は投稿削除が成功した際に呼ばれる（同様にカード自体を
  * 非表示にするために使う）。
+ *
+ * `viaRepost` はリポストラッパー越しに元ポスト（`note`）を表示しているときのラッパー自身。
+ * 渡すと表示用の `displayReactions` にラッパー宛てのリアクションも合算する
+ * （`lib/repostReactions.ts` の `mergeRepostReactions` 参照）。トグル判定・送信は元ポスト分の `reactions` で行う。
  */
-export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDeleted?: () => void) {
+export function useNoteCardActions(
+  note: Note,
+  onUnreposted?: () => void,
+  onDeleted?: () => void,
+  viaRepost?: Note
+) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const { showError } = useToast();
@@ -91,6 +101,9 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
   const reactions = useReactionState(note.id, note.reactions);
+  const viaRepostId = viaRepost?.id ?? null;
+  const wrapperReactions = useReactionState(viaRepostId, viaRepost?.reactions);
+  const displayReactions = mergeRepostReactions(reactions, wrapperReactions);
   const [pinned, setPinned] = useState(note.pinnedByMe ?? false);
   const [pinning, setPinning] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -112,6 +125,15 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
       setReactionState(note.id, applyReactionUpdate(getReactionState(note.id) ?? [], update, user?.actor_id));
     });
   }, [note.id, registerReaction, user?.actor_id]);
+  useEffect(() => {
+    if (viaRepostId === null) return;
+    return registerReaction(viaRepostId, (update) => {
+      setReactionState(
+        viaRepostId,
+        applyReactionUpdate(getReactionState(viaRepostId) ?? [], update, user?.actor_id)
+      );
+    });
+  }, [viaRepostId, registerReaction, user?.actor_id]);
 
   async function handleRepost(e?: React.MouseEvent) {
     e?.stopPropagation();
@@ -295,6 +317,7 @@ export function useNoteCardActions(note: Note, onUnreposted?: () => void, onDele
     isGateQuoteBlocked,
     isGateReplyBlocked,
     reactions,
+    displayReactions,
     reactionPending,
     toggleReaction,
     reposted,

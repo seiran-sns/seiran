@@ -622,11 +622,46 @@ async fn embed_referenced_notes(
             .as_deref()
             .and_then(|s| s.parse::<i64>().ok())
         {
-            note.renote = by_id.get(&rid).cloned().map(Box::new);
+            note.renote = by_id.get(&rid).cloned().map(|mut renote| {
+                if is_pure_renote(note) {
+                    merge_wrapper_reactions(&mut renote, note);
+                }
+                Box::new(renote)
+            });
         }
         if let Some(rid) = note.reply_id.as_deref().and_then(|s| s.parse::<i64>().ok()) {
             note.reply = by_id.get(&rid).cloned().map(Box::new);
         }
+    }
+}
+
+/// Misskey本家の `isPureRenote` と同じ判定（リノート先があり、本文・CW・添付・投票を持たない）。
+/// クライアントはこの形のノートを「リノート先そのもの」として描画し、リアクションも
+/// リノート先（`renote`）のものを表示する。
+fn is_pure_renote(note: &MisskeyNote) -> bool {
+    note.renote_id.is_some()
+        && note.text.is_none()
+        && note.cw.is_none()
+        && note.files.is_empty()
+        && note.poll.is_none()
+}
+
+/// 純粋リノートのラッパー自身へ付いたリアクションを、埋め込むリノート先のリアクションへ合算する。
+/// seiranではBskyポストをFedi方面へリポストするとFedi側からはラッパーが通常のノートに見え、
+/// リアクション（Like）がラッパー宛てに届く。クライアントはリノート先のリアクションしか
+/// 表示しないため、合算しないとそれらが表示される場所が無くなる。
+/// `myReaction` はリノート先の値のまま変えない（リアクション操作はリノート先へ送られるため、
+/// ラッパー側の値を入れると取消操作が空振りする）。frontend API 側の同じ扱いは
+/// `frontend/src/lib/repostReactions.ts` の `mergeRepostReactions`。
+fn merge_wrapper_reactions(renote: &mut MisskeyNote, wrapper: &MisskeyNote) {
+    for (emoji, count) in &wrapper.reactions {
+        *renote.reactions.entry(emoji.clone()).or_insert(0) += count;
+    }
+    for (key, url) in &wrapper.reaction_emojis {
+        renote
+            .reaction_emojis
+            .entry(key.clone())
+            .or_insert_with(|| url.clone());
     }
 }
 
@@ -1071,5 +1106,85 @@ mod tests {
         ] {
             assert_eq!(to_misskey_notification_type(kind), kind);
         }
+    }
+
+    fn reaction(
+        emoji: &str,
+        count: i64,
+        reacted_by_me: bool,
+        url: Option<&str>,
+    ) -> ReactionSummary {
+        ReactionSummary {
+            emoji: emoji.to_string(),
+            count,
+            reacted_by_me,
+            emoji_url: url.map(str::to_string),
+        }
+    }
+
+    fn note_with_reactions(p: &TimelinePost, reactions: Vec<ReactionSummary>) -> MisskeyNote {
+        let materials = NoteMaterials {
+            reactions: HashMap::from([(p.id, reactions)]),
+            ..Default::default()
+        };
+        to_misskey_note(p, LOCAL_DOMAIN, &materials)
+    }
+
+    #[test]
+    fn plain_repost_is_pure_renote_but_quote_is_not() {
+        let mut repost = base_post();
+        repost.repost_of_post_id = Some(2);
+        let mut quote = base_post();
+        quote.quote_of_post_id = Some(2);
+
+        let materials = NoteMaterials::default();
+        assert!(is_pure_renote(&to_misskey_note(
+            &repost,
+            LOCAL_DOMAIN,
+            &materials
+        )));
+        assert!(!is_pure_renote(&to_misskey_note(
+            &quote,
+            LOCAL_DOMAIN,
+            &materials
+        )));
+    }
+
+    #[test]
+    fn wrapper_reactions_are_added_to_renote_without_touching_my_reaction() {
+        let mut original = base_post();
+        original.id = 2;
+        let mut renote = note_with_reactions(
+            &original,
+            vec![reaction(
+                ":blob@a.example:",
+                1,
+                true,
+                Some("https://a/blob.png"),
+            )],
+        );
+        let mut wrapper_post = base_post();
+        wrapper_post.repost_of_post_id = Some(2);
+        let wrapper = note_with_reactions(
+            &wrapper_post,
+            vec![
+                reaction(":blob@a.example:", 2, false, Some("https://a/blob.png")),
+                reaction("❤️", 1, true, None),
+                reaction(":cat@b.example:", 1, false, Some("https://b/cat.png")),
+            ],
+        );
+
+        merge_wrapper_reactions(&mut renote, &wrapper);
+
+        assert_eq!(renote.reactions.get(":blob@a.example:"), Some(&3));
+        assert_eq!(renote.reactions.get("❤️"), Some(&1));
+        assert_eq!(
+            renote
+                .reaction_emojis
+                .get("cat@b.example")
+                .map(String::as_str),
+            Some("https://b/cat.png")
+        );
+        assert_eq!(renote.my_reaction.as_deref(), Some(":blob@a.example:"));
     }
 }

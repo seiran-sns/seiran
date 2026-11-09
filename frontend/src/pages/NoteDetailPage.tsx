@@ -461,7 +461,9 @@ export default function NoteDetailPage() {
       {noteDetailTab === 0 && note && <AuthorPanel note={note} />}
       {noteDetailTab === 1 && display && !repliesInCenter && <ReplyThreadPanel note={display} />}
       {noteDetailTab === 2 && renderContext()}
-      {noteDetailTab === 3 && display && <ReactionListPanel note={display} />}
+      {noteDetailTab === 3 && display && (
+        <ReactionListPanel note={display} viaRepost={hasRenote && note ? note : undefined} />
+      )}
       {noteDetailTab === 4 && display && <RepostListPanel note={display} />}
       {noteDetailTab === 5 && hasRenote && display && <AuthorPanel note={display} />}
     </div>

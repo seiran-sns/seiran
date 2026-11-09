@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, Note, ReactionActor } from "../../api/client";
+import { Note, ReactionActor } from "../../api/client";
+import { fetchReactionActors, mergeRepostReactions } from "../../lib/repostReactions";
 import RemoteImg from "../common/RemoteImg";
 import UserItem from "../common/UserItem";
 import EmojiContextMenu from "../note/EmojiContextMenu";
@@ -11,6 +12,9 @@ import styles from "./ReactionListPanel.module.css";
 
 interface ReactionListPanelProps {
   note: Note;
+  /** リポストラッパーの詳細ページで元ポスト（`note`）を表示しているときのラッパー自身。
+   * ラッパー宛てのリアクションも合算して一覧する（`mergeRepostReactions` 参照）。 */
+  viaRepost?: Note;
 }
 
 type ActorsState = ReactionActor[] | "loading" | "error";
@@ -18,9 +22,10 @@ type ActorsState = ReactionActor[] | "loading" | "error";
 /** ポスト詳細右ペインの「リアクション」タブ（#226）: 全リアクション×付けたユーザー一覧を
  * 絵文字ごとにグループ化して表示する（`ReactionChips`のホバーポップオーバーと異なり、
  * ホバー不要で全件を常時展開表示する）。 */
-export default function ReactionListPanel({ note }: ReactionListPanelProps) {
+export default function ReactionListPanel({ note, viaRepost }: ReactionListPanelProps) {
   const { t } = useTranslation();
-  const reactions = note.reactions ?? [];
+  const reactions = mergeRepostReactions(note.reactions ?? [], viaRepost?.reactions ?? []);
+  const viaRepostId = viaRepost?.id;
   const [actorsByEmoji, setActorsByEmoji] = useState<Record<string, ActorsState>>({});
 
   useEffect(() => {
@@ -30,10 +35,9 @@ export default function ReactionListPanel({ note }: ReactionListPanelProps) {
     setActorsByEmoji(initial);
 
     reactions.forEach((r) => {
-      api.notes
-        .reactionActors(note.id, r.emoji)
-        .then((res) => {
-          if (!cancelled) setActorsByEmoji((prev) => ({ ...prev, [r.emoji]: res.actors }));
+      fetchReactionActors(note.id, viaRepostId, r.emoji)
+        .then((actors) => {
+          if (!cancelled) setActorsByEmoji((prev) => ({ ...prev, [r.emoji]: actors }));
         })
         .catch(() => {
           if (!cancelled) setActorsByEmoji((prev) => ({ ...prev, [r.emoji]: "error" }));
@@ -43,7 +47,7 @@ export default function ReactionListPanel({ note }: ReactionListPanelProps) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [note.id, reactions.map((r) => r.emoji).join(",")]);
+  }, [note.id, viaRepostId, reactions.map((r) => r.emoji).join(",")]);
 
   if (reactions.length === 0) {
     return (

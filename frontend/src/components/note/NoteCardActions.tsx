@@ -34,7 +34,10 @@ interface NoteCardActionsProps {
   replyCount: number;
   quoteCount: number;
   repostCount: number;
+  /** 表示用のリアクション集計（リポストラッパー越しならラッパー宛ての分も合算済み）。 */
   reactions: ReactionSummary[];
+  /** リポストラッパー越しに表示しているときのラッパーID（リアクションした人一覧の取得に使う）。 */
+  viaRepostId?: string;
   reactionPending: boolean;
   onToggleReaction: (emoji: string) => void;
   onReply: (e?: React.MouseEvent) => void;
@@ -73,6 +76,7 @@ export default function NoteCardActions({
   quoteCount,
   repostCount,
   reactions,
+  viaRepostId,
   reactionPending,
   onToggleReaction,
   onReply,
@@ -206,6 +210,7 @@ export default function NoteCardActions({
     <>
       <ReactionChips
         noteId={noteId}
+        viaRepostId={viaRepostId}
         reactions={reactions}
         onToggle={onToggleReaction}
         disabled={reactionPending}
