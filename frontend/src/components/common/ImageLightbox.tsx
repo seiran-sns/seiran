@@ -28,6 +28,16 @@ const WHEEL_ZOOM_SPEED = 0.0015;
 const SWIPE_RUBBER_BAND = 0.3;
 /** パン可能範囲の端に着いているとみなす誤差（px）。 */
 const EDGE_EPSILON_PX = 0.5;
+/** 縦スワイプで閉じるのに必要な移動量（px）。 */
+const DISMISS_THRESHOLD_PX = 80;
+/** 縦スワイプで背景が最も薄くなるまでの移動量（px）。 */
+const DISMISS_FADE_DISTANCE_PX = 300;
+const OVERLAY_ALPHA = 0.85;
+/**
+ * タッチ操作の後にブラウザが合成するclickを、タップとみなして無視する期間（ms）。
+ * スマホではタップで閉じず、✕ボタンか縦スワイプで閉じる（横スワイプの操作中の誤タップで閉じないため）。
+ */
+const TOUCH_CLICK_GUARD_MS = 800;
 
 function clampScale(scale: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
@@ -55,6 +65,8 @@ type TouchGesture =
   | { kind: "pan"; start: Point; startTranslate: Point }
   /** 画像のページング。画像は指に横方向だけ追従し、移動先が無ければ抵抗をつけて追従する。 */
   | { kind: "page"; startX: number; direction: "next" | "previous"; hasTarget: boolean }
+  /** 縦スワイプで閉じる操作。画像は指に縦方向だけ追従し、背景が薄くなる。 */
+  | { kind: "dismiss"; startY: number }
   /**
    * 2本指のピンチ。開始時に2本指の中点の下にあった画像上の点が、常に現在の中点の下に来るように
    * 拡大率と位置を決める（ピンチしながらの平行移動にも追従する）。
@@ -75,7 +87,7 @@ type TouchGesture =
  * オーバーレイ・Escで閉じ、複数画像ではボタン・左右矢印キー・スワイプで移動する。
  * ホイール／ピンチで100〜500%ズーム、ズーム中はドラッグ／指1本でビューポート移動する。
  * スワイプは、その向きの先に拡大ではみ出した部分が残っていればスクロール、残っていなければ
- * ページングになる。
+ * 横はページング、縦は閉じる操作になる。タップでは閉じない（PCのクリックでは閉じる）。
  * 表示画像はアップロード時の最大サイズに合わせ、CSS上で1024×1024pxを上限とする。
  */
 export default function ImageLightbox({
@@ -90,8 +102,8 @@ export default function ImageLightbox({
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
-  /** ページングのスワイプ中に画像を横へずらす量（px）。 */
-  const [swipeOffset, setSwipeOffset] = useState(0);
+  /** ページング／閉じるスワイプ中に画像をずらす量（px）。ページングはx、閉じるはyだけを使う。 */
+  const [swipeOffset, setSwipeOffset] = useState<Point>({ x: 0, y: 0 });
   /** 指を離した後、ずらした画像を元の位置へアニメーションで戻している最中。 */
   const [settling, setSettling] = useState(false);
 
@@ -124,6 +136,11 @@ export default function ImageLightbox({
   // クリック（onClose）を抑制するフラグ。ドラッグ/パン/ピンチ操作の終わりに
   // 発火するclickイベントで誤って閉じないようにする。
   const suppressClickRef = useRef(false);
+  /** 最後にタッチ操作が終わった時刻（performance.now()）。直後のclickはタップ由来として閉じない。 */
+  const lastTouchEndRef = useRef(Number.NEGATIVE_INFINITY);
+
+  // effect内のリスナーから最新のrequestCloseを呼ぶためのref。
+  const requestCloseRef = useRef<() => void>(() => {});
 
   // NSFWぼかし未解除の間はズーム不可（解除ボタンごと拡大されてしまうのを防ぐ）。
   const zoomAllowedRef = useRef(!sensitive || revealed);
@@ -163,13 +180,14 @@ export default function ImageLightbox({
       onClose();
     }
   }
+  requestCloseRef.current = requestClose;
 
   useEffect(() => {
     if (!src) return;
     setRevealed(false);
     setScale(1);
     setTranslate({ x: 0, y: 0 });
-    setSwipeOffset(0);
+    setSwipeOffset({ x: 0, y: 0 });
     setSettling(false);
 
     function onKey(e: KeyboardEvent) {
@@ -204,9 +222,13 @@ export default function ImageLightbox({
       return ((scale - 1) * imageWrap!.offsetWidth) / 2;
     }
 
+    function maxTranslateY(scale: number) {
+      return ((scale - 1) * imageWrap!.offsetHeight) / 2;
+    }
+
     function clampTranslate(tx: number, ty: number, scale: number) {
       const maxX = maxTranslateX(scale);
-      const maxY = ((scale - 1) * imageWrap!.offsetHeight) / 2;
+      const maxY = maxTranslateY(scale);
       return {
         x: Math.min(maxX, Math.max(-maxX, tx)),
         y: Math.min(maxY, Math.max(-maxY, ty)),
@@ -265,9 +287,9 @@ export default function ImageLightbox({
     let gesture: TouchGesture = { kind: "idle" };
 
     function beginPinch(a: Touch, b: Touch) {
-      // ページングで横にずらしていた分は捨て、拡大の基準にしない。
+      // ページング／閉じるでずらしていた分は捨て、拡大の基準にしない。
       const offset = swipeOffsetRef.current;
-      setSwipeOffset(0);
+      setSwipeOffset({ x: 0, y: 0 });
       setSettling(false);
       const rect = imageWrap!.getBoundingClientRect();
       const t = translateRef.current;
@@ -279,17 +301,26 @@ export default function ImageLightbox({
         startMid: touchMidpoint(a, b),
         startTranslate: { ...t },
         layoutCenter: {
-          x: rect.left + rect.width / 2 - t.x - offset,
-          y: rect.top + rect.height / 2 - t.y,
+          x: rect.left + rect.width / 2 - t.x - offset.x,
+          y: rect.top + rect.height / 2 - t.y - offset.y,
         },
       };
       suppressClickRef.current = true;
     }
 
-    /** 指1本の動き出しで、スクロールかページングかを決める。 */
+    /** 指1本の動き出しで、スクロールか、ページング（横）／閉じる（縦）かを決める。 */
     function decideSingleTouchMode(dx: number, dy: number, start: Point, startTranslate: Point) {
       if (Math.abs(dx) <= Math.abs(dy)) {
-        gesture = { kind: "pan", start, startTranslate };
+        // 指を下へ動かすと、画像の上側に隠れた部分が見えてくる。
+        const maxY = maxTranslateY(scaleRef.current);
+        const hiddenRemains =
+          dy > 0
+            ? startTranslate.y < maxY - EDGE_EPSILON_PX
+            : startTranslate.y > -maxY + EDGE_EPSILON_PX;
+        gesture = hiddenRemains
+          ? { kind: "pan", start, startTranslate }
+          : { kind: "dismiss", startY: start.y };
+        setSettling(false);
         return;
       }
       // 指を左へ動かす（左スワイプ）と、画像の右側に隠れた部分が見えてくる。
@@ -368,21 +399,36 @@ export default function ImageLightbox({
         const dx = t.clientX - gesture.startX;
         // スワイプを始めた向きと逆へは動かさない。
         const raw = gesture.direction === "next" ? Math.min(0, dx) : Math.max(0, dx);
-        setSwipeOffset(gesture.hasTarget ? raw : raw * SWIPE_RUBBER_BAND);
+        setSwipeOffset({ x: gesture.hasTarget ? raw : raw * SWIPE_RUBBER_BAND, y: 0 });
+      } else if (gesture.kind === "dismiss") {
+        setSwipeOffset({ x: 0, y: t.clientY - gesture.startY });
       }
     }
 
-    /** ページングのスワイプを終える。閾値を超えていれば画像を切り替え、そうでなければ元の位置へ戻す。 */
-    function finishPage(commit: boolean) {
-      if (gesture.kind !== "page") return;
+    /**
+     * ページング／閉じるスワイプを終える。閾値を超えていれば画像を切り替える／閉じる。
+     * そうでなければ元の位置へバネのように戻す。
+     */
+    function finishSwipe(commit: boolean) {
       const offset = swipeOffsetRef.current;
-      if (commit && gesture.hasTarget && Math.abs(offset) > SWIPE_THRESHOLD_PX) {
-        setSwipeOffset(0);
-        if (gesture.direction === "next") onNextRef.current?.();
-        else onPreviousRef.current?.();
-      } else if (offset !== 0) {
+      if (gesture.kind === "page") {
+        if (commit && gesture.hasTarget && Math.abs(offset.x) > SWIPE_THRESHOLD_PX) {
+          setSwipeOffset({ x: 0, y: 0 });
+          if (gesture.direction === "next") onNextRef.current?.();
+          else onPreviousRef.current?.();
+          return;
+        }
+      } else if (gesture.kind === "dismiss") {
+        if (commit && Math.abs(offset.y) > DISMISS_THRESHOLD_PX) {
+          requestCloseRef.current();
+          return;
+        }
+      } else {
+        return;
+      }
+      if (offset.x !== 0 || offset.y !== 0) {
         setSettling(true);
-        setSwipeOffset(0);
+        setSwipeOffset({ x: 0, y: 0 });
       }
     }
 
@@ -390,7 +436,7 @@ export default function ImageLightbox({
       if (e.touches.length === 1) {
         // ピンチから指1本が残ったら、残った指でのスクロールとして続ける（ページングはしない）。
         const t = e.touches[0];
-        finishPage(false);
+        finishSwipe(false);
         gesture = {
           kind: "pan",
           start: { x: t.clientX, y: t.clientY },
@@ -399,13 +445,15 @@ export default function ImageLightbox({
         return;
       }
       if (e.touches.length === 0) {
-        finishPage(true);
+        lastTouchEndRef.current = performance.now();
+        finishSwipe(true);
         gesture = { kind: "idle" };
       }
     }
 
     function onTouchCancel() {
-      finishPage(false);
+      lastTouchEndRef.current = performance.now();
+      finishSwipe(false);
       gesture = { kind: "idle" };
     }
 
@@ -438,6 +486,7 @@ export default function ImageLightbox({
       suppressClickRef.current = false;
       return;
     }
+    if (performance.now() - lastTouchEndRef.current < TOUCH_CLICK_GUARD_MS) return;
     requestClose();
   }
 
@@ -448,15 +497,26 @@ export default function ImageLightbox({
   }
 
   const zoomed = scale > 1;
-  const offsetX = translate.x + swipeOffset;
+  const offsetX = translate.x + swipeOffset.x;
+  const offsetY = translate.y + swipeOffset.y;
   const wrapStyle =
-    scale !== 1 || offsetX !== 0 || translate.y !== 0
-      ? { transform: `translate(${offsetX}px, ${translate.y}px) scale(${scale})` }
+    scale !== 1 || offsetX !== 0 || offsetY !== 0
+      ? { transform: `translate(${offsetX}px, ${offsetY}px) scale(${scale})` }
+      : undefined;
+  // 閉じるスワイプの移動量に応じて背景を薄くし、離せば閉じることを示す。
+  const overlayStyle =
+    swipeOffset.y !== 0
+      ? {
+          backgroundColor: `rgba(10, 14, 26, ${
+            OVERLAY_ALPHA * (1 - 0.7 * Math.min(1, Math.abs(swipeOffset.y) / DISMISS_FADE_DISTANCE_PX))
+          })`,
+        }
       : undefined;
 
   return (
     <div
-      className={styles.overlay}
+      className={`${styles.overlay} ${settling ? styles.settling : ""}`}
+      style={overlayStyle}
       onClick={handleClick}
       onTouchStart={stopTouch}
       onTouchMove={stopTouch}
