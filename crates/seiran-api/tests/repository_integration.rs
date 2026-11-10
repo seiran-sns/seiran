@@ -243,6 +243,56 @@ async fn reaction_upsert_returns_previous_and_delete_returns_removed_row() {
     assert_eq!(removed.ap_activity_id.as_deref(), Some("act-2"));
 }
 
+/// よく使う絵文字の順位付け（メモリ上、`handlers::notes::frequent_ranking`）に渡す、自分が付けている
+/// リアクションの内容と時刻が取れる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn list_uses_by_actor_returns_own_reactions() {
+    let pool = test_db_pool().await;
+    let repo = PgReactionRepository::new(pool.clone());
+    let author = create_fixture_local_actor(&pool, "rfauthor").await;
+    let reactor = create_fixture_local_actor(&pool, "rfreactor").await;
+    let other = create_fixture_local_actor(&pool, "rfother").await;
+
+    for (i, (actor, content)) in [(reactor, "👍"), (reactor, "🎉"), (other, "😂")]
+        .into_iter()
+        .enumerate()
+    {
+        let post = create_fixture_post(
+            &pool,
+            author,
+            FixturePost {
+                body: "rf",
+                ..Default::default()
+            },
+        )
+        .await;
+        let activity = format!("rf-act-{}-{i}", unique_suffix());
+        repo.upsert(&NewReaction {
+            id: seiran_common::generate_snowflake_id(chrono::Utc::now()),
+            post_id: post,
+            actor_id: actor,
+            reaction_type: "emoji",
+            content,
+            ap_activity_id: Some(&activity),
+            at_uri: None,
+            emoji_url: None,
+        })
+        .await
+        .unwrap();
+    }
+
+    let mut contents: Vec<String> = repo
+        .list_uses_by_actor(reactor)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|u| u.content)
+        .collect();
+    contents.sort();
+    assert_eq!(contents, ["🎉", "👍"]);
+}
+
 /// 同じ (投稿, ユーザー) への同時の切り替えでも、各呼び出しが返す旧値は実際に上書きした
 /// 行と一致する（新規作成扱いはちょうど1回、旧値の activity id は重複しない）。
 #[tokio::test]

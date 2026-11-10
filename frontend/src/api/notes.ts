@@ -262,11 +262,13 @@ export const notifications = {
 };
 
 export const reactions = {
-  /** 自分がよく使う絵文字を頻度順に返す（絵文字ピッカーの「よく使う」タブ用）。 */
-  frequent() {
+  /** 自分がよく使う絵文字を返す（絵文字ピッカーの「よく使う」タブ・クイックリアクション用）。
+   * `utcOffsetMinutes` を渡すと今の時間帯によく使う絵文字を先に並べる（`lib/reactionTimeSlot.ts`）。 */
+  frequent(utcOffsetMinutes?: number) {
+    const query = utcOffsetMinutes === undefined ? "" : `?utcOffset=${utcOffsetMinutes}`;
     return request<{ items: FrequentReaction[] }>(
       "GET",
-      "/reactions/frequent",
+      `/reactions/frequent${query}`,
     );
   },
 };
