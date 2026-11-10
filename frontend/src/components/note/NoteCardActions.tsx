@@ -7,7 +7,7 @@ import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
 import { useFitCount } from "../../hooks/useFitCount";
 import { useQuickReactions } from "../../hooks/useQuickReactions";
-import { isSameReaction } from "../../lib/quickReactions";
+import { isSameReaction, QUICK_REACTION_FREQUENT_LIMIT, QuickReaction } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
@@ -116,12 +116,19 @@ export default function NoteCardActions({
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
   const myReaction = reactions.find((r) => r.reactedByMe);
   const quickReactions = useQuickReactions();
+  // ❤️の後ろの「よく使う」枠は、候補が足りなくても常に上限数ぶんの場所を取る（空き枠は
+  // 見えない置き場所）。ホバーでの表示切り替えや候補数の違いでケバブメニューの位置が
+  // 動かないようにするため。
+  const quickSlots: (QuickReaction | null)[] = [
+    ...quickReactions,
+    ...Array<null>(Math.max(0, 1 + QUICK_REACTION_FREQUENT_LIMIT - quickReactions.length)).fill(null),
+  ];
   const actionsRef = useRef<HTMLDivElement>(null);
   // クイックリアクションボタンは幅が足りない分を末尾（使用頻度の低い側）から隠し、
   // ケバブメニューのボタンを行からはみ出させない（メニューにしか無い操作があるため）。
   const visibleQuickCount = useFitCount(
     actionsRef,
-    quickReactions.map((q) => q.content)
+    quickSlots.map((q, i) => q?.content ?? `slot:${i}`)
   );
   const hasLoss =
     replyCount > 0 ||
@@ -298,7 +305,23 @@ export default function NoteCardActions({
           count={totalReactionCount}
           active={myReaction !== undefined}
         />
-        {quickReactions.map((q, i) => {
+        {quickSlots.map((q, i) => {
+          const hiddenStyle = i < visibleQuickCount ? undefined : { display: "none" };
+          // ❤️以外（よく使う絵文字）はカードにホバーしている間だけ見せる（CSS、`quickFrequent`）。
+          const frequentClass = i > 0 ? styles.quickFrequent : "";
+          if (!q) {
+            return (
+              <span
+                key={`slot:${i}`}
+                data-fit-key={`slot:${i}`}
+                className={`${styles.actionBtn} ${styles.quickSlotEmpty}`}
+                style={hiddenStyle}
+                aria-hidden="true"
+              >
+                <span className={styles.quickSlotBox} />
+              </span>
+            );
+          }
           // 自分が付けている絵文字のボタンは🙂ボタンと同じく枠で示し、押すと取り消す。それ以外の
           // ボタンは押すとその絵文字で付ける（別の絵文字を付けていればサーバー側で置き換わる）。
           const active = myReaction !== undefined && isSameReaction(q.content, myReaction.emoji);
@@ -307,8 +330,8 @@ export default function NoteCardActions({
               key={q.content}
               type="button"
               data-fit-key={q.content}
-              className={`${styles.actionBtn} ${active ? styles.actionBtnActive : ""}`}
-              style={i < visibleQuickCount ? undefined : { display: "none" }}
+              className={`${styles.actionBtn} ${frequentClass} ${active ? styles.actionBtnActive : ""}`}
+              style={hiddenStyle}
               disabled={reactionPending}
               onClick={(e) => {
                 e.stopPropagation();

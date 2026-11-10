@@ -78,6 +78,16 @@ test("よく使う絵文字が❤️の後ろに頻度順で並び、別の絵�
     .poll(() => quickTitles(card).evaluateAll((els) => els.map((e) => e.getAttribute("title"))))
     .toEqual(["❤️ でリアクション", "👍 でリアクション", "🎉 でリアクション", "😂 でリアクション"]);
 
+  // ❤️以外はカードにホバーしている間だけ見える。表示が切り替わってもメニューの位置は動かない。
+  const menu = card.getByRole("button", { name: "⋯" });
+  await page.mouse.move(0, 0);
+  await expect(card.getByTitle("❤️ でリアクション", { exact: true })).toBeVisible();
+  await expect(card.getByTitle("👍 でリアクション", { exact: true })).toBeHidden();
+  const menuBoxBefore = await menu.boundingBox();
+  await card.hover();
+  await expect(card.getByTitle("👍 でリアクション", { exact: true })).toBeVisible();
+  expect(await menu.boundingBox()).toEqual(menuBoxBefore);
+
   await card.getByTitle("👍 でリアクション", { exact: true }).click();
   await expect(card.getByRole("button", { name: /👍\s*1/ })).toBeVisible({ timeout: 15_000 });
   await expect(card.getByTitle("👍 のリアクションを取り消す", { exact: true })).toHaveClass(/actionBtnActive/);
@@ -105,6 +115,7 @@ test("幅が足りないとクイックリアクションボタンを末尾か�
 
   const menu = card.getByRole("button", { name: "⋯" });
   await expect(menu).toBeVisible();
+  await card.hover();
   await expect(card.getByTitle("😂 でリアクション", { exact: true })).toBeHidden({ timeout: 15_000 });
   const cardBox = await card.boundingBox();
   const menuBox = await menu.boundingBox();
@@ -113,6 +124,7 @@ test("幅が足りないとクイックリアクションボタンを末尾か�
 
   // 広げれば全部並ぶ。
   await page.setViewportSize({ width: 1600, height: 900 });
+  await card.hover();
   await expect(card.getByTitle("😂 でリアクション", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(menu).toBeVisible();
 });
