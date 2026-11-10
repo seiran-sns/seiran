@@ -2,7 +2,12 @@ import { useEffect, useState } from "react";
 import { api, FrequentReaction } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchCustomEmojis } from "../lib/customEmojis";
-import { QUICK_REACTION_HEART, QuickReaction, selectQuickReactions } from "../lib/quickReactions";
+import {
+  mergeQuickReactionsStable,
+  QUICK_REACTION_HEART,
+  QuickReaction,
+  selectQuickReactions,
+} from "../lib/quickReactions";
 
 const HEART_ONLY: QuickReaction[] = [{ content: QUICK_REACTION_HEART }];
 
@@ -21,14 +26,16 @@ function publish(items: QuickReaction[]) {
   listeners.forEach((l) => l(items));
 }
 
-function load(userId: string) {
+/** `refresh` は表示中の並びを保って取り直す（`mergeQuickReactionsStable`）。 */
+function load(userId: string, refresh = false) {
   loadedFor = userId;
   Promise.all([
     api.reactions.frequent().catch(() => ({ items: [] as FrequentReaction[] })),
     fetchCustomEmojis().catch(() => []),
   ]).then(([frequent, customEmojis]) => {
     if (loadedFor !== userId) return;
-    publish(selectQuickReactions(frequent.items, customEmojis));
+    const next = selectQuickReactions(frequent.items, customEmojis);
+    publish(refresh ? mergeQuickReactionsStable(current, next) : next);
   });
 }
 
@@ -39,7 +46,7 @@ export function scheduleQuickReactionsRefresh() {
   if (refreshTimer !== null) window.clearTimeout(refreshTimer);
   refreshTimer = window.setTimeout(() => {
     refreshTimer = null;
-    if (loadedFor === userId) load(userId);
+    if (loadedFor === userId) load(userId, true);
   }, REFRESH_DELAY_MS);
 }
 

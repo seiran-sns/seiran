@@ -7,10 +7,11 @@ import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
 import { useFitCount } from "../../hooks/useFitCount";
 import { useQuickReactions } from "../../hooks/useQuickReactions";
-import { isSameReaction, QUICK_REACTION_FREQUENT_LIMIT, QuickReaction } from "../../lib/quickReactions";
+import { QUICK_REACTION_FREQUENT_LIMIT, QuickReaction } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
+import QuickReactionButtons from "./QuickReactionButtons";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -305,57 +306,13 @@ export default function NoteCardActions({
           count={totalReactionCount}
           active={myReaction !== undefined}
         />
-        {quickSlots.map((q, i) => {
-          const hiddenStyle = i < visibleQuickCount ? undefined : { display: "none" };
-          // ❤️以外（よく使う絵文字）はカードにホバーしている間だけ見せる（CSS、`quickFrequent`）。
-          const frequentClass = i > 0 ? styles.quickFrequent : "";
-          if (!q) {
-            return (
-              <span
-                key={`slot:${i}`}
-                data-fit-key={`slot:${i}`}
-                className={`${styles.actionBtn} ${styles.quickSlotEmpty}`}
-                style={hiddenStyle}
-                aria-hidden="true"
-              >
-                <span className={styles.quickSlotBox} />
-              </span>
-            );
-          }
-          // 自分が付けている絵文字のボタンは🙂ボタンと同じく枠で示し、押すと取り消す。それ以外の
-          // ボタンは押すとその絵文字で付ける（別の絵文字を付けていればサーバー側で置き換わる）。
-          const active = myReaction !== undefined && isSameReaction(q.content, myReaction.emoji);
-          return (
-            <button
-              key={q.content}
-              type="button"
-              data-fit-key={q.content}
-              className={`${styles.actionBtn} ${frequentClass} ${active ? styles.actionBtnActive : ""}`}
-              style={hiddenStyle}
-              disabled={reactionPending}
-              onClick={(e) => {
-                e.stopPropagation();
-                onToggleReaction(active && myReaction ? myReaction.emoji : q.content);
-              }}
-              title={t(
-                active ? "home:quickReaction.removeTitle" : "home:quickReaction.reactTitle",
-                { emoji: q.content }
-              )}
-            >
-              {q.imageUrl ? (
-                <img
-                  className={styles.quickReactionImg}
-                  src={q.imageUrl}
-                  alt={q.content}
-                  draggable={false}
-                  loading="lazy"
-                />
-              ) : (
-                <TwemojiEmoji emoji={q.content} />
-              )}
-            </button>
-          );
-        })}
+        <QuickReactionButtons
+          slots={quickSlots}
+          visibleCount={visibleQuickCount}
+          myReactionEmoji={myReaction?.emoji}
+          disabled={reactionPending}
+          onToggleReaction={onToggleReaction}
+        />
         <ActionsMenu
           items={menuItems}
           triggerTitle={t("home:noteCard.menuTitle")}

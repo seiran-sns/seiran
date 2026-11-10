@@ -730,6 +730,13 @@
 /* ❤️以外のクイックリアクションボタンは、マウスで操作する環境ではカードにホバーしている間
    （キーボード操作中はカード内にフォーカスがある間）だけ見せる。常に全部並べると画面が
    うるさいため。visibility で隠すので場所は取ったままで、ケバブメニューの位置は動かない。 */
+/* タッチ環境では並べず、❤️に指を置いたときのフリック選択（`QuickReactionButtons`）で出す。 */
+@media (hover: none) {
+  .quickFrequent {
+    display: none;
+  }
+}
+
 @media (hover: hover) {
   .quickFrequent {
     visibility: hidden;

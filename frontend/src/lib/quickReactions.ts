@@ -65,3 +65,41 @@ export function selectQuickReactions(
   }
   return result;
 }
+
+/** 指を置いた位置からこれ以上動かしたらフリックとみなす距離（px）。未満で離せば❤️のタップ。 */
+export const FLICK_THRESHOLD_PX = 16;
+
+/** よく使う絵文字を❤️のどの方向へ出すか（頻度順）。 */
+export const FLICK_DIRECTIONS = ["left", "up", "right"] as const;
+export type FlickDirection = (typeof FLICK_DIRECTIONS)[number];
+
+/**
+ * ❤️に指を置いた位置からの移動量でフリック方向を決める。しきい値未満なら `"none"`（❤️のタップ）、
+ * 下方向は取り消し（`null`）。斜めは横・縦の移動量の大きい方に寄せる。
+ */
+export function flickDirection(dx: number, dy: number): FlickDirection | "none" | null {
+  if (Math.hypot(dx, dy) < FLICK_THRESHOLD_PX) return "none";
+  if (dy > 0 && dy >= Math.abs(dx)) return null;
+  if (Math.abs(dx) > -dy) return dx < 0 ? "left" : "right";
+  return "up";
+}
+
+/**
+ * 取り直した候補 `next` を、表示中の `prev` の並びをなるべく保って並べ直す。引き続き候補に残る
+ * 絵文字は同じ位置に留め、外れた絵文字の位置にだけ新しく入った絵文字を頻度順に入れる。
+ * タッチ環境ではよく使う絵文字を❤️の左・上・右に割り当てており、使うたびに頻度が入れ替わって
+ * 方向が変わると指が覚えた操作が狂うため（頻度順に並べ直すのはページを読み込み直したときだけ）。
+ */
+export function mergeQuickReactionsStable(
+  prev: QuickReaction[],
+  next: QuickReaction[]
+): QuickReaction[] {
+  const result: (QuickReaction | null)[] = prev.map(
+    (p) => next.find((n) => n.content === p.content) ?? null
+  );
+  const incoming = next.filter((n) => !prev.some((p) => p.content === n.content));
+  for (let i = 0; i < result.length && incoming.length > 0; i++) {
+    if (result[i] === null) result[i] = incoming.shift()!;
+  }
+  return [...result.filter((q): q is QuickReaction => q !== null), ...incoming];
+}

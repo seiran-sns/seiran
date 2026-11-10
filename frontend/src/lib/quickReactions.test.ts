@@ -1,6 +1,11 @@
 import { describe, expect, it } from "vitest";
 import type { FrequentReaction, PublicEmoji } from "../api/client";
-import { isSameReaction, selectQuickReactions } from "./quickReactions";
+import {
+  flickDirection,
+  isSameReaction,
+  mergeQuickReactionsStable,
+  selectQuickReactions,
+} from "./quickReactions";
 
 function freq(content: string, count = 1): FrequentReaction {
   return { content, count, emojiUrl: null };
@@ -71,5 +76,50 @@ describe("isSameReaction", () => {
     expect(isSameReaction("❤️", "❤")).toBe(true);
     expect(isSameReaction("❤️", "👍")).toBe(false);
     expect(isSameReaction("👍", ":thumbsup:")).toBe(false);
+  });
+});
+
+describe("flickDirection", () => {
+  it("しきい値未満の動きは❤️のタップとみなす", () => {
+    expect(flickDirection(0, 0)).toBe("none");
+    expect(flickDirection(10, -10)).toBe("none");
+  });
+
+  it("左・上・右へのフリックを判定し、斜めは移動量の大きい方に寄せる", () => {
+    expect(flickDirection(-40, 0)).toBe("left");
+    expect(flickDirection(40, 0)).toBe("right");
+    expect(flickDirection(0, -40)).toBe("up");
+    expect(flickDirection(-40, -20)).toBe("left");
+    expect(flickDirection(20, -40)).toBe("up");
+    expect(flickDirection(40, 20)).toBe("right");
+  });
+
+  it("下へのフリックは取り消し", () => {
+    expect(flickDirection(0, 40)).toBeNull();
+    expect(flickDirection(-20, 40)).toBeNull();
+  });
+});
+
+describe("mergeQuickReactionsStable", () => {
+  const q = (content: string) => ({ content });
+
+  it("候補に残る絵文字は頻度順が入れ替わっても位置を変えない", () => {
+    expect(
+      mergeQuickReactionsStable([q("❤️"), q("👍"), q("🎉"), q("😂")], [q("❤️"), q("🎉"), q("👍"), q("😂")])
+    ).toEqual([q("❤️"), q("👍"), q("🎉"), q("😂")]);
+  });
+
+  it("外れた絵文字の位置に新しく入った絵文字を入れる", () => {
+    expect(
+      mergeQuickReactionsStable([q("❤️"), q("👍"), q("🎉"), q("😂")], [q("❤️"), q("🙏"), q("👍"), q("😂")])
+    ).toEqual([q("❤️"), q("👍"), q("🙏"), q("😂")]);
+  });
+
+  it("空いていた枠には末尾に足す", () => {
+    expect(mergeQuickReactionsStable([q("❤️"), q("👍")], [q("❤️"), q("🎉"), q("👍")])).toEqual([
+      q("❤️"),
+      q("👍"),
+      q("🎉"),
+    ]);
   });
 });

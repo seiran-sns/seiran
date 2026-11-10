@@ -1,4 +1,4 @@
-import { test, expect, APIRequestContext, Locator } from "@playwright/test";
+import { test, expect, APIRequestContext, CDPSession, Locator } from "@playwright/test";
 import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
 // NoteCard の🙂ボタンの右に並ぶクイックリアクションボタン: 先頭は常に❤️、続いて自分が
@@ -127,4 +127,76 @@ test("幅が足りないとクイックリアクションボタンを末尾か�
   await card.hover();
   await expect(card.getByTitle("😂 でリアクション", { exact: true })).toBeVisible({ timeout: 15_000 });
   await expect(menu).toBeVisible();
+});
+
+test.describe("タッチ環境", () => {
+  test.use({ viewport: { width: 412, height: 900 }, hasTouch: true, isMobile: true });
+
+  /** CDP でタッチを送る（Playwright の touchscreen は tap しかなく、指を滑らせられないため）。 */
+  async function touch(cdp: CDPSession, type: "touchStart" | "touchMove" | "touchEnd", x: number, y: number) {
+    await cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints: type === "touchEnd" ? [] : [{ x, y }],
+    });
+  }
+
+  test("❤️に指を置くとよく使う絵文字が左・上・右に出て、滑らせた方向の絵文字が付く", async ({ page, request }) => {
+    const user = await registerUserViaApi(request, "e2equickflick");
+    const prefix = `クイックフリック ${Date.now()}`;
+    await seedFrequentReactions(request, user.token, prefix);
+    const text = `${prefix} 対象`;
+    await createNote(request, user.token, text);
+
+    await seedAuth(page, user.token);
+    await page.goto("/");
+    const card = page.locator("article").filter({ hasText: text }).first();
+    await expect(card).toBeVisible({ timeout: 15_000 });
+
+    // タッチ環境ではよく使う絵文字のボタンを行に並べない。
+    const heart = card.getByTitle("❤️ でリアクション", { exact: true });
+    await expect(heart).toBeVisible();
+    await expect(card.getByTitle("👍 でリアクション", { exact: true })).toBeHidden({ timeout: 15_000 });
+
+    const cdp = await page.context().newCDPSession(page);
+    const heartButton = card.locator('button[title^="❤️ "]');
+    const flickItems = card.locator('[class*="flickItem"]');
+
+    /** ❤️に指を置き、`path` の順に滑らせて離す（各点は❤️の中心からの相対位置）。
+     * リアクションのチップ行が出入りするとボタンの位置が変わるので、毎回測り直す。 */
+    async function flick(path: [number, number][], onDown?: () => Promise<void>) {
+      await expect(heartButton).toBeEnabled();
+      const box = (await heartButton.boundingBox())!;
+      const x = box.x + box.width / 2;
+      const y = box.y + box.height / 2;
+      await touch(cdp, "touchStart", x, y);
+      await onDown?.();
+      let last: [number, number] = [0, 0];
+      for (const p of path) {
+        await touch(cdp, "touchMove", x + p[0], y + p[1]);
+        last = p;
+      }
+      await touch(cdp, "touchEnd", x + last[0], y + last[1]);
+    }
+
+    // 指を置いた時点でせり出す（左=👍、上=🎉、右=😂）。上へ滑らせて離すと🎉。
+    await flick([[2, -20], [4, -45]], () => expect(flickItems).toHaveCount(3));
+    await expect(flickItems).toHaveCount(0);
+    await expect(card.getByRole("button", { name: /🎉\s*1/ })).toBeVisible({ timeout: 15_000 });
+
+    // 左へ滑らせると👍に付け替わる。
+    await flick([[-20, 0], [-45, 3]]);
+    await expect(card.getByRole("button", { name: /👍\s*1/ })).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByRole("button", { name: /🎉\s*\d/ })).toHaveCount(0);
+
+    // 下へ滑らせると何もしない。
+    await flick([[0, 20], [0, 45]]);
+    await expect(flickItems).toHaveCount(0);
+    await expect(card.getByRole("button", { name: /👍\s*1/ })).toBeVisible();
+
+    // 動かさずに離すと❤️。
+    await flick([]);
+    await expect(card.getByRole("button", { name: /❤️\s*1/ })).toBeVisible({ timeout: 15_000 });
+    await expect(card.getByRole("button", { name: /👍\s*\d/ })).toHaveCount(0);
+    await expect(card.getByTitle("❤️ のリアクションを取り消す", { exact: true })).toHaveClass(/actionBtnActive/);
+  });
 });
