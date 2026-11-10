@@ -41,6 +41,11 @@
   cursor: grabbing;
 }
 
+/* ダブルタップで拡大率を切り替えるときのアニメーション。 */
+.zooming {
+  transition: transform 0.2s ease-out;
+}
+
 /* ページング／閉じるスワイプを離した後、画像がバネのように元の位置へ戻り、背景の濃さも戻る。 */
 .settling {
   transition:

@@ -51,6 +51,18 @@ const OVERLAY_ALPHA = 0.85;
  * スマホではタップで閉じず、✕ボタンか縦スワイプで閉じる（横スワイプの操作中の誤タップで閉じないため）。
  */
 const TOUCH_CLICK_GUARD_MS = 800;
+/** ダブルタップとみなす2回のタップの間隔（ms）と位置のずれ（px）の上限。 */
+const DOUBLE_TAP_INTERVAL_MS = 300;
+const DOUBLE_TAP_SLOP_PX = 30;
+/** ダブルタップの1段目の拡大率。これ未満ならここへ、これ以上なら最大へ、最大なら等倍へ戻す。 */
+const DOUBLE_TAP_SCALE = 2.25;
+
+/** ダブルタップ後の拡大率。 */
+function doubleTapTargetScale(current: number): number {
+  if (current >= MAX_SCALE - 0.001) return MIN_SCALE;
+  if (current < DOUBLE_TAP_SCALE) return DOUBLE_TAP_SCALE;
+  return MAX_SCALE;
+}
 
 function clampScale(scale: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
@@ -104,6 +116,7 @@ type TouchGesture =
  * ホイール／ピンチで100〜500%ズーム、ズーム中はドラッグ／指1本でビューポート移動する。
  * スワイプは、その向きの先に拡大ではみ出した部分が残っていればスクロール、残っていなければ
  * 横はページング、縦は閉じる操作になる。タップでは閉じない（PCのクリックでは閉じる）。
+ * 画像上のダブルタップで、タップした点を中心に 100%→225%→500%→100% と拡大率を切り替える。
  * 表示画像はアップロード時の最大サイズに合わせ、CSS上で1024×1024pxを上限とする。
  */
 export default function ImageLightbox({
@@ -124,6 +137,8 @@ export default function ImageLightbox({
   const [swipeOffset, setSwipeOffset] = useState<Point>({ x: 0, y: 0 });
   /** 指を離した後、ずらした画像を元の位置へアニメーションで戻している最中。 */
   const [settling, setSettling] = useState(false);
+  /** ダブルタップで拡大率を切り替えるアニメーションの最中。 */
+  const [zoomAnimating, setZoomAnimating] = useState(false);
   /**
    * スワイプ確定のアニメーション中。ページングは表示中の画像が画面外へ出て隣の画像が中央へ来る、
    * 閉じるは画像が上下へ飛び去り背景が消える。アニメーションが終わった時点で切り替える／閉じる。
@@ -215,6 +230,7 @@ export default function ImageLightbox({
     setTranslate({ x: 0, y: 0 });
     setSwipeOffset({ x: 0, y: 0 });
     setSettling(false);
+    setZoomAnimating(false);
     setCommitting(null);
     committingRef.current = null;
     closeRequestedRef.current = false;
@@ -314,25 +330,68 @@ export default function ImageLightbox({
 
     // --- タッチ（ピンチズーム／指1本のスクロール・ページング） ---
     let gesture: TouchGesture = { kind: "idle" };
+    /** 直前の（動かさずに離した）タップ。次のタップと合わせてダブルタップを判定する。 */
+    let lastTap: { time: number; x: number; y: number } | null = null;
+
+    /**
+     * 画像上のダブルタップで、タップした点を指の下に保ったまま拡大率を切り替える
+     * （225%未満→225%、225%以上500%未満→500%、500%→100%）。
+     */
+    function zoomAtPoint(x: number, y: number) {
+      if (!zoomAllowedRef.current) return;
+      const rect = imageWrap!.getBoundingClientRect();
+      if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+      const s = scaleRef.current;
+      const t = translateRef.current;
+      const nextScale = doubleTapTargetScale(s);
+      const { x: cx, y: cy } = layoutCenter();
+      // タップした点の画像上の位置（中心基準・等倍の座標）。拡大後も同じ点が指の下に来るようにする。
+      const px = (x - cx - t.x) / s;
+      const py = (y - cy - t.y) / s;
+      setZoomAnimating(true);
+      setScale(nextScale);
+      setTranslate(clampTranslate(x - cx - nextScale * px, y - cy - nextScale * py, nextScale));
+    }
+
+    /** 動かさずに離したタップを記録し、直前のタップと合わせてダブルタップなら拡大する。 */
+    function handleTap(x: number, y: number) {
+      const now = performance.now();
+      if (
+        lastTap &&
+        now - lastTap.time <= DOUBLE_TAP_INTERVAL_MS &&
+        Math.hypot(x - lastTap.x, y - lastTap.y) <= DOUBLE_TAP_SLOP_PX
+      ) {
+        lastTap = null;
+        zoomAtPoint(x, y);
+        return;
+      }
+      lastTap = { time: now, x, y };
+    }
+
+    /**
+     * imageWrapの変形前（translate/scale無し）のレイアウト上の中心。transformは中心基準のscaleなので、
+     * 画像上の点の画面座標 = この中心 + translate + scale × (中心からの等倍の位置)。
+     * getBoundingClientRectはアニメーション途中の変形後の矩形を返すので、変形の影響を受けない
+     * offset系の値（offsetParentはposition: fixedのoverlay）から求める。
+     */
+    function layoutCenter(): Point {
+      const overlayRect = overlay!.getBoundingClientRect();
+      return {
+        x: overlayRect.left + imageWrap!.offsetLeft + imageWrap!.offsetWidth / 2,
+        y: overlayRect.top + imageWrap!.offsetTop + imageWrap!.offsetHeight / 2,
+      };
+    }
 
     function beginPinch(a: Touch, b: Touch) {
       // ページング／閉じるでずらしていた分は捨て、拡大の基準にしない。
-      const offset = swipeOffsetRef.current;
       setSwipeOffset({ x: 0, y: 0 });
-      setSettling(false);
-      const rect = imageWrap!.getBoundingClientRect();
-      const t = translateRef.current;
-      // transformは中心基準のscaleなので、変形後の矩形の中心 = レイアウト上の中心 + translate。
       gesture = {
         kind: "pinch",
         startDist: touchDistance(a, b),
         startScale: scaleRef.current,
         startMid: touchMidpoint(a, b),
-        startTranslate: { ...t },
-        layoutCenter: {
-          x: rect.left + rect.width / 2 - t.x - offset.x,
-          y: rect.top + rect.height / 2 - t.y - offset.y,
-        },
+        startTranslate: { ...translateRef.current },
+        layoutCenter: layoutCenter(),
       };
       suppressClickRef.current = true;
     }
@@ -374,6 +433,10 @@ export default function ImageLightbox({
         gesture = { kind: "idle" };
         return;
       }
+      // 戻り・拡大のアニメーション中に触れたら、アニメーションを打ち切って指に追従させる
+      // （transitionが残ると指の動きに遅れてついてくる）。
+      setSettling(false);
+      setZoomAnimating(false);
       if (e.touches.length === 2) {
         beginPinch(e.touches[0], e.touches[1]);
       } else if (e.touches.length === 1) {
@@ -488,6 +551,12 @@ export default function ImageLightbox({
       }
       if (e.touches.length === 0) {
         lastTouchEndRef.current = performance.now();
+        const tap = e.changedTouches[0];
+        if (gesture.kind === "pending" && tap) {
+          handleTap(tap.clientX, tap.clientY);
+        } else {
+          lastTap = null;
+        }
         finishSwipe(true);
         gesture = { kind: "idle" };
       }
@@ -495,6 +564,7 @@ export default function ImageLightbox({
 
     function onTouchCancel() {
       lastTouchEndRef.current = performance.now();
+      lastTap = null;
       finishSwipe(false);
       gesture = { kind: "idle" };
     }
@@ -587,13 +657,23 @@ export default function ImageLightbox({
       : OVERLAY_ALPHA * (1 - 0.7 * Math.min(1, Math.abs(swipeOffset.y) / DISMISS_FADE_DISTANCE_PX));
   const overlayStyle =
     swipeOffset.y !== 0 ? { backgroundColor: `rgba(10, 14, 26, ${overlayAlpha})` } : undefined;
-  const transitionClass = committing ? styles.committing : settling ? styles.settling : "";
+  const transitionClass = committing
+    ? styles.committing
+    : zoomAnimating
+      ? styles.zooming
+      : settling
+        ? styles.settling
+        : "";
 
   // 表示中の画像のtransformアニメーションの終わり（子のimgのアニメーション等は除く）。
   function handleWrapTransitionEnd(e: ReactTransitionEvent) {
     if (e.target !== e.currentTarget || e.propertyName !== "transform") return;
-    if (committingRef.current) completeCommit();
-    else setSettling(false);
+    if (committingRef.current) {
+      completeCommit();
+    } else {
+      setSettling(false);
+      setZoomAnimating(false);
+    }
   }
 
   return (
