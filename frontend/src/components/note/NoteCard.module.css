@@ -704,6 +704,15 @@
   color: var(--text-dim);
 }
 
+/* クイックリアクションボタンのカスタム絵文字。Twemoji（1.2em四方）と同じ高さに揃え、
+   横長のもの（ピッカーで1マスに収まる範囲）は幅を広げずに縮小して収める。 */
+.quickReactionImg {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
 .actionCount {
   font-variant-numeric: tabular-nums;
 }

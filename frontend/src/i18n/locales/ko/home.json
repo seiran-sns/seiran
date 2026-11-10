@@ -221,6 +221,10 @@
     "noCustomEmojis": "등록된 맞춤 이모티콘이 없습니다.",
     "uncategorized": "미분류"
   },
+  "quickReaction": {
+    "reactTitle": "{{emoji}}(으)로 리액션",
+    "removeTitle": "{{emoji}} 리액션 취소"
+  },
   "replyIndicator": {
     "goToOriginalTitle": "원본 게시물로 이동",
     "replyLabel": "회신하다",

@@ -1,10 +1,13 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReactionSummary, getErrorMessage } from "../../api/client";
 import { formatCount } from "../../lib/format";
 import { RedraftBlockReason } from "../../lib/redraft";
 import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
+import { useFitCount } from "../../hooks/useFitCount";
+import { useQuickReactions } from "../../hooks/useQuickReactions";
+import { isSameReaction } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
@@ -66,7 +69,8 @@ interface NoteCardActionsProps {
 }
 
 /**
- * 投稿カード下部のリアクションチップ＋アクションボタン群（返信/リポスト/リアクション）＋
+ * 投稿カード下部のリアクションチップ＋アクションボタン群（返信/リポスト/リアクション/
+ * クイックリアクション）＋
  * ケバブメニュー（返信/リポスト/リアクション/ピン留め/削除）。ピン留め・削除はメニューのみに
  * ある（自分の投稿のみ表示）。
  */
@@ -110,7 +114,15 @@ export default function NoteCardActions({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
-  const reactedByMe = reactions.some((r) => r.reactedByMe);
+  const myReaction = reactions.find((r) => r.reactedByMe);
+  const quickReactions = useQuickReactions();
+  const actionsRef = useRef<HTMLDivElement>(null);
+  // クイックリアクションボタンは幅が足りない分を末尾（使用頻度の低い側）から隠し、
+  // ケバブメニューのボタンを行からはみ出させない（メニューにしか無い操作があるため）。
+  const visibleQuickCount = useFitCount(
+    actionsRef,
+    quickReactions.map((q) => q.content)
+  );
   const hasLoss =
     replyCount > 0 ||
     quoteCount > 0 ||
@@ -222,7 +234,7 @@ export default function NoteCardActions({
         indent={indent}
       />
 
-      <div className={styles.actions}>
+      <div className={styles.actions} ref={actionsRef}>
         <button
           className={styles.actionBtn}
           onClick={onReply}
@@ -284,8 +296,43 @@ export default function NoteCardActions({
           open={reactionPickerOpen}
           onOpenChange={setReactionPickerOpen}
           count={totalReactionCount}
-          active={reactedByMe}
+          active={myReaction !== undefined}
         />
+        {quickReactions.map((q, i) => {
+          // 自分が付けている絵文字のボタンは🙂ボタンと同じく枠で示し、押すと取り消す。それ以外の
+          // ボタンは押すとその絵文字で付ける（別の絵文字を付けていればサーバー側で置き換わる）。
+          const active = myReaction !== undefined && isSameReaction(q.content, myReaction.emoji);
+          return (
+            <button
+              key={q.content}
+              type="button"
+              data-fit-key={q.content}
+              className={`${styles.actionBtn} ${active ? styles.actionBtnActive : ""}`}
+              style={i < visibleQuickCount ? undefined : { display: "none" }}
+              disabled={reactionPending}
+              onClick={(e) => {
+                e.stopPropagation();
+                onToggleReaction(active && myReaction ? myReaction.emoji : q.content);
+              }}
+              title={t(
+                active ? "home:quickReaction.removeTitle" : "home:quickReaction.reactTitle",
+                { emoji: q.content }
+              )}
+            >
+              {q.imageUrl ? (
+                <img
+                  className={styles.quickReactionImg}
+                  src={q.imageUrl}
+                  alt={q.content}
+                  draggable={false}
+                  loading="lazy"
+                />
+              ) : (
+                <TwemojiEmoji emoji={q.content} />
+              )}
+            </button>
+          );
+        })}
         <ActionsMenu
           items={menuItems}
           triggerTitle={t("home:noteCard.menuTitle")}

@@ -221,6 +221,10 @@
     "noCustomEmojis": "没有注册自定义表情符号",
     "uncategorized": "未分类"
   },
+  "quickReaction": {
+    "reactTitle": "用 {{emoji}} 回应",
+    "removeTitle": "取消 {{emoji}} 回应"
+  },
   "replyIndicator": {
     "goToOriginalTitle": "前往原帖",
     "replyLabel": "回复",

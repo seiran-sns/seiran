@@ -221,6 +221,10 @@
     "noCustomEmojis": "No hay emojis personalizados registrados",
     "uncategorized": "Sin categoría"
   },
+  "quickReaction": {
+    "reactTitle": "Reaccionar con {{emoji}}",
+    "removeTitle": "Quitar tu reacción {{emoji}}"
+  },
   "replyIndicator": {
     "goToOriginalTitle": "Ir a la publicación original",
     "replyLabel": "Responder",

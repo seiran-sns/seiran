@@ -14,6 +14,7 @@ import {
   useCoolingDown,
 } from "../lib/interactionCooldown";
 import { useComposer } from "../contexts/ComposerContext";
+import { scheduleQuickReactionsRefresh } from "./useQuickReactions";
 import {
   clearComposerDraft,
   loadComposerDraft,
@@ -204,6 +205,7 @@ export function useNoteCardActions(
         : await api.notes.unreact(note.id, emoji);
       setReactionState(note.id, res.reactions);
       if (reacting) startCooldown(cooldownKey);
+      scheduleQuickReactionsRefresh();
     } catch (err) {
       setReactionState(note.id, prevReactions);
       if (err instanceof ApiError && err.status === 429) startCooldown(cooldownKey);
