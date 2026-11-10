@@ -20,6 +20,14 @@ pub struct ReactionFeedRow {
     pub target_actor_emoji_map: Option<serde_json::Value>,
 }
 
+/// 自分が付けているリアクション1件の内容と時刻（`ReactionRepository::list_uses_by_actor`）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ReactionUse {
+    pub content: String,
+    pub emoji_url: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 /// リアクションを付けたアクターの表示用情報（ホバーポップオーバーの「誰が付けたか」一覧用）。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ReactorInfo {
@@ -123,15 +131,11 @@ pub trait ReactionRepository: Send + Sync {
         post_id: i64,
     ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
 
-    /// 指定アクターが現在付けているリアクションを `content` 単位で頻度集計する
-    /// （絵文字ピッカーの「よく使う絵文字」用、多い順に最大 `limit` 件、`(content, count, emoji_url)`）。
-    /// `reactions` は 1投稿1リアクションで切替時に上書きされるため、これは厳密な「過去の使用履歴」
-    /// ではなく「現在も付いている自分のリアクション」の集計という近似値になる。
-    async fn aggregate_for_actor(
-        &self,
-        actor_id: i64,
-        limit: i64,
-    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error>;
+    /// 指定アクターが現在付けているリアクションを全件、内容と付けた時刻だけ返す（絵文字ピッカーの
+    /// 「よく使う絵文字」とクイックリアクションの並べ替え用。時間帯別の集計と順位付けは呼び出し側が
+    /// メモリ上で行う）。`reactions` は 1投稿1リアクションで切替時に上書きされるため、これは厳密な
+    /// 「過去の使用履歴」ではなく「現在も付いている自分のリアクション」になる。
+    async fn list_uses_by_actor(&self, actor_id: i64) -> Result<Vec<ReactionUse>, sqlx::Error>;
 
     /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
     /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。
@@ -300,26 +304,13 @@ impl ReactionRepository for PgReactionRepository {
             .collect())
     }
 
-    async fn aggregate_for_actor(
-        &self,
-        actor_id: i64,
-        limit: i64,
-    ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
-        let rows = sqlx::query(
-            "SELECT content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url FROM reactions
-             WHERE actor_id = $1
-             GROUP BY content
-             ORDER BY cnt DESC, MAX(created_at) DESC
-             LIMIT $2",
+    async fn list_uses_by_actor(&self, actor_id: i64) -> Result<Vec<ReactionUse>, sqlx::Error> {
+        sqlx::query_as::<_, ReactionUse>(
+            "SELECT content, emoji_url, created_at FROM reactions WHERE actor_id = $1",
         )
         .bind(actor_id)
-        .bind(limit)
         .fetch_all(&self.pool)
-        .await?;
-        Ok(rows
-            .into_iter()
-            .map(|r| (r.get("content"), r.get("cnt"), r.get("emoji_url")))
-            .collect())
+        .await
     }
 
     async fn actors_for_reaction(

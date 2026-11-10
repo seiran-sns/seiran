@@ -3,27 +3,46 @@ use seiran_common::repository::{NewNotification, NewReaction, StoredReaction};
 use validation::{validate_reaction_content, ReactionContent};
 
 /// よく使う絵文字ピッカーで表示する候補数の上限。
-const FREQUENT_REACTIONS_LIMIT: i64 = 24;
+const FREQUENT_REACTIONS_LIMIT: usize = 24;
 
-/// GET /api/reactions/frequent
-/// 自分がよく使う絵文字（Unicode/カスタム問わず）を頻度順に返す（絵文字ピッカーの
-/// 「よく使う」タブ用）。`reactions` が 1投稿1リアクションで切替時に上書きされる都合上、
-/// これは「過去の使用履歴」ではなく「現在も自分が付けているリアクション」の集計になる
-/// （`ReactionRepository::aggregate_for_actor` 参照）。
+/// 実在するUTCオフセットの範囲（分）。最小は -12:00、最大はキリバスの +14:00。
+const UTC_OFFSET_MINUTES_RANGE: std::ops::RangeInclusive<i32> = -720..=840;
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrequentReactionsQuery {
+    /// 閲覧中のブラウザの今のUTCオフセット（分、日本なら540）。
+    utc_offset: Option<i32>,
+}
+
+/// GET /api/reactions/frequent?utcOffset=540
+/// 自分がよく使う絵文字（Unicode/カスタム問わず）を返す（絵文字ピッカーの「よく使う」タブと
+/// NoteCard のクイックリアクションボタン用）。`utcOffset` があれば今の時間帯を優先した順
+/// （`frequent_ranking::rank_frequent_reactions`）、無ければ（範囲外も）全時間帯の頻度順。
+/// `reactions` が 1投稿1リアクションで切替時に上書きされる都合上、これは「過去の使用履歴」ではなく
+/// 「現在も自分が付けているリアクション」の集計になる。
 pub async fn frequent_reactions(
     me: AuthedUser,
     State(state): State<AppState>,
+    Query(query): Query<FrequentReactionsQuery>,
 ) -> impl IntoResponse {
-    let rows = state
+    let utc_offset = query
+        .utc_offset
+        .filter(|m| UTC_OFFSET_MINUTES_RANGE.contains(m));
+    let uses = state
         .reactions
-        .aggregate_for_actor(me.actor_id, FREQUENT_REACTIONS_LIMIT)
+        .list_uses_by_actor(me.actor_id)
         .await
         .unwrap_or_default();
+    let rows = frequent_ranking::rank_frequent_reactions(
+        &uses,
+        utc_offset.map(|offset| frequent_ranking::time_slot(chrono::Utc::now(), offset)),
+        utc_offset.unwrap_or(0),
+        FREQUENT_REACTIONS_LIMIT,
+    );
     let items: Vec<serde_json::Value> = rows
         .into_iter()
-        .map(|(content, count, emoji_url)| {
-            serde_json::json!({ "content": content, "count": count, "emojiUrl": emoji_url })
-        })
+        .map(|r| serde_json::json!({ "content": r.content, "count": r.count, "emojiUrl": r.emoji_url }))
         .collect();
     Json(serde_json::json!({ "items": items }))
 }

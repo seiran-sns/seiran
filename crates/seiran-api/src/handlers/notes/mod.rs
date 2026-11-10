@@ -20,6 +20,7 @@ pub mod creation;
 pub mod deletion;
 pub mod delivery;
 pub mod dto;
+pub mod frequent_ranking;
 pub mod pins;
 pub mod poll;
 pub mod profile_material;

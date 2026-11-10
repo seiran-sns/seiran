@@ -122,7 +122,7 @@ pub use post::{
 };
 pub use reaction::{
     NewReaction, PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactionUpsert,
-    ReactorInfo, StoredReaction,
+    ReactionUse, ReactorInfo, StoredReaction,
 };
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};

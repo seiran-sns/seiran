@@ -11,6 +11,7 @@ import {
 } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
 import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
+import { currentUtcOffsetMinutes } from "../../lib/reactionTimeSlot";
 import { emojiAspectSpan } from "../../lib/emojiAspect";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import EmojiImage from "./EmojiImage";
@@ -179,7 +180,9 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
     let cancelled = false;
     Promise.all([
       fetchCustomEmojis().catch(() => [] as PublicEmoji[]),
-      api.reactions.frequent().catch(() => ({ items: [] as FrequentReaction[] })),
+      api.reactions
+        .frequent(currentUtcOffsetMinutes())
+        .catch(() => ({ items: [] as FrequentReaction[] })),
     ]).then(([emojis, frequentRes]) => {
       if (cancelled) return;
       setCustomEmojis(emojis);

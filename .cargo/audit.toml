@@ -9,4 +9,10 @@ ignore = [
     # （2026-08-05時点）。seiran-common がAP HTTP SignaturesのRSA-SHA256署名に
     # 使用しており、フェディバース標準に合わせるための直接依存で代替が無い。
     "RUSTSEC-2023-0071",
+    # libsqlite3-sys: 同梱の C SQLite の脆弱性（修正版は0.39.0以上）。sqlx 0.8 が
+    # SQLite対応（sqlx-sqlite）を任意依存として Cargo.lock に載せるため検出されるが、
+    # seiran は postgres 機能しか有効にしておらず、どのターゲットでもビルドに含まれない
+    # （`cargo tree -i libsqlite3-sys --target all` が空）。修正版の libsqlite3-sys を
+    # 使えるのは sqlx 0.9 以降なので、sqlx を 0.9 へ上げたらこの行を消す。
+    "RUSTSEC-2026-0459",
 ]
