@@ -64,8 +64,13 @@ test("他人の投稿をリポスト・取り消すとボタン表示が切り�
   await expect(unrepostButton).toHaveClass(/actionBtnActive/);
 
   await unrepostButton.click();
-  await expect(repostButton).toBeVisible({ timeout: 10_000 });
-  await expect(repostButton).not.toHaveClass(/actionBtnActive/);
+  // 取り消し直後は連打対策のクールダウン中（リポストから10秒）で、未リポストのボタンは
+  // 「リポスト」ではなくクールダウンの title になる。10秒の境目を待つと時間次第で揺れるので、
+  // クールダウン中の表示で確かめる。
+  const cooldownButton = page.getByTitle("続けてリポストすることはできません。少し待ってください", { exact: true });
+  await expect(repostButton.or(cooldownButton)).toBeVisible({ timeout: 10_000 });
+  await expect(repostButton.or(cooldownButton)).not.toHaveClass(/actionBtnActive/);
+  await expect(unrepostButton).toHaveCount(0);
 });
 
 test("自分の投稿をケバブメニューから削除でき、確認前はキャンセルできる", async ({ page, request }) => {

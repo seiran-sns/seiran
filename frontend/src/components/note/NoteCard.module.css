@@ -704,6 +704,50 @@
   color: var(--text-dim);
 }
 
+/* クイックリアクションボタンのカスタム絵文字。Twemoji（1.2em四方）と同じ高さに揃え、
+   横長のもの（ピッカーで1マスに収まる範囲）は幅を広げずに縮小して収める。 */
+.quickReactionImg {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  object-fit: contain;
+}
+
+/* 空き枠の中身。絵文字ボタンと同じ幅にする（TwemojiEmoji・quickReactionImg と同じ1.2em四方）。 */
+.quickSlotBox {
+  display: inline-block;
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+}
+
+/* 候補が上限に満たないときの空き枠。場所だけ取って見せない。 */
+.quickSlotEmpty {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* ❤️以外のクイックリアクションボタンは、マウスで操作する環境ではカードにホバーしている間
+   （キーボード操作中はカード内にフォーカスがある間）だけ見せる。常に全部並べると画面が
+   うるさいため。visibility で隠すので場所は取ったままで、ケバブメニューの位置は動かない。 */
+/* タッチ環境では並べず、❤️に指を置いたときのフリック選択（`QuickReactionButtons`）で出す。 */
+@media (hover: none) {
+  .quickFrequent {
+    display: none;
+  }
+}
+
+@media (hover: hover) {
+  .quickFrequent {
+    visibility: hidden;
+  }
+
+  .card:hover .quickFrequent,
+  .card:has(:focus-visible) .quickFrequent {
+    visibility: visible;
+  }
+}
+
 .actionCount {
   font-variant-numeric: tabular-nums;
 }

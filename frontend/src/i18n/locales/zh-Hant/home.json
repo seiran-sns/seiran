@@ -221,6 +221,10 @@
     "noCustomEmojis": "沒有註冊自訂表情符號",
     "uncategorized": "未分類"
   },
+  "quickReaction": {
+    "reactTitle": "用 {{emoji}} 回應",
+    "removeTitle": "取消 {{emoji}} 回應"
+  },
   "replyIndicator": {
     "goToOriginalTitle": "前往原始貼文",
     "replyLabel": "回覆",

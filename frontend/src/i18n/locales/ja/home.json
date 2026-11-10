@@ -221,6 +221,10 @@
     "noCustomEmojis": "カスタム絵文字が登録されていません",
     "uncategorized": "未分類"
   },
+  "quickReaction": {
+    "reactTitle": "{{emoji}} でリアクション",
+    "removeTitle": "{{emoji}} のリアクションを取り消す"
+  },
   "replyIndicator": {
     "goToOriginalTitle": "返信元のポストへ移動",
     "replyLabel": "返信",

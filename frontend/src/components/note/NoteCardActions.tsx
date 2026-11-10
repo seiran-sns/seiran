@@ -1,13 +1,17 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReactionSummary, getErrorMessage } from "../../api/client";
 import { formatCount } from "../../lib/format";
 import { RedraftBlockReason } from "../../lib/redraft";
 import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
+import { useFitCount } from "../../hooks/useFitCount";
+import { useQuickReactions } from "../../hooks/useQuickReactions";
+import { QUICK_REACTION_FREQUENT_LIMIT, QuickReaction } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
+import QuickReactionButtons from "./QuickReactionButtons";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -66,7 +70,8 @@ interface NoteCardActionsProps {
 }
 
 /**
- * 投稿カード下部のリアクションチップ＋アクションボタン群（返信/リポスト/リアクション）＋
+ * 投稿カード下部のリアクションチップ＋アクションボタン群（返信/リポスト/リアクション/
+ * クイックリアクション）＋
  * ケバブメニュー（返信/リポスト/リアクション/ピン留め/削除）。ピン留め・削除はメニューのみに
  * ある（自分の投稿のみ表示）。
  */
@@ -110,7 +115,22 @@ export default function NoteCardActions({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
-  const reactedByMe = reactions.some((r) => r.reactedByMe);
+  const myReaction = reactions.find((r) => r.reactedByMe);
+  const quickReactions = useQuickReactions();
+  // ❤️の後ろの「よく使う」枠は、候補が足りなくても常に上限数ぶんの場所を取る（空き枠は
+  // 見えない置き場所）。ホバーでの表示切り替えや候補数の違いでケバブメニューの位置が
+  // 動かないようにするため。
+  const quickSlots: (QuickReaction | null)[] = [
+    ...quickReactions,
+    ...Array<null>(Math.max(0, 1 + QUICK_REACTION_FREQUENT_LIMIT - quickReactions.length)).fill(null),
+  ];
+  const actionsRef = useRef<HTMLDivElement>(null);
+  // クイックリアクションボタンは幅が足りない分を末尾（使用頻度の低い側）から隠し、
+  // ケバブメニューのボタンを行からはみ出させない（メニューにしか無い操作があるため）。
+  const visibleQuickCount = useFitCount(
+    actionsRef,
+    quickSlots.map((q, i) => q?.content ?? `slot:${i}`)
+  );
   const hasLoss =
     replyCount > 0 ||
     quoteCount > 0 ||
@@ -222,7 +242,7 @@ export default function NoteCardActions({
         indent={indent}
       />
 
-      <div className={styles.actions}>
+      <div className={styles.actions} ref={actionsRef}>
         <button
           className={styles.actionBtn}
           onClick={onReply}
@@ -284,7 +304,14 @@ export default function NoteCardActions({
           open={reactionPickerOpen}
           onOpenChange={setReactionPickerOpen}
           count={totalReactionCount}
-          active={reactedByMe}
+          active={myReaction !== undefined}
+        />
+        <QuickReactionButtons
+          slots={quickSlots}
+          visibleCount={visibleQuickCount}
+          myReactionEmoji={myReaction?.emoji}
+          disabled={reactionPending}
+          onToggleReaction={onToggleReaction}
         />
         <ActionsMenu
           items={menuItems}
