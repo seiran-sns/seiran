@@ -1,3 +1,14 @@
+/* ページングのスワイプで画面端から現れる前後の画像。overlay全体を覆う枠の中で中央に置き、
+   transformで画面幅＋間隔だけ横にずらす。操作は表示中の画像だけが受ける。 */
+.neighbor {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+}
+
 .overlay {
   position: fixed;
   inset: 0;
@@ -28,6 +39,21 @@
 
 .dragging {
   cursor: grabbing;
+}
+
+/* ページング／閉じるスワイプを離した後、画像がバネのように元の位置へ戻り、背景の濃さも戻る。 */
+.settling {
+  transition:
+    transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2),
+    background-color 0.22s ease-out;
+}
+
+/* 指を離してページング／閉じるが確定した後、表示中の画像が画面外へすばやく飛び去る
+   （ページングでは隣の画像が中央へ飛んでくる。閉じるでは背景も消える）。 */
+.committing {
+  transition:
+    transform 0.2s cubic-bezier(0.25, 0.8, 0.4, 1),
+    background-color 0.2s ease-out;
 }
 
 .zoomed .image {

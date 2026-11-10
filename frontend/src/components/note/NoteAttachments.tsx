@@ -1,7 +1,7 @@
 import { CSSProperties, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NoteAttachment } from "../../api/client";
-import ImageLightbox from "../common/ImageLightbox";
+import ImageLightbox, { type LightboxNeighbor } from "../common/ImageLightbox";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import HlsVideo from "./HlsVideo";
 import styles from "./NoteCard.module.css";
@@ -115,6 +115,12 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
 
   const images = attachments.filter(isImage);
   const blocks = buildBlocks(attachments);
+
+  /** ライトボックスでスワイプ中に隣に見せる画像。範囲外なら undefined。 */
+  function lightboxImage(imageIndex: number): LightboxNeighbor | undefined {
+    const att = images[imageIndex];
+    return att ? { src: att.url, sensitive: att.isSensitive } : undefined;
+  }
 
   function reveal(index: number) {
     setRevealed((current) => new Set(current).add(index));
@@ -305,6 +311,8 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         src={lightboxIndex === null ? null : (images[lightboxIndex]?.url ?? null)}
         sensitive={lightboxIndex === null ? false : images[lightboxIndex]?.isSensitive}
         onClose={() => setLightboxIndex(null)}
+        previousImage={lightboxImage(lightboxIndex === null ? -1 : lightboxIndex - 1)}
+        nextImage={lightboxImage(lightboxIndex === null ? -1 : lightboxIndex + 1)}
         onPrevious={
           lightboxIndex !== null && lightboxIndex > 0
             ? () => setLightboxIndex(lightboxIndex - 1)
