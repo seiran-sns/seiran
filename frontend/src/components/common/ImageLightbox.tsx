@@ -1,4 +1,10 @@
-import { type MouseEvent as ReactMouseEvent, useEffect, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+  useEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import TwemojiEmoji from "./TwemojiEmoji";
 import styles from "./ImageLightbox.module.css";
@@ -18,20 +24,58 @@ const DRAG_THRESHOLD_PX = 6;
 const MIN_SCALE = 1;
 const MAX_SCALE = 5;
 const WHEEL_ZOOM_SPEED = 0.0015;
+/** 移動先の画像が無い方向へのスワイプで、指の移動量に対して画像を動かす割合（バネの抵抗感）。 */
+const SWIPE_RUBBER_BAND = 0.3;
+/** パン可能範囲の端に着いているとみなす誤差（px）。 */
+const EDGE_EPSILON_PX = 0.5;
 
 function clampScale(scale: number): number {
   return Math.min(MAX_SCALE, Math.max(MIN_SCALE, scale));
 }
 
+type Point = { x: number; y: number };
+
 function touchDistance(a: Touch, b: Touch): number {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
+
+function touchMidpoint(a: Touch, b: Touch): Point {
+  return { x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 };
+}
+
+/**
+ * 1回のタッチ操作の状態。指1本の操作はモード（スクロールかページングか）を動き出した時点で
+ * 1度だけ決め、操作の途中では切り替えない（スクロールで端に着いてもそのまま次の画像へは行かない）。
+ */
+type TouchGesture =
+  | { kind: "idle" }
+  /** 指1本が触れたが、まだ動きの閾値を超えていない。 */
+  | { kind: "pending"; start: Point; startTranslate: Point }
+  /** 拡大画像のスクロール。 */
+  | { kind: "pan"; start: Point; startTranslate: Point }
+  /** 画像のページング。画像は指に横方向だけ追従し、移動先が無ければ抵抗をつけて追従する。 */
+  | { kind: "page"; startX: number; direction: "next" | "previous"; hasTarget: boolean }
+  /**
+   * 2本指のピンチ。開始時に2本指の中点の下にあった画像上の点が、常に現在の中点の下に来るように
+   * 拡大率と位置を決める（ピンチしながらの平行移動にも追従する）。
+   */
+  | {
+      kind: "pinch";
+      startDist: number;
+      startScale: number;
+      startMid: Point;
+      startTranslate: Point;
+      /** imageWrapの変形前（translate/scale無し）のレイアウト上の中心。 */
+      layoutCenter: Point;
+    };
 
 /**
  * 添付画像クリック時のページ内ライトボックス表示（#64, #153）。
  *
  * オーバーレイ・Escで閉じ、複数画像ではボタン・左右矢印キー・スワイプで移動する。
  * ホイール／ピンチで100〜500%ズーム、ズーム中はドラッグ／指1本でビューポート移動する。
+ * スワイプは、その向きの先に拡大ではみ出した部分が残っていればスクロール、残っていなければ
+ * ページングになる。
  * 表示画像はアップロード時の最大サイズに合わせ、CSS上で1024×1024pxを上限とする。
  */
 export default function ImageLightbox({
@@ -46,6 +90,10 @@ export default function ImageLightbox({
   const [scale, setScale] = useState(1);
   const [translate, setTranslate] = useState({ x: 0, y: 0 });
   const [dragging, setDragging] = useState(false);
+  /** ページングのスワイプ中に画像を横へずらす量（px）。 */
+  const [swipeOffset, setSwipeOffset] = useState(0);
+  /** 指を離した後、ずらした画像を元の位置へアニメーションで戻している最中。 */
+  const [settling, setSettling] = useState(false);
 
   const overlayRef = useRef<HTMLDivElement>(null);
   const imageWrapRef = useRef<HTMLDivElement>(null);
@@ -53,12 +101,25 @@ export default function ImageLightbox({
   // ネイティブイベントリスナー内で最新値を同期的に読むためのref（stale closure回避）。
   const scaleRef = useRef(scale);
   const translateRef = useRef(translate);
+  const swipeOffsetRef = useRef(swipeOffset);
   useEffect(() => {
     scaleRef.current = scale;
   }, [scale]);
   useEffect(() => {
     translateRef.current = translate;
   }, [translate]);
+  useEffect(() => {
+    swipeOffsetRef.current = swipeOffset;
+  }, [swipeOffset]);
+
+  // 親は毎レンダーで新しい関数を渡してくるので、ジェスチャ処理のeffectの依存に入れると
+  // 操作の途中でリスナーが張り直され、ジェスチャ状態が失われる。refで最新値を読む。
+  const onPreviousRef = useRef(onPrevious);
+  const onNextRef = useRef(onNext);
+  useEffect(() => {
+    onPreviousRef.current = onPrevious;
+    onNextRef.current = onNext;
+  }, [onPrevious, onNext]);
 
   // クリック（onClose）を抑制するフラグ。ドラッグ/パン/ピンチ操作の終わりに
   // 発火するclickイベントで誤って閉じないようにする。
@@ -108,6 +169,8 @@ export default function ImageLightbox({
     setRevealed(false);
     setScale(1);
     setTranslate({ x: 0, y: 0 });
+    setSwipeOffset(0);
+    setSettling(false);
 
     function onKey(e: KeyboardEvent) {
       if (e.key === "Escape") {
@@ -137,8 +200,12 @@ export default function ImageLightbox({
     // 移動位置の制約:「等倍率のときの矩形（画面中央・imageWrapの素のサイズ）が
     // 常に現在の拡大後矩形に内包される」。scaleが1に近づくほど許容範囲が0に収束するため、
     // ズームアウト時に不自然なジャンプなく自然に中央へ戻る。
+    function maxTranslateX(scale: number) {
+      return ((scale - 1) * imageWrap!.offsetWidth) / 2;
+    }
+
     function clampTranslate(tx: number, ty: number, scale: number) {
-      const maxX = ((scale - 1) * imageWrap!.offsetWidth) / 2;
+      const maxX = maxTranslateX(scale);
       const maxY = ((scale - 1) * imageWrap!.offsetHeight) / 2;
       return {
         x: Math.min(maxX, Math.max(-maxX, tx)),
@@ -194,71 +261,152 @@ export default function ImageLightbox({
       setDragging(false);
     }
 
-    // --- タッチ（ピンチズーム／1本指パン・スワイプ） ---
-    let pinchStartDist: number | null = null;
-    let pinchStartScale = 1;
-    let touchStartX: number | null = null;
-    let panStart: { x: number; y: number; tx: number; ty: number } | null = null;
-    let touchDidDrag = false;
+    // --- タッチ（ピンチズーム／指1本のスクロール・ページング） ---
+    let gesture: TouchGesture = { kind: "idle" };
+
+    function beginPinch(a: Touch, b: Touch) {
+      // ページングで横にずらしていた分は捨て、拡大の基準にしない。
+      const offset = swipeOffsetRef.current;
+      setSwipeOffset(0);
+      setSettling(false);
+      const rect = imageWrap!.getBoundingClientRect();
+      const t = translateRef.current;
+      // transformは中心基準のscaleなので、変形後の矩形の中心 = レイアウト上の中心 + translate。
+      gesture = {
+        kind: "pinch",
+        startDist: touchDistance(a, b),
+        startScale: scaleRef.current,
+        startMid: touchMidpoint(a, b),
+        startTranslate: { ...t },
+        layoutCenter: {
+          x: rect.left + rect.width / 2 - t.x - offset,
+          y: rect.top + rect.height / 2 - t.y,
+        },
+      };
+      suppressClickRef.current = true;
+    }
+
+    /** 指1本の動き出しで、スクロールかページングかを決める。 */
+    function decideSingleTouchMode(dx: number, dy: number, start: Point, startTranslate: Point) {
+      if (Math.abs(dx) <= Math.abs(dy)) {
+        gesture = { kind: "pan", start, startTranslate };
+        return;
+      }
+      // 指を左へ動かす（左スワイプ）と、画像の右側に隠れた部分が見えてくる。
+      const direction = dx < 0 ? "next" : "previous";
+      const maxX = maxTranslateX(scaleRef.current);
+      const hiddenRemains =
+        direction === "next"
+          ? startTranslate.x > -maxX + EDGE_EPSILON_PX
+          : startTranslate.x < maxX - EDGE_EPSILON_PX;
+      if (hiddenRemains) {
+        gesture = { kind: "pan", start, startTranslate };
+        return;
+      }
+      const hasTarget = direction === "next" ? !!onNextRef.current : !!onPreviousRef.current;
+      gesture = { kind: "page", startX: start.x, direction, hasTarget };
+      setSettling(false);
+    }
 
     function onTouchStart(e: TouchEvent) {
       if (e.touches.length === 2) {
-        pinchStartDist = touchDistance(e.touches[0], e.touches[1]);
-        pinchStartScale = scaleRef.current;
-        touchStartX = null;
-        panStart = null;
+        beginPinch(e.touches[0], e.touches[1]);
       } else if (e.touches.length === 1) {
         const t = e.touches[0];
-        touchStartX = t.clientX;
-        panStart = { x: t.clientX, y: t.clientY, tx: translateRef.current.x, ty: translateRef.current.y };
-        touchDidDrag = false;
+        gesture = {
+          kind: "pending",
+          start: { x: t.clientX, y: t.clientY },
+          startTranslate: { ...translateRef.current },
+        };
         suppressClickRef.current = false;
       }
     }
 
     function onTouchMove(e: TouchEvent) {
-      if (e.touches.length === 2 && pinchStartDist !== null) {
-        e.preventDefault();
-        if (!zoomAllowedRef.current) return;
-        const dist = touchDistance(e.touches[0], e.touches[1]);
-        const next = clampScale(pinchStartScale * (dist / pinchStartDist));
-        setScale(next);
-        suppressClickRef.current = true;
-        setTranslate((t) => clampTranslate(t.x, t.y, next));
+      // 背面のスクロール・ブラウザ標準ジェスチャを止める。
+      e.preventDefault();
+
+      if (gesture.kind === "pinch") {
+        if (e.touches.length < 2 || !zoomAllowedRef.current) return;
+        const g = gesture;
+        const nextScale = clampScale(
+          g.startScale * (touchDistance(e.touches[0], e.touches[1]) / g.startDist),
+        );
+        const mid = touchMidpoint(e.touches[0], e.touches[1]);
+        // 開始時に中点の下にあった画像上の点（imageWrap中心基準・等倍の座標）。
+        const px = (g.startMid.x - g.layoutCenter.x - g.startTranslate.x) / g.startScale;
+        const py = (g.startMid.y - g.layoutCenter.y - g.startTranslate.y) / g.startScale;
+        setScale(nextScale);
+        setTranslate(
+          clampTranslate(
+            mid.x - g.layoutCenter.x - nextScale * px,
+            mid.y - g.layoutCenter.y - nextScale * py,
+            nextScale,
+          ),
+        );
         return;
       }
-      if (e.touches.length === 1 && panStart) {
-        const t = e.touches[0];
-        const dx = t.clientX - panStart.x;
-        const dy = t.clientY - panStart.y;
-        if (!touchDidDrag && (Math.abs(dx) > DRAG_THRESHOLD_PX || Math.abs(dy) > DRAG_THRESHOLD_PX)) {
-          touchDidDrag = true;
-        }
-        if (scaleRef.current > 1) {
-          e.preventDefault();
-          suppressClickRef.current = true;
-          setTranslate(clampTranslate(panStart.tx + dx, panStart.ty + dy, scaleRef.current));
-        }
+
+      if (e.touches.length !== 1) return;
+      const t = e.touches[0];
+
+      if (gesture.kind === "pending") {
+        const dx = t.clientX - gesture.start.x;
+        const dy = t.clientY - gesture.start.y;
+        if (Math.abs(dx) <= DRAG_THRESHOLD_PX && Math.abs(dy) <= DRAG_THRESHOLD_PX) return;
+        suppressClickRef.current = true;
+        decideSingleTouchMode(dx, dy, gesture.start, gesture.startTranslate);
+      }
+
+      if (gesture.kind === "pan") {
+        const dx = t.clientX - gesture.start.x;
+        const dy = t.clientY - gesture.start.y;
+        setTranslate(
+          clampTranslate(gesture.startTranslate.x + dx, gesture.startTranslate.y + dy, scaleRef.current),
+        );
+      } else if (gesture.kind === "page") {
+        const dx = t.clientX - gesture.startX;
+        // スワイプを始めた向きと逆へは動かさない。
+        const raw = gesture.direction === "next" ? Math.min(0, dx) : Math.max(0, dx);
+        setSwipeOffset(gesture.hasTarget ? raw : raw * SWIPE_RUBBER_BAND);
+      }
+    }
+
+    /** ページングのスワイプを終える。閾値を超えていれば画像を切り替え、そうでなければ元の位置へ戻す。 */
+    function finishPage(commit: boolean) {
+      if (gesture.kind !== "page") return;
+      const offset = swipeOffsetRef.current;
+      if (commit && gesture.hasTarget && Math.abs(offset) > SWIPE_THRESHOLD_PX) {
+        setSwipeOffset(0);
+        if (gesture.direction === "next") onNextRef.current?.();
+        else onPreviousRef.current?.();
+      } else if (offset !== 0) {
+        setSettling(true);
+        setSwipeOffset(0);
       }
     }
 
     function onTouchEnd(e: TouchEvent) {
-      if (e.touches.length < 2) {
-        pinchStartDist = null;
+      if (e.touches.length === 1) {
+        // ピンチから指1本が残ったら、残った指でのスクロールとして続ける（ページングはしない）。
+        const t = e.touches[0];
+        finishPage(false);
+        gesture = {
+          kind: "pan",
+          start: { x: t.clientX, y: t.clientY },
+          startTranslate: { ...translateRef.current },
+        };
+        return;
       }
       if (e.touches.length === 0) {
-        if (scaleRef.current === 1 && !touchDidDrag && touchStartX !== null) {
-          const endX = e.changedTouches[0]?.clientX;
-          if (endX !== undefined) {
-            const delta = endX - touchStartX;
-            if (delta > SWIPE_THRESHOLD_PX) onPrevious?.();
-            if (delta < -SWIPE_THRESHOLD_PX) onNext?.();
-          }
-        }
-        touchStartX = null;
-        panStart = null;
-        touchDidDrag = false;
+        finishPage(true);
+        gesture = { kind: "idle" };
       }
+    }
+
+    function onTouchCancel() {
+      finishPage(false);
+      gesture = { kind: "idle" };
     }
 
     overlay.addEventListener("wheel", onWheel, { passive: false });
@@ -268,6 +416,7 @@ export default function ImageLightbox({
     overlay.addEventListener("touchstart", onTouchStart, { passive: true });
     overlay.addEventListener("touchmove", onTouchMove, { passive: false });
     overlay.addEventListener("touchend", onTouchEnd, { passive: true });
+    overlay.addEventListener("touchcancel", onTouchCancel, { passive: true });
 
     return () => {
       overlay.removeEventListener("wheel", onWheel);
@@ -277,8 +426,9 @@ export default function ImageLightbox({
       overlay.removeEventListener("touchstart", onTouchStart);
       overlay.removeEventListener("touchmove", onTouchMove);
       overlay.removeEventListener("touchend", onTouchEnd);
+      overlay.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, [src, onPrevious, onNext]);
+  }, [src]);
 
   if (!src) return null;
 
@@ -291,14 +441,29 @@ export default function ImageLightbox({
     requestClose();
   }
 
+  // ライトボックスはノートの中（Reactツリー上はタイムラインの子孫）に描画されるため、
+  // React合成イベントのタッチがホームのタブ切り替えスワイプ（`useSwipe`）まで伝播する。ここで止める。
+  function stopTouch(e: ReactTouchEvent) {
+    e.stopPropagation();
+  }
+
   const zoomed = scale > 1;
+  const offsetX = translate.x + swipeOffset;
   const wrapStyle =
-    scale !== 1 || translate.x !== 0 || translate.y !== 0
-      ? { transform: `translate(${translate.x}px, ${translate.y}px) scale(${scale})` }
+    scale !== 1 || offsetX !== 0 || translate.y !== 0
+      ? { transform: `translate(${offsetX}px, ${translate.y}px) scale(${scale})` }
       : undefined;
 
   return (
-    <div className={styles.overlay} onClick={handleClick} ref={overlayRef}>
+    <div
+      className={styles.overlay}
+      onClick={handleClick}
+      onTouchStart={stopTouch}
+      onTouchMove={stopTouch}
+      onTouchEnd={stopTouch}
+      onTouchCancel={stopTouch}
+      ref={overlayRef}
+    >
       <button className={styles.close} onClick={(e) => { e.stopPropagation(); requestClose(); }} aria-label={t("common:close")}>
         ×
       </button>
@@ -315,8 +480,9 @@ export default function ImageLightbox({
         </button>
       )}
       <div
-        className={`${styles.imageWrap} ${zoomed ? styles.zoomed : ""} ${dragging ? styles.dragging : ""}`}
+        className={`${styles.imageWrap} ${zoomed ? styles.zoomed : ""} ${dragging ? styles.dragging : ""} ${settling ? styles.settling : ""}`}
         onClick={handleClick}
+        onTransitionEnd={() => setSettling(false)}
         style={wrapStyle}
         ref={imageWrapRef}
       >

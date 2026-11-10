@@ -30,6 +30,11 @@
   cursor: grabbing;
 }
 
+/* ページングのスワイプを離した後、画像がバネのように元の位置へ戻る。 */
+.settling {
+  transition: transform 0.22s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+}
+
 .zoomed .image {
   cursor: grab;
 }
