@@ -44,6 +44,7 @@
     "repostTitle": "Republier",
     "unrepostTitle": "Annuler la republication",
     "repostDisabledTitle": "Les messages privés ne peuvent pas être republiés",
+    "repostCooldownTitle": "Vous ne pouvez pas republier aussi vite. Patientez un instant",
     "quoteDisabledTitle": "Les messages privés ne peuvent pas être cités",
     "replyGateDisabledTitle": "L'auteur n'autorise pas les réponses",
     "quoteGateDisabledTitle": "L'auteur n'autorise pas les citations",

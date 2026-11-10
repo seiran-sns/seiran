@@ -44,6 +44,7 @@
     "repostTitle": "Reposten",
     "unrepostTitle": "Repost rückgängig machen",
     "repostDisabledTitle": "Private Beiträge können nicht erneut gepostet werden",
+    "repostCooldownTitle": "Du kannst das nicht so schnell erneut reposten. Bitte warte einen Moment",
     "quoteDisabledTitle": "Private Beiträge können nicht zitiert werden",
     "replyGateDisabledTitle": "Der Autor erlaubt keine Antworten",
     "quoteGateDisabledTitle": "Der Autor erlaubt keine Zitate",

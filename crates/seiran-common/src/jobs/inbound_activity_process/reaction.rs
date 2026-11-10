@@ -98,19 +98,10 @@ pub(super) async fn handle_reaction(
 
     tracing::info!("[Reaction] post {} に {} を記録", post_id, db_content);
 
-    // 通知ベル用（#37）: リアクションされたポストの著者へ
-    inbox.stream_hub.publish_event(
-        HashSet::from([post_author_id]),
-        "reaction",
-        serde_json::json!({
-            "postId": post_id.to_string(),
-            "emoji": db_content,
-            "emojiUrl": emoji_url,
-            "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
-        }),
-    );
+    // 通知ベル用（#37）: リアクションされたポストの著者へ。連打抑制・重複で通知を
+    // 作らなかったときはストリーミングにも流さない。
     let notif_id = generate_snowflake_id(chrono::Utc::now());
-    if let Err(e) = inbox
+    match inbox
         .notification_repo
         .insert(&NewNotification {
             notifier_actor_id: Some(actor_id),
@@ -122,7 +113,18 @@ pub(super) async fn handle_reaction(
         })
         .await
     {
-        tracing::error!("[Reaction] notifications INSERT 失敗: {}", e);
+        Ok(true) => inbox.stream_hub.publish_event(
+            HashSet::from([post_author_id]),
+            "reaction",
+            serde_json::json!({
+                "postId": post_id.to_string(),
+                "emoji": db_content,
+                "emojiUrl": emoji_url,
+                "actor": { "username": remote.username, "domain": remote.domain, "displayName": remote.display_name },
+            }),
+        ),
+        Ok(false) => {}
+        Err(e) => tracing::error!("[Reaction] notifications INSERT 失敗: {}", e),
     }
 
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の

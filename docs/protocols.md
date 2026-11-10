@@ -742,6 +742,17 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 `source_uri` の UNIQUE は他人発のイベントの複線受信対策で、`reaction_id` は自分発の操作が戻ってくることへの対策。他人のリアクションは `reaction_id` が NULL なので、同じ投稿への絵文字の連投は妨げない。
 
+### リポスト・リアクション通知の連打抑制
+取り消しと付け直しを繰り返す連打（Fedi の Announce/Undo・Like/Undo、Bsky の repost/like レコードの作成・削除）で通知欄が埋まらないよう、`NotificationRepository::insert` は同じ宛先・同じ通知元の同じ働きかけの通知が5分以内にあれば作らない。
+
+- **リポスト**: 同じ元ポスト（`notifications.repost_of_post_id`）。ラッパーごとに別の行になり、前のラッパーが残っていても（Misskey は同じノートを何度もリノートできる）同じ元ポストなら止める。元ポストが未解決の Announce は元ポストが分からないので通知自体を作らない（従来どおり）。
+- **リアクション**: 同じポスト・同じ内容（`note_id`+`reaction`）。違う絵文字は止めない（絵文字を続けて付けて文にする使い方があるため）。Bsky の Like は内容が同じなので、like/unlike の繰り返しは止まる。
+- 判定と INSERT は1文で行い、宛先と通知元の組のアドバイザリロック（`pg_advisory_xact_lock`）で並行受信を直列化する（federation-worker の並列処理や firehose で同じ相手の通知が同時に届くと、両方が判定をすり抜けるため）。
+- `insert` は通知を実際に作ったかを返し、各経路（ローカル・AP 受信・firehose）はそのときだけストリーミングの `repost`/`reaction` イベントを流す（抑制した連打がトーストとして届かないように）。リアクション表示の `noteUpdated` は通知と無関係に流す。
+- ローカルユーザー発の連打は送信元でも10秒のクールダウンで止める（`docs/architecture.md` 4節「リポスト・リアクションの連打対策」）。
+
+リポスト通知の表示（`i/notifications`）は、ラッパーが取り消し済み（論理削除）か物理削除済みなら独自拡張 `repostWithdrawn: true` を付ける。`note` は取り消し済みのラッパー、ラッパーが物理削除されて残っていなければ `repost_of_post_id` の元ポストそのもの（閲覧可能な場合）にする。Mastodon 互換 API の `reblog` 通知も、ラッパーが見えなければ元ポストを `status` にする。
+
 ### メンション通知
 本文でローカルユーザーが言及されたら `type="mention"`（`note_id` = 言及元）を作る。配送設定と無関係に、出自ごとに次で解決する。自己メンションは通知しない。リプライ先の投稿者へのメンションはリプライ通知と重複するので作らない（他の宛先へのメンションは通知する）。
 

@@ -78,6 +78,7 @@ use seiran_common::{
 };
 
 use crate::error::ApiError;
+use crate::interaction_cooldown::{cooldown_error, CooldownKey};
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 

@@ -253,6 +253,11 @@ pub struct MisskeyNotification {
     /// 上記と同じく独自拡張専用。移転先アクターの詳細。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub related_user: Option<MisskeyUserLite>,
+    /// `type == "renote"` でリポストが取り消し済み・削除済みの場合のみ true（seiran独自拡張）。
+    /// `note` は取り消し済みのラッパー（残っていなければリポスト元の投稿そのもの）になるので、
+    /// クライアントはラッパーの投稿ページではなくリポスト元へ遷移させる。
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub repost_withdrawn: bool,
 }
 
 /// `POST /api/users/following`（フォロー中一覧）の要素。Misskey 本家の `Following` エンティティ

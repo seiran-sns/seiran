@@ -879,6 +879,9 @@ export interface NotificationItem {
   /** `type === "moveRefollowed" | "moveAlreadyFollowing"` の場合のみ。引っ越し先アクター。 */
   relatedUserId?: string;
   relatedUser?: NotificationUser;
+  /** `type === "renote"` でリポストが取り消し・削除済みの場合のみ true（seiran独自拡張）。
+   * `note` は取り消し済みのラッパー（残っていなければリポスト元そのもの）。 */
+  repostWithdrawn?: boolean;
   /**
    * `type === "reaction"` の場合は `reactionEmojis` にカスタム絵文字の画像URLが
    * 入っている場合のみ画像表示する（Unicode絵文字は入らない）。キーは Misskey

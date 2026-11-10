@@ -50,6 +50,8 @@ interface NoteCardActionsProps {
   reposted: boolean;
   reposting: boolean;
   unreposting: boolean;
+  /** 同じポストの再リポストを止めている間（`lib/interactionCooldown.ts`）。取り消しは止めない。 */
+  repostCoolingDown?: boolean;
   isPrivateRepostTarget: boolean;
   onRepost: (e?: React.MouseEvent) => void;
   isSelf: boolean;
@@ -87,6 +89,7 @@ export default function NoteCardActions({
   reposted,
   reposting,
   unreposting,
+  repostCoolingDown = false,
   isPrivateRepostTarget,
   onRepost,
   isSelf,
@@ -162,7 +165,9 @@ export default function NoteCardActions({
       label: `🔁 ${reposted ? t("home:noteCard.unrepostTitle") : t("home:noteCard.repostTitle")}`,
       onClick: () => onRepost(),
       disabled:
-        reposting || unreposting || (isPrivateRepostTarget && !reposted),
+        reposting ||
+        unreposting ||
+        ((isPrivateRepostTarget || repostCoolingDown) && !reposted),
     },
     {
       key: "reaction",
@@ -254,14 +259,18 @@ export default function NoteCardActions({
           className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
           onClick={onRepost}
           disabled={
-            reposting || unreposting || (isPrivateRepostTarget && !reposted)
+            reposting ||
+            unreposting ||
+            ((isPrivateRepostTarget || repostCoolingDown) && !reposted)
           }
           title={
             isPrivateRepostTarget
               ? t("home:noteCard.repostDisabledTitle")
               : reposted
                 ? t("home:noteCard.unrepostTitle")
-                : t("home:noteCard.repostTitle")
+                : repostCoolingDown
+                  ? t("home:noteCard.repostCooldownTitle")
+                  : t("home:noteCard.repostTitle")
           }
         >
           <TwemojiEmoji emoji="🔁" />{" "}

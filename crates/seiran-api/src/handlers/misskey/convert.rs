@@ -770,10 +770,17 @@ pub async fn build_notifications(
 
     // note_id は重複がありうる（同じ投稿への複数リアクション等）ため、一意な ID ごとに1回だけ、
     // 全件まとめて取得・変換する。リポストが取り消し済み（ラッパー投稿が論理削除済み）
-    // でもその通知自体は残り続けるため、ラッパーは削除済みも含めて取得する。
+    // でもその通知自体は残り続けるため、ラッパーは削除済みも含めて取得する。ラッパーが
+    // 物理削除されて残っていない場合に備え、取り消し済みリポストの元ポストも取得しておく
+    // （ラッパーの代わりに `note` にする）。
     let (wrapper_ids, regular_ids): (Vec<i64>, Vec<i64>) = rows
         .iter()
         .filter_map(|r| r.note_id)
+        .chain(
+            rows.iter()
+                .filter(|r| r.repost_withdrawn)
+                .filter_map(|r| r.repost_of_post_id),
+        )
         .collect::<HashSet<_>>()
         .into_iter()
         .partition(|id| repost_wrapper_ids.contains(id));
@@ -795,7 +802,15 @@ pub async fn build_notifications(
 
     rows.into_iter()
         .map(|r| {
-            let mut note = r.note_id.and_then(|id| notes.get(&id).cloned());
+            let mut note = r
+                .note_id
+                .and_then(|id| notes.get(&id))
+                .or_else(|| {
+                    r.repost_of_post_id
+                        .filter(|_| r.repost_withdrawn)
+                        .and_then(|id| notes.get(&id))
+                })
+                .cloned();
             // ノート単位で共有キャッシュした `reactionEmojis` は投稿の「現在の」リアクション
             // 集計にすぎない。`reactions` は1人1投稿1リアクションのため、通知発生後に
             // 同じアクターが別の絵文字へ切り替えると過去の行は上書きされて消え、共有キャッシュ
@@ -828,6 +843,7 @@ pub async fn build_notifications(
                 related_user: r
                     .related_actor_id
                     .and_then(|id| notifier_users.get(&id).cloned()),
+                repost_withdrawn: r.repost_withdrawn,
             }
         })
         .collect()

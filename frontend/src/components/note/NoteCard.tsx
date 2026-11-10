@@ -205,6 +205,7 @@ function PostContent({
     reposted,
     reposting,
     unreposting,
+    repostCoolingDown,
     handleRepost,
     pinned,
     pinning,
@@ -728,6 +729,7 @@ function PostContent({
         reposted={reposted}
         reposting={reposting}
         unreposting={unreposting}
+        repostCoolingDown={repostCoolingDown}
         isPrivateRepostTarget={isPrivateRepostTarget}
         onRepost={handleRepost}
         isSelf={isSelf}

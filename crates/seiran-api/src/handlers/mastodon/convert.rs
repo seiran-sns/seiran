@@ -968,7 +968,12 @@ pub async fn build_notifications(
         .collect();
     actor_ids.sort_unstable();
     actor_ids.dedup();
-    let mut post_ids: Vec<i64> = rows.iter().filter_map(|(r, _)| r.note_id).collect();
+    // 取り消し済みリポストのラッパーは見えないので、元ポストも取得しておく（下の `reblog` 参照）。
+    let mut post_ids: Vec<i64> = rows
+        .iter()
+        .flat_map(|(r, _)| [r.note_id, r.repost_of_post_id])
+        .flatten()
+        .collect();
     post_ids.sort_unstable();
     post_ids.dedup();
 
@@ -990,9 +995,14 @@ pub async fn build_notifications(
             let account = accounts.get(&r.notifier_actor_id?)?.clone();
             let status = r.note_id.and_then(|id| statuses.get(&id)).cloned();
             // 「リポストされた」通知の `status` は Mastodon ではリポストされた自分の投稿。
-            // seiran の通知はリポストのラッパー投稿を指すので、その中身を取り出す。
+            // seiran の通知はリポストのラッパー投稿を指すので、その中身を取り出す。ラッパーが
+            // 取り消し・削除されていれば元ポストを直接使う。
             let status = if kind == "reblog" {
-                status.and_then(|s| s.reblog.map(|b| *b))
+                status.and_then(|s| s.reblog.map(|b| *b)).or_else(|| {
+                    r.repost_of_post_id
+                        .and_then(|id| statuses.get(&id))
+                        .cloned()
+                })
             } else {
                 status
             };

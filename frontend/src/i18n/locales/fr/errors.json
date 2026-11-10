@@ -93,5 +93,7 @@
   "USER_NOT_FOUND": "Utilisateur introuvable",
   "DISPLAY_NAME_TOO_LONG": "Le nom d'affichage est trop long (64 caractères max.)",
   "BIO_TOO_LONG": "La bio est trop longue (256 caractères max.)",
-  "INTERACTION_RESTRICTED": "Votre compte est restreint : vous ne pouvez répondre, citer, mentionner ou réagir qu'à vos abonnés."
+  "INTERACTION_RESTRICTED": "Votre compte est restreint : vous ne pouvez répondre, citer, mentionner ou réagir qu'à vos abonnés.",
+  "REPOST_COOLDOWN": "Vous ne pouvez pas republier la même publication aussi vite. Patientez un instant puis réessayez",
+  "REACTION_COOLDOWN": "Vous ne pouvez pas ajouter la même réaction aussi vite. Patientez un instant puis réessayez"
 }

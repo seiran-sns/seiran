@@ -93,5 +93,7 @@
   "USER_NOT_FOUND": "找不到該使用者",
   "DISPLAY_NAME_TOO_LONG": "顯示名稱過長（最多 64 個字元）",
   "BIO_TOO_LONG": "簡介過長（最多 256 個字元）",
-  "INTERACTION_RESTRICTED": "您的帳號受到限制，只能回覆、引用、提及或回應您的追蹤者。"
+  "INTERACTION_RESTRICTED": "您的帳號受到限制，只能回覆、引用、提及或回應您的追蹤者。",
+  "REPOST_COOLDOWN": "不能連續轉發同一則貼文。請稍候再試",
+  "REACTION_COOLDOWN": "不能連續新增同一個回應。請稍候再試"
 }

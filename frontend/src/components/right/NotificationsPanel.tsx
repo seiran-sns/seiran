@@ -52,9 +52,12 @@ export function resolveTargetNoteId(n: NotificationItem): string | undefined {
 /** 通知クリック時の遷移先とすべきポストID。
  * ダイジェスト表示・ホバープレビュー（`resolveTargetNoteId`）は "renote" 通知でも
  * リポスト元の実体投稿を優先するが、クリック遷移はリポストラッパー投稿自身
- * （`note.id`）へ飛ばす（リポストという行為そのものの投稿ページを開くため）。 */
+ * （`note.id`）へ飛ばす（リポストという行為そのものの投稿ページを開くため）。
+ * リポストが取り消し・削除済み（`repostWithdrawn`）ならラッパーのページは開けないので
+ * リポスト元へ飛ばす。 */
 export function resolveClickTargetNoteId(n: NotificationItem): string | undefined {
   if (!NOTE_LINKED_TYPES.has(n.type)) return undefined;
+  if (n.type === "renote" && n.repostWithdrawn) return resolveTargetNoteId(n);
   return n.note?.id;
 }
 

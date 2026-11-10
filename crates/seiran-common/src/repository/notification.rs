@@ -6,6 +6,12 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
+/// 同じ相手からの同じ働きかけ（同じ元ポストのリポスト・同じポストへの同じリアクション）の
+/// 通知を、前回の通知からこの時間が経つまで作らない。取り消しと付け直しを繰り返す連打で
+/// 通知欄が埋まるのを防ぐ。リモート（Fedi/Bsky）発の連打は送信側のクールダウン
+/// （seiran-api の `interaction_cooldown`）が効かないため、受信側でも抑える。
+pub const NOTIFICATION_REPEAT_SUPPRESS: chrono::Duration = chrono::Duration::minutes(5);
+
 /// 通知の種別。Misskey 本家の `type` 値に合わせる
 /// （`follow` / `reaction` / `followRequestAccepted` / `mention` / `reply` /
 /// `repost` / `quote`）。`MoveRefollowed`/`MoveAlreadyFollowing` は Misskey API に無い
@@ -64,6 +70,12 @@ pub struct NotificationRow {
     pub reaction_emoji_url: Option<String>,
     /// `MoveRefollowed`/`MoveAlreadyFollowing` の移転先アクター（他の種別では常にNULL）。
     pub related_actor_id: Option<i64>,
+    /// リポスト通知の元ポスト（`note_id` はラッパー投稿）。列追加前の通知でラッパーが
+    /// 残っていなかったものは NULL。
+    pub repost_of_post_id: Option<i64>,
+    /// リポスト通知のラッパー投稿が取り消し済み（論理削除）または物理削除済みか。
+    /// リポスト以外の種別では常に false。
+    pub repost_withdrawn: bool,
     pub is_read: bool,
     pub created_at: DateTime<Utc>,
 }
@@ -85,6 +97,8 @@ pub struct NewNotification<'a> {
     pub reaction_id: Option<i64>,
     /// `MoveRefollowed`/`MoveAlreadyFollowing`（引っ越し先アクター）専用の2つ目のアクター参照。
     pub related_actor_id: Option<i64>,
+    /// `Repost` 専用。リポストされた元ポスト（`note_id` にはラッパー投稿を渡す）。
+    pub repost_of_post_id: Option<i64>,
 }
 
 impl NewNotification<'_> {
@@ -100,6 +114,7 @@ impl NewNotification<'_> {
             source_uri: None,
             reaction_id: None,
             related_actor_id: None,
+            repost_of_post_id: None,
         }
     }
 }
@@ -124,7 +139,13 @@ pub trait NotificationRepository: Send + Sync {
     /// リアクション（自分がATPへコミットしていないもの）は`None`のままでよい。
     /// `related_actor_id` は `MoveRefollowed`/`MoveAlreadyFollowing`（引っ越し先アクター）
     /// 専用の2つ目のアクター参照。他の種別では `None` のままでよい。
-    async fn insert(&self, n: &NewNotification<'_>) -> Result<(), sqlx::Error>;
+    /// `Repost`・`Reaction` は、同じ宛先・同じ通知元の同じ働きかけ（リポストは
+    /// `repost_of_post_id`、リアクションは `note_id`+`reaction` が一致）の通知が
+    /// `NOTIFICATION_REPEAT_SUPPRESS` 以内にあれば作らない。
+    /// 戻り値は実際に通知を作ったか（ブロック・ミュート・重複・連打抑制で作らなかったら
+    /// false）。ストリーミングへの通知イベントは true のときだけ流すこと（流すと抑制した
+    /// 連打がトーストとして届いてしまう）。
+    async fn insert(&self, n: &NewNotification<'_>) -> Result<bool, sqlx::Error>;
 
     /// 自分宛ての通知を新しい順に取得する（カーソルページネーション、`posts` の
     /// タイムライン系クエリと同じ `until_id`/`since_id` 規約）。
@@ -141,6 +162,72 @@ pub trait NotificationRepository: Send + Sync {
     async fn mark_all_read(&self, recipient_actor_id: i64) -> Result<(), sqlx::Error>;
 }
 
+/// 連打抑制の対象なら、抑制期間の始まり（これより大きい id の通知を「直近」とみなす）を返す。
+/// 通知元の無いシステム通知や、元ポストが分からないリポスト（未解決の Announce）は対象外。
+fn repeat_suppress_since(n: &NewNotification<'_>) -> Option<i64> {
+    let has_key = match n.kind {
+        NotificationKind::Repost => n.repost_of_post_id.is_some(),
+        NotificationKind::Reaction => n.note_id.is_some() && n.reaction.is_some(),
+        _ => false,
+    };
+    if n.notifier_actor_id.is_none() || !has_key {
+        return None;
+    }
+    let at = crate::id::snowflake_id_time(n.id) - NOTIFICATION_REPEAT_SUPPRESS;
+    Some(crate::id::snowflake_id_floor(at))
+}
+
+/// 通知1件の INSERT。`suppress_since` があれば、それより後の同じ働きかけの通知が既に
+/// あるとき作らない（`NotificationRepository::insert` 参照）。
+async fn insert_notification<'e, E>(
+    executor: E,
+    n: &NewNotification<'_>,
+    suppress_since: Option<i64>,
+) -> Result<bool, sqlx::Error>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Postgres>,
+{
+    // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
+    // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
+    // Reaction・firehose・bsky_follower_poll）はこの1箇所の変更だけで自動的に対象になる。
+    // ON CONFLICT はターゲット未指定（DO NOTHING）にして、source_uri・reaction_id
+    // どちらの部分ユニークインデックス違反でも無視する（1つのINSERTで両方に対応するため）。
+    // 連打抑制の照合は宛先の通知を id（Snowflake）の範囲で絞るので
+    // idx_notifications_recipient の範囲走査で済む。
+    let result = sqlx::query(
+        "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri, reaction_id, related_actor_id, repost_of_post_id)
+         SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11
+         WHERE ($4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4))
+           AND ($12::bigint IS NULL OR NOT EXISTS (
+               SELECT 1 FROM notifications d
+               WHERE d.recipient_actor_id = $2
+                 AND d.id > $12
+                 AND d.type = $3
+                 AND d.notifier_actor_id = $4
+                 AND CASE $3
+                         WHEN 'repost' THEN d.repost_of_post_id = $11
+                         ELSE d.note_id = $5 AND d.reaction = $6
+                     END
+           ))
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(n.id)
+    .bind(n.recipient_actor_id)
+    .bind(n.kind.as_str())
+    .bind(n.notifier_actor_id)
+    .bind(n.note_id)
+    .bind(n.reaction)
+    .bind(n.reaction_emoji_url)
+    .bind(n.source_uri)
+    .bind(n.reaction_id)
+    .bind(n.related_actor_id)
+    .bind(n.repost_of_post_id)
+    .bind(suppress_since)
+    .execute(executor)
+    .await?;
+    Ok(result.rows_affected() == 1)
+}
+
 pub struct PgNotificationRepository {
     pool: PgPool,
 }
@@ -153,31 +240,22 @@ impl PgNotificationRepository {
 
 #[async_trait]
 impl NotificationRepository for PgNotificationRepository {
-    async fn insert(&self, n: &NewNotification<'_>) -> Result<(), sqlx::Error> {
-        // ブロック・ミュート関係にある相手からの通知は生成しない（$4=notifier_actor_idが
-        // NULL のシステム通知は素通り）。呼び出し元（リアクション作成・inbound Follow/Accept/
-        // Reaction・firehose・bsky_follower_poll）はこの1箇所の変更だけで自動的に対象になる。
-        // ON CONFLICT はターゲット未指定（DO NOTHING）にして、source_uri・reaction_id
-        // どちらの部分ユニークインデックス違反でも無視する（1つのINSERTで両方に対応するため）。
-        sqlx::query(
-            "INSERT INTO notifications (id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, source_uri, reaction_id, related_actor_id)
-             SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
-             WHERE $4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, $4)
-             ON CONFLICT DO NOTHING",
-        )
-        .bind(n.id)
-        .bind(n.recipient_actor_id)
-        .bind(n.kind.as_str())
-        .bind(n.notifier_actor_id)
-        .bind(n.note_id)
-        .bind(n.reaction)
-        .bind(n.reaction_emoji_url)
-        .bind(n.source_uri)
-        .bind(n.reaction_id)
-        .bind(n.related_actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+    async fn insert(&self, n: &NewNotification<'_>) -> Result<bool, sqlx::Error> {
+        let Some(since_id) = repeat_suppress_since(n) else {
+            return insert_notification(&self.pool, n, None).await;
+        };
+        // 「直近に同じ通知があるか」の判定と INSERT は1文だが、同じ相手からの通知が並行して
+        // 届くと（federation-worker の並列処理・firehose）両方が判定をすり抜ける。宛先と
+        // 通知元の組でアドバイザリロックを取って直列化する。
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1, $2))")
+            .bind(format!("notification_repeat:{}", n.recipient_actor_id))
+            .bind(n.notifier_actor_id)
+            .execute(&mut *tx)
+            .await?;
+        let inserted = insert_notification(&mut *tx, n, Some(since_id)).await?;
+        tx.commit().await?;
+        Ok(inserted)
     }
 
     async fn list(
@@ -189,8 +267,12 @@ impl NotificationRepository for PgNotificationRepository {
         filter: &NotificationFilter,
     ) -> Result<Vec<NotificationRow>, sqlx::Error> {
         sqlx::query_as::<_, NotificationRow>(
-            "SELECT id, recipient_actor_id, type, notifier_actor_id, note_id, reaction, reaction_emoji_url, related_actor_id, is_read, created_at
-             FROM notifications
+            "SELECT n.id, n.recipient_actor_id, n.type, n.notifier_actor_id, n.note_id, n.reaction, n.reaction_emoji_url, n.related_actor_id, n.repost_of_post_id,
+                    (n.type = 'repost' AND NOT EXISTS (
+                        SELECT 1 FROM posts w WHERE w.id = n.note_id AND w.deleted_at IS NULL
+                    )) AS repost_withdrawn,
+                    n.is_read, n.created_at
+             FROM notifications n
              WHERE recipient_actor_id = $1
                AND id < COALESCE($2::bigint, 9223372036854775807)
                AND id > COALESCE($3::bigint, 0)
