@@ -233,16 +233,6 @@ async fn notify_reaction(
     if post.actor_id == me.actor_id {
         return;
     }
-    state.stream_hub.publish_event(
-        std::collections::HashSet::from([post.actor_id]),
-        "reaction",
-        serde_json::json!({
-            "postId": post.id.to_string(),
-            "emoji": content,
-            "emojiUrl": emoji_url,
-            "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
-        }),
-    );
     let notification = NewNotification {
         notifier_actor_id: Some(me.actor_id),
         note_id: Some(post.id),
@@ -255,8 +245,20 @@ async fn notify_reaction(
             NotificationKind::Reaction,
         )
     };
-    if let Err(e) = state.notifications.insert(&notification).await {
-        tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e);
+    // 連打抑制で通知を作らなかったときはストリーミングにも流さない。
+    match state.notifications.insert(&notification).await {
+        Ok(true) => state.stream_hub.publish_event(
+            std::collections::HashSet::from([post.actor_id]),
+            "reaction",
+            serde_json::json!({
+                "postId": post.id.to_string(),
+                "emoji": content,
+                "emojiUrl": emoji_url,
+                "actor": { "username": me.username, "domain": me.domain, "displayName": me.display_name },
+            }),
+        ),
+        Ok(false) => {}
+        Err(e) => tracing::error!("[create_reaction] notifications INSERT 失敗: {}", e),
     }
 }
 
@@ -363,6 +365,15 @@ async fn create_reaction_inner(
     let restriction = crate::role_restriction::restriction_of(state, me.actor_id).await;
     crate::role_restriction::require_can_interact(state, me.actor_id, restriction, [post.actor_id])
         .await?;
+    // 連打防止（`interaction_cooldown`）。同じポストでも絵文字が違えば止めない。
+    state
+        .interaction_cooldown
+        .try_start(CooldownKey::Reaction {
+            actor_id: me.actor_id,
+            post_id: note_id,
+            content: content.clone(),
+        })
+        .map_err(|remaining| cooldown_error("REACTION_COOLDOWN", remaining))?;
 
     // AP へ配送する Like/EmojiReact 自身の activity id を発行し、Undo で参照できるよう保存する。
     let activity_id = format!(

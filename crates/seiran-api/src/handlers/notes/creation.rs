@@ -88,6 +88,15 @@ async fn create_repost(
     // 配送先識別子をそちらへ差し替える（`LocalOrSeiran`なら差し替えない）。
     let meta = with_bridge_delivery_targets(state, meta, origin).await;
 
+    // 連打防止（`interaction_cooldown`）。検証をすべて通った後で数える（弾かれた操作で
+    // クールダウンが始まらないように）。
+    if let Err(remaining) = state.interaction_cooldown.try_start(CooldownKey::Repost {
+        actor_id,
+        post_id: renote_id,
+    }) {
+        return cooldown_error("REPOST_COOLDOWN", remaining).into_response();
+    }
+
     let post_id = generate_snowflake_id(now);
     // リポスト行の ap_object_id は、deliver_repost が実際に配送するActivity種別に合わせて
     // 決定する。元ポストに ap_object_id がある（Fedi 側にも実体がある）場合のみ実際に
@@ -141,26 +150,29 @@ async fn create_repost(
     .await;
 
     // リポスト通知: ローカルユーザーの投稿が他ユーザーにリポストされた場合に作る。
+    // 連打抑制で通知を作らなかったときはストリーミングにも流さない（`NotificationRepository::insert`）。
     if meta.actor_type == "local" && meta.actor_id != actor_id {
-        state.stream_hub.publish_event(
-            std::collections::HashSet::from([meta.actor_id]),
-            "repost",
-            serde_json::json!({
-                "postId": post_id.to_string(),
-                "actor": { "username": username, "domain": serde_json::Value::Null }
-            }),
-        );
         let notif_id = generate_snowflake_id(chrono::Utc::now());
-        if let Err(e) = state
+        match state
             .notifications
             .insert(&NewNotification {
                 notifier_actor_id: Some(actor_id),
                 note_id: Some(post_id),
+                repost_of_post_id: Some(renote_id),
                 ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
             })
             .await
         {
-            tracing::error!("[create_repost] notifications INSERT 失敗: {}", e);
+            Ok(true) => state.stream_hub.publish_event(
+                std::collections::HashSet::from([meta.actor_id]),
+                "repost",
+                serde_json::json!({
+                    "postId": post_id.to_string(),
+                    "actor": { "username": username, "domain": serde_json::Value::Null }
+                }),
+            ),
+            Ok(false) => {}
+            Err(e) => tracing::error!("[create_repost] notifications INSERT 失敗: {}", e),
         }
     }
 

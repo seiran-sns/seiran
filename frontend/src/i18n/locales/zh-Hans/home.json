@@ -44,6 +44,7 @@
     "repostTitle": "转发",
     "unrepostTitle": "取消转发",
     "repostDisabledTitle": "私密帖子无法转发",
+    "repostCooldownTitle": "不能连续转发。请稍候",
     "quoteDisabledTitle": "私密帖子无法引用",
     "replyGateDisabledTitle": "作者未开放回复",
     "quoteGateDisabledTitle": "作者未开放引用",

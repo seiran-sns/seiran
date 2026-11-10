@@ -44,6 +44,7 @@
     "repostTitle": "Repost",
     "unrepostTitle": "Undo repost",
     "repostDisabledTitle": "Private posts can't be reposted",
+    "repostCooldownTitle": "You can't repost this again so soon. Please wait a moment",
     "quoteDisabledTitle": "Private posts can't be quoted",
     "replyGateDisabledTitle": "The author doesn't allow replies",
     "quoteGateDisabledTitle": "The author doesn't allow quotes",

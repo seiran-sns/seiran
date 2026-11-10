@@ -44,6 +44,7 @@
     "repostTitle": "Volver a publicar",
     "unrepostTitle": "Deshacer volver a publicar",
     "repostDisabledTitle": "Las publicaciones privadas no se pueden volver a publicar",
+    "repostCooldownTitle": "No puedes volver a repostear tan pronto. Espera un momento",
     "quoteDisabledTitle": "Las publicaciones privadas no se pueden citar",
     "replyGateDisabledTitle": "El autor no permite respuestas",
     "quoteGateDisabledTitle": "El autor no permite citas",

@@ -6,6 +6,13 @@ import { useToast } from "../contexts/ToastContext";
 import { ReactionUpdate, useStreamingContext } from "../contexts/StreamingContext";
 import { getReactionState, setReactionState, useReactionState } from "../stores/reactionStore";
 import { mergeRepostReactions } from "../lib/repostReactions";
+import {
+  isCoolingDown,
+  reactionCooldownKey,
+  repostCooldownKey,
+  startCooldown,
+  useCoolingDown,
+} from "../lib/interactionCooldown";
 import { useComposer } from "../contexts/ComposerContext";
 import {
   clearComposerDraft,
@@ -100,6 +107,8 @@ export function useNoteCardActions(
   const [reposting, setReposting] = useState(false);
   const [unreposting, setUnreposting] = useState(false);
   const [reposted, setReposted] = useState(note.repostedByMe ?? false);
+  // 取り消しは止めず、再リポストだけを止める（`lib/interactionCooldown.ts`）。
+  const repostCoolingDown = useCoolingDown(repostCooldownKey(note.id));
   const reactions = useReactionState(note.id, note.reactions);
   const viaRepostId = viaRepost?.id ?? null;
   const wrapperReactions = useReactionState(viaRepostId, viaRepost?.reactions);
@@ -153,15 +162,19 @@ export function useNoteCardActions(
       return;
     }
 
-    if (isPrivateRepostTarget || user?.did_moved_out) return;
+    if (isPrivateRepostTarget || user?.did_moved_out || repostCoolingDown) return;
 
     setReposting(true);
     try {
       await api.notes.create("", true, true, [], undefined, note.id);
       setReposted(true);
+      startCooldown(repostCooldownKey(note.id));
     } catch (err) {
       if (err instanceof ApiError && err.status === 409) {
         setReposted(true);
+      } else if (err instanceof ApiError && err.status === 429) {
+        startCooldown(repostCooldownKey(note.id));
+        showError(getErrorMessage(err));
       } else if (err instanceof ApiError && err.status === 403) {
         showError(t("home:noteCard.privateRepostError"));
       } else {
@@ -176,6 +189,11 @@ export function useNoteCardActions(
     if (reactionPending) return;
     const reacting = !(reactions.find((r) => r.emoji === emoji)?.reactedByMe ?? false);
     if (reacting && user?.did_moved_out) return;
+    const cooldownKey = reactionCooldownKey(note.id, emoji);
+    if (reacting && isCoolingDown(cooldownKey)) {
+      showError(t("errors:REACTION_COOLDOWN"));
+      return;
+    }
     const prevReactions = reactions;
 
     setReactionPending(true);
@@ -185,8 +203,10 @@ export function useNoteCardActions(
         ? await api.notes.react(note.id, emoji)
         : await api.notes.unreact(note.id, emoji);
       setReactionState(note.id, res.reactions);
+      if (reacting) startCooldown(cooldownKey);
     } catch (err) {
       setReactionState(note.id, prevReactions);
+      if (err instanceof ApiError && err.status === 429) startCooldown(cooldownKey);
       showError(getErrorMessage(err));
     } finally {
       setReactionPending(false);
@@ -323,6 +343,7 @@ export function useNoteCardActions(
     reposted,
     reposting,
     unreposting,
+    repostCoolingDown,
     handleRepost,
     pinned,
     pinning,

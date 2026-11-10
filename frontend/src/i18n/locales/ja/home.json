@@ -44,6 +44,7 @@
     "repostTitle": "リポスト",
     "unrepostTitle": "リポスト解除",
     "repostDisabledTitle": "非公開の投稿はリポストできません",
+    "repostCooldownTitle": "続けてリポストすることはできません。少し待ってください",
     "quoteDisabledTitle": "非公開の投稿は引用できません",
     "replyGateDisabledTitle": "投稿者が返信を許可していません",
     "quoteGateDisabledTitle": "投稿者が引用を許可していません",

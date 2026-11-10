@@ -254,6 +254,8 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `reaction_emoji_url`: 通知時点の絵文字画像URL（リアクションは1人1個なので、後で切り替えると過去の内容が分からなくなるため）。 `i/notifications` は `note.reactionEmojis` に加え、独自拡張フィールド `reactionEmojiUrl` としてもこの値を返す。対象ポストが削除済みだと `note` 自体が無く `reactionEmojis` から引けないため、フロントは `reactionEmojiUrl` を優先して絵文字を画像で出す。
 - `related_actor_id`: `move*` 専用の2つ目のアクター（移転先。`notifier_actor_id` が移転元）。
 - `reaction_id`（`reactions.id`、部分 UNIQUE）: 自分のリアクションが firehose で戻ってきたときの重複排除（`docs/protocols.md` 8節）。他人のリアクションでは NULL なので、絵文字の連投は妨げない。
+- `repost_of_post_id`（`posts` への FK、`ON DELETE SET NULL`）: リポスト通知の元ポスト。`note_id` のラッパーが取り消し・削除された後も通知から元ポストへたどるためと、連打抑制（下記）の判定キー。ラッパーが残っていなかった古いリポスト通知では NULL。
+- 連打抑制: リポスト・リアクションの通知は、同じ宛先・同じ通知元で、リポストなら `repost_of_post_id`、リアクションなら `note_id`+`reaction` が一致する通知が5分以内にあれば作らない（`NotificationRepository::insert`、`docs/protocols.md` 8節）。直近の判定は Snowflake の `id` の範囲で行うので `idx_notifications_recipient` の範囲走査で済む。
 
 ### `actor_also_known_as`
 プロフィールの「別のアカウント」。`owner_actor_id` が「`target_actor_id` も自分だ」と申告する片方向の関係（target は解決済みの `actors.id`）。owner はローカルユーザー（本人が API で追加/削除、`resolve_and_upsert_target` で解決）かリモート Fedi アクター（`jobs::also_known_as_sync` が Actor 文書の `alsoKnownAs` を同期）。Bsky アクターは owner にも target にもならない。

@@ -1278,28 +1278,33 @@ async fn handle_inbound_repost_create(
     // リポスト通知: リモート Bsky ユーザーがローカルユーザーの投稿をリポストした場合のみ作る。
     match post_repo.find_delivery_meta(repost_of_post_id).await {
         Ok(Some(meta)) if meta.actor_type == "local" && meta.actor_id != actor_id => {
-            let actor_repo = PgActorRepository::new(pool.clone());
-            if let Ok(Some(reposter)) = actor_repo.find_by_id(actor_id).await {
-                stream_hub.publish_event(
-                    HashSet::from([meta.actor_id]),
-                    "repost",
-                    serde_json::json!({
-                        "postId": post_id.to_string(),
-                        "actor": { "username": reposter.username, "domain": reposter.domain, "displayName": reposter.display_name },
-                    }),
-                );
-            }
             let notif_id = generate_snowflake_id(chrono::Utc::now());
-            if let Err(e) = PgNotificationRepository::new(pool.clone())
+            match PgNotificationRepository::new(pool.clone())
                 .insert(&NewNotification {
                     notifier_actor_id: Some(actor_id),
                     note_id: Some(post_id),
                     source_uri: Some(at_uri),
+                    repost_of_post_id: Some(repost_of_post_id),
                     ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
                 })
                 .await
             {
-                tracing::error!("[Jetstream/Repost] notifications INSERT 失敗: {}", e);
+                // 連打抑制・重複で通知を作らなかったときはストリーミングにも流さない。
+                Ok(true) => {
+                    let actor_repo = PgActorRepository::new(pool.clone());
+                    if let Ok(Some(reposter)) = actor_repo.find_by_id(actor_id).await {
+                        stream_hub.publish_event(
+                            HashSet::from([meta.actor_id]),
+                            "repost",
+                            serde_json::json!({
+                                "postId": post_id.to_string(),
+                                "actor": { "username": reposter.username, "domain": reposter.domain, "displayName": reposter.display_name },
+                            }),
+                        );
+                    }
+                }
+                Ok(false) => {}
+                Err(e) => tracing::error!("[Jetstream/Repost] notifications INSERT 失敗: {}", e),
             }
         }
         Ok(_) => {}
@@ -1418,22 +1423,12 @@ async fn handle_inbound_like_create(
     );
 
     // 通知ベル用（#37）: 自作自演（本尊が自分の投稿を Bsky 側からもいいねした等）は通知しない
+    // 連打抑制・重複（自分のコミットの再受信を含む）で通知を作らなかったときは
+    // ストリーミングにも流さない。
     if post_author_id != actor_id {
-        let actor_repo = PgActorRepository::new(pool.clone());
-        if let Ok(Some(liker)) = actor_repo.find_by_id(actor_id).await {
-            stream_hub.publish_event(
-                HashSet::from([post_author_id]),
-                "reaction",
-                serde_json::json!({
-                    "postId": post_id.to_string(),
-                    "emoji": content,
-                    "actor": { "username": liker.username, "domain": liker.domain, "displayName": liker.display_name },
-                }),
-            );
-        }
         let notifications_repo = PgNotificationRepository::new(pool.clone());
         let notif_id = generate_snowflake_id(chrono::Utc::now());
-        if let Err(e) = notifications_repo
+        match notifications_repo
             .insert(&NewNotification {
                 notifier_actor_id: Some(actor_id),
                 note_id: Some(post_id),
@@ -1444,7 +1439,22 @@ async fn handle_inbound_like_create(
             })
             .await
         {
-            tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e);
+            Ok(true) => {
+                let actor_repo = PgActorRepository::new(pool.clone());
+                if let Ok(Some(liker)) = actor_repo.find_by_id(actor_id).await {
+                    stream_hub.publish_event(
+                        HashSet::from([post_author_id]),
+                        "reaction",
+                        serde_json::json!({
+                            "postId": post_id.to_string(),
+                            "emoji": content,
+                            "actor": { "username": liker.username, "domain": liker.domain, "displayName": liker.display_name },
+                        }),
+                    );
+                }
+            }
+            Ok(false) => {}
+            Err(e) => tracing::error!("[Jetstream/Like] notifications INSERT 失敗: {}", e),
         }
     }
 

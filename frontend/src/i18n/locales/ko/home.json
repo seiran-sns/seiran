@@ -44,6 +44,7 @@
     "repostTitle": "다시 게시",
     "unrepostTitle": "재게시 취소",
     "repostDisabledTitle": "비공개 게시물은 다시 게시할 수 없습니다.",
+    "repostCooldownTitle": "연달아 리포스트할 수 없습니다. 잠시 기다려 주세요",
     "quoteDisabledTitle": "비공개 게시물은 인용할 수 없습니다",
     "replyGateDisabledTitle": "작성자가 답글을 허용하지 않습니다",
     "quoteGateDisabledTitle": "작성자가 인용을 허용하지 않습니다",

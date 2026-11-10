@@ -6,6 +6,7 @@
 
 pub mod error;
 pub mod handlers;
+pub mod interaction_cooldown;
 pub mod mailer;
 pub mod middleware;
 pub mod rate_limit;
@@ -129,6 +130,8 @@ pub struct AppState {
     /// クールダウンが緩む（許容: 根本的な多重防止はWorker側のジョブ重複排除で行うべきだが、
     /// まずは支配的なケース＝同一プロセスへの連続リロードを塞ぐ）。
     pub remote_follow_sync_recent: Arc<DashMap<(i64, String), std::time::Instant>>,
+    /// リポスト・リアクションの連打を止める送信元クールダウン（`interaction_cooldown`）。
+    pub interaction_cooldown: Arc<interaction_cooldown::InteractionCooldown>,
     /// 非同期ジョブキュー（AP配送・Bsky動画パイプライン結合等）。`all` ロールでは
     /// `seiran-federation-worker`のWorkerEngineと同一インスタンスを共有する。
     pub job_queue: Arc<dyn JobQueue>,
@@ -918,6 +921,7 @@ pub async fn init_state(
         shutdown,
         emoji_import_jobs: Arc::new(DashMap::new()),
         remote_follow_sync_recent: Arc::new(DashMap::new()),
+        interaction_cooldown: Arc::new(interaction_cooldown::InteractionCooldown::new()),
         job_queue,
         lists,
         hashtags,

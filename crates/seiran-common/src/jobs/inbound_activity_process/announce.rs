@@ -100,29 +100,34 @@ pub(super) async fn handle_announce(
     if let Some(target_id) = repost_of_post_id {
         match inbox.post_repo.find_delivery_meta(target_id).await {
             Ok(Some(meta)) if meta.actor_type == "local" && meta.actor_id != actor_id => {
-                inbox.stream_hub.publish_event(
-                    HashSet::from([meta.actor_id]),
-                    "repost",
-                    serde_json::json!({
-                        "postId": post_id.to_string(),
-                        "actor": {
-                            "username": remote.username,
-                            "domain": remote.domain,
-                            "displayName": remote.display_name
-                        },
-                    }),
-                );
                 let notif_id = generate_snowflake_id(chrono::Utc::now());
-                if let Err(e) = inbox
+                match inbox
                     .notification_repo
                     .insert(&NewNotification {
                         notifier_actor_id: Some(actor_id),
                         note_id: Some(post_id),
+                        repost_of_post_id: Some(target_id),
                         ..NewNotification::new(notif_id, meta.actor_id, NotificationKind::Repost)
                     })
                     .await
                 {
-                    tracing::error!("[Inbox/Announce] repost notifications INSERT 失敗: {}", e);
+                    // 連打抑制で通知を作らなかったときはストリーミングにも流さない。
+                    Ok(true) => inbox.stream_hub.publish_event(
+                        HashSet::from([meta.actor_id]),
+                        "repost",
+                        serde_json::json!({
+                            "postId": post_id.to_string(),
+                            "actor": {
+                                "username": remote.username,
+                                "domain": remote.domain,
+                                "displayName": remote.display_name
+                            },
+                        }),
+                    ),
+                    Ok(false) => {}
+                    Err(e) => {
+                        tracing::error!("[Inbox/Announce] repost notifications INSERT 失敗: {}", e)
+                    }
                 }
             }
             Ok(_) => {}

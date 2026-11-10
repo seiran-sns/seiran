@@ -93,5 +93,7 @@
   "USER_NOT_FOUND": "Usuario no encontrado",
   "DISPLAY_NAME_TOO_LONG": "El nombre para mostrar es demasiado largo (máx. 64 caracteres)",
   "BIO_TOO_LONG": "La biografía es demasiado larga (máx. 256 caracteres)",
-  "INTERACTION_RESTRICTED": "Tu cuenta está restringida: solo puedes responder, citar, mencionar o reaccionar a tus seguidores."
+  "INTERACTION_RESTRICTED": "Tu cuenta está restringida: solo puedes responder, citar, mencionar o reaccionar a tus seguidores.",
+  "REPOST_COOLDOWN": "No puedes volver a repostear la misma publicación tan pronto. Espera un momento e inténtalo de nuevo",
+  "REACTION_COOLDOWN": "No puedes volver a añadir la misma reacción tan pronto. Espera un momento e inténtalo de nuevo"
 }

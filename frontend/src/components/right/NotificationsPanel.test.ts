@@ -113,6 +113,24 @@ describe("resolveClickTargetNoteId（クリック遷移先はリポストラッ�
     expect(resolveClickTargetNoteId(n)).toBe("999");
   });
 
+  it("取り消し済みのrenote通知はリポスト元（note.renote.id）を返す", () => {
+    const n = makeReactionNotification({
+      type: "renote",
+      repostWithdrawn: true,
+      note: { id: "999", renote: { id: "42" } },
+    });
+    expect(resolveClickTargetNoteId(n)).toBe("42");
+  });
+
+  it("ラッパーが残っておらずnoteがリポスト元そのものなら、そのidを返す", () => {
+    const n = makeReactionNotification({
+      type: "renote",
+      repostWithdrawn: true,
+      note: { id: "42" },
+    });
+    expect(resolveClickTargetNoteId(n)).toBe("42");
+  });
+
   it("quote通知は引用投稿自体（note.id）を対象にする", () => {
     const n = makeReactionNotification({
       type: "quote",
