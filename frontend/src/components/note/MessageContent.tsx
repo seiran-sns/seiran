@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Note } from "../../api/client";
 import EmojiText from "./EmojiText";
+import ContentWarningText from "./ContentWarningText";
 import RichHtml from "./RichHtml";
 import RichText from "./RichText";
 import NoteAttachments from "./NoteAttachments";
@@ -23,7 +24,7 @@ export default function MessageContent({ note }: { note: Note }) {
       {note.contentWarning && (
         <div className={styles.contentWarningWrap}>
           <span>
-            <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
+            <TwemojiEmoji emoji="⚠️" /> <ContentWarningText note={note} />
           </span>
           <button type="button" onClick={() => setShowContent((shown) => !shown)}>
             {showContent ? t("home:noteCard.hideContent") : t("home:noteCard.showContent")}

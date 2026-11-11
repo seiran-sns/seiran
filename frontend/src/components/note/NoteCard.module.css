@@ -434,19 +434,6 @@
   white-space: pre-wrap;
   word-break: break-word;
 }
-.contentWarningToggle {
-  margin-top: 6px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: none;
-  color: var(--accent);
-  font-size: 0.8rem;
-  padding: 3px 10px;
-  cursor: pointer;
-}
-.contentWarningToggle:hover {
-  background: var(--accent-deep-hover);
-}
 /* 縦に長すぎる本文の折りたたみ（本文・添付・リンクカード・投票・引用元をまとめて
  * 1ブロックとしてクリップする）。基準の高さは固定pxではなく、このブロック自身の
  * 実測幅（NoteCard.tsx側でResizeObserverが計測）と同じ、つまり正方形になるまで。 */
@@ -491,6 +478,13 @@
 }
 .showAllButton:hover {
   background: var(--accent-hover);
+}
+/* CW付きで本文を描画していない間は重ねる先の本文が無いため、警告文の下に置く。 */
+.showAllButtonStatic {
+  position: static;
+  display: block;
+  width: calc(100% - 50px);
+  margin: 0 0 6px 50px;
 }
 
 .poll { margin: 8px 0 0 50px; display: grid; gap: 5px; }

@@ -46,7 +46,7 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
     await fedi.close();
   });
 
-  test("CW付き投稿は初期状態で本文が隠れ、ボタンで開閉できる", async ({ page, request }) => {
+  test("DMのCW付きメッセージは初期状態で本文が隠れ、ボタンで開閉できる", async ({ page, request }) => {
     const alice = await registerUserViaApi(request, "e2fedicw");
     const text = `CW本文テスト ${Date.now()}`;
     await fedi.sendCreateNote(SEIRAN_BASE_URL, alice.username, text, { summary: "テスト注意書き" });
@@ -80,6 +80,47 @@ test.describe("Fediから受信したCW・アンケート付き投稿の表示",
 
     await main.getByRole("button", { name: "隠す", exact: true }).click();
     await expect(main.getByText(text)).toHaveCount(0);
+  });
+
+  test("CW付き投稿は本文が隠れ「全部表示」で開く。警告文のタグ・MFMは変換して表示する", async ({ page, request }) => {
+    const alice = await registerUserViaApi(request, "e2fedicwp");
+    const text = `CW公開本文テスト ${Date.now()}`;
+    await fedi.sendCreateNote(SEIRAN_BASE_URL, alice.username, text, {
+      summary: "<small>テスト</small>注意書き $[ruby 鬼徹 コイツ] <script>x</script><ご報告>",
+      visibility: "public",
+    });
+
+    let postId: string | undefined;
+    await expect
+      .poll(
+        async () => {
+          postId = (await findGlobalNoteByText(request, alice.token, text))?.id;
+          return postId !== undefined;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeTruthy();
+
+    await seedAuth(page, alice.token);
+    await page.goto(`/notes/${postId}`);
+
+    const card = page.locator("main article").first();
+    await expect(card.getByText(/注意書き/)).toBeVisible();
+    // 警告文のタグは描画され、文字としては見えない。MFMのルビは<ruby>になる。
+    await expect(card.locator("small", { hasText: "テスト" })).toBeVisible();
+    await expect(card.locator("ruby", { hasText: "鬼徹" })).toBeVisible();
+    await expect(card.getByText(/<small>|\$\[ruby/)).toHaveCount(0);
+    // タグの形をしていない`<`は文字のまま残る。
+    await expect(card.getByText(/<ご報告>/)).toBeVisible();
+
+    await expect(card.getByRole("button", { name: "表示", exact: true })).toHaveCount(0);
+    const showAll = card.getByRole("button", { name: "全部表示", exact: true });
+    await expect(showAll).toBeVisible();
+    await expect(card.getByText(text)).toHaveCount(0);
+
+    await showAll.click();
+    await expect(card.getByText(text)).toBeVisible();
+    await expect(showAll).toHaveCount(0);
   });
 
   test("アンケート付き投稿は選択肢と票数が表示される", async ({ page, request }) => {

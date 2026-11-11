@@ -10,6 +10,7 @@ pub mod db;
 pub mod denied_host;
 pub mod did_provision;
 pub mod event_bus;
+pub mod fedi_content_warning;
 pub mod follow_approval;
 pub mod follow_exec;
 pub mod follow_target;

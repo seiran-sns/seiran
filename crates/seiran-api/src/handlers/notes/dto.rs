@@ -274,6 +274,11 @@ pub struct NoteResponse {
     pub bridge_original_post_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_warning: Option<String>,
+    /// 警告文のサニタイズ済みHTML（MFMのタグ・`$[ruby]`等を変換したもの、
+    /// `seiran_common::fedi_content_warning`）。リモートFedi投稿で警告文に記法を含む場合のみ
+    /// 設定。`None`ならフロントは`content_warning`をプレーンテキストとして描画する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content_warning_html: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub poll: Option<serde_json::Value>,
     /// このポストへの返信・引用・リポストの件数（`posts.reply_count`/`quote_count`/`repost_count`）。
@@ -473,6 +478,12 @@ pub fn to_note_response(
         p.actor_type
     };
     let is_local = actor_type == "local";
+    // ローカル・seiranリモートの警告文はユーザーが入力したプレーンテキストなので変換しない
+    // （`<`等をそのまま文字として見せる）。
+    let content_warning_html = (actor_type == "fedi")
+        .then_some(p.content_warning.as_deref())
+        .flatten()
+        .and_then(seiran_common::fedi_content_warning::fedi_content_warning_html);
     let avatar_url =
         seiran_common::avatar::resolve_avatar_url(p.avatar_url, &actor_type, &p.domain, p.actor_id);
 
@@ -559,6 +570,7 @@ pub fn to_note_response(
         quote_blocked: false,
         remote_url,
         bridge_original_post_id: p.bridge_of_post_id.map(|i| i.to_string()),
+        content_warning_html,
         content_warning: p.content_warning,
         poll: p.poll,
         reply_count: p.reply_count,

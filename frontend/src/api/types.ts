@@ -366,6 +366,9 @@ export interface Note {
    * 元ポスト未解決なら省略。 */
   bridgeOriginalPostId?: string;
   contentWarning?: string;
+  /** 警告文のサニタイズ済みHTML（MFMのタグ・`$[ruby]`等を変換したもの）。リモートFedi投稿で
+   * 警告文に記法を含む場合のみ設定。無ければ`contentWarning`をプレーンテキストで描画する。 */
+  contentWarningHtml?: string;
   poll?: {
     multiple: boolean;
     options: { name: string; votes: number }[];
@@ -651,6 +654,7 @@ export interface RawNote {
   bridge_original_post_id?: string;
   contentWarning?: string;
   content_warning?: string;
+  contentWarningHtml?: string;
   poll?: Note["poll"];
   replyCount?: number;
   reply_count?: number;
@@ -710,6 +714,7 @@ export function normalizeNote(r: RawNote): Note {
     remoteUrl: r.remoteUrl ?? r.remote_url,
     bridgeOriginalPostId: r.bridgeOriginalPostId ?? r.bridge_original_post_id,
     contentWarning: r.contentWarning ?? r.content_warning,
+    contentWarningHtml: r.contentWarningHtml,
     poll: r.poll,
     replyCount: r.replyCount ?? r.reply_count ?? 0,
     quoteCount: r.quoteCount ?? r.quote_count ?? 0,

@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, Note } from "../../api/client";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
+import ContentWarningText from "./ContentWarningText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import { acct, displayName } from "../../lib/format";
 import styles from "./NoteHoverPreview.module.css";
@@ -150,7 +151,7 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
               {target.contentWarning && (
                 <span className={styles.cw}>
                   <span className={styles.cwText}>
-                    <TwemojiEmoji emoji="⚠️" /> <EmojiText text={target.contentWarning} emojis={target.emojis} />
+                    <TwemojiEmoji emoji="⚠️" /> <ContentWarningText note={target} />
                   </span>
                   <button
                     type="button"

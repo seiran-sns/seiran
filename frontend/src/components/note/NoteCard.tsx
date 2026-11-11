@@ -23,6 +23,7 @@ import ReplyIndicator from "./ReplyIndicator";
 import PendingReferenceIndicator from "./PendingReferenceIndicator";
 import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
+import ContentWarningText from "./ContentWarningText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import RichHtml from "./RichHtml";
 import RichText from "./RichText";
@@ -111,7 +112,7 @@ export function QuoteCard({ note }: { note: Note }) {
           {note.contentWarning && (
             <div className={styles.quoteContentWarning}>
               <span>
-                <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
+                <TwemojiEmoji emoji="⚠️" /> <ContentWarningText note={note} />
               </span>
               <button
                 type="button"
@@ -233,15 +234,17 @@ function PostContent({
     reportLabel: `@${note.user.username}${note.user.domain ? `@${note.user.domain}` : ""}`,
   };
 
-  const [showContent, setShowContent] = useState(!note.contentWarning || forceOpenCw);
-  // 縦に長すぎる本文の折りたたみ（#未採番）。本文・添付・リンクカード・投票・引用元を
-  // まとめた1ブロックの実測サイズをResizeObserverで見て、「幅の62.5%を超える高さ」なら
-  // 折りたたみ、「全部表示」ボタンを出す（CSS側のaspect-ratio: 8/5と合わせる）。
-  // overflow:hiddenでクリップした状態のouter要素自身のサイズはクリップにより高さが
-  // 固定され変化を検知できないため、クリップされないinner要素側を監視する。
+  // 本文の折りたたみ。CW付きの投稿と縦に長すぎる投稿は、同じ「全部表示」ボタン1つで開く
+  // （開いたら長さによる折りたたみも同時に解除する。CWを開いた直後にもう一度「全部表示」を
+  // 押させないため）。CW付きの間は本文を一切描画しない（一部でも見えるとCWの意味がない）。
+  // 縦の長さは、本文・添付・リンクカード・投票・引用元をまとめた1ブロックの実測サイズを
+  // ResizeObserverで見て、「幅の62.5%を超える高さ」なら折りたたむ（CSS側の
+  // aspect-ratio: 8/5と合わせる）。overflow:hiddenでクリップした状態のouter要素自身の
+  // サイズはクリップにより高さが固定され変化を検知できないため、クリップされないinner要素側を監視する。
   const contentBodyRef = useRef<HTMLDivElement>(null);
   const [contentCollapsed, setContentCollapsed] = useState(true);
   const [contentOverflowing, setContentOverflowing] = useState(false);
+  const cwHidden = !!note.contentWarning && contentCollapsed && !forceOpenCw;
   useEffect(() => {
     const el = contentBodyRef.current;
     if (!el) return;
@@ -251,7 +254,7 @@ function PostContent({
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, [showContent]);
+  }, [cwHidden]);
   // pending参照が「取り込む」で解決された場合のローカル反映（#234）。
   const [resolvedReplyId, setResolvedReplyId] = useState<string | null>(null);
   const [resolvedQuote, setResolvedQuote] = useState<Note | null>(null);
@@ -545,23 +548,24 @@ function PostContent({
         <>
           {note.contentWarning && (
             <div className={styles.contentWarningWrap}>
-              <p className={styles.contentWarningText}>
-                <TwemojiEmoji emoji="⚠️" /> <EmojiText text={note.contentWarning} emojis={note.emojis} />
-              </p>
-              <button
-                className={styles.contentWarningToggle}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowContent((shown) => !shown);
-                }}
-              >
-                {showContent
-                  ? t("home:noteCard.hideContent")
-                  : t("home:noteCard.showContent")}
-              </button>
+              <div className={styles.contentWarningText}>
+                <TwemojiEmoji emoji="⚠️" /> <ContentWarningText note={note} />
+              </div>
             </div>
           )}
-          {showContent && (
+          {cwHidden && (
+            <button
+              type="button"
+              className={`${styles.showAllButton} ${styles.showAllButtonStatic}`}
+              onClick={(e) => {
+                e.stopPropagation();
+                setContentCollapsed(false);
+              }}
+            >
+              {t("home:noteCard.showAllContent")}
+            </button>
+          )}
+          {!cwHidden && (
             <div
               className={`${styles.contentBodyOuter} ${
                 contentCollapsed && contentOverflowing ? styles.contentBodyCollapsed : ""

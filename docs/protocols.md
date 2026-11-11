@@ -40,7 +40,7 @@
 
 ### Fedi投稿のCW・アンケート・閲覧注意画像
 
-`summary` を CW、`Question.oneOf`/`anyOf` をアンケートとして保存する。添付または投稿全体の `sensitive` が真なら画像を閲覧注意として返す。
+`summary` を CW、`Question.oneOf`/`anyOf` をアンケートとして保存する。`summary` は受信したまま保存する（Misskey は本文 `content` を HTML に変換して送るのに、`summary` は生の MFM のまま送るため、タグや `$[…]` 記法を含みうる）。表示用の変換は API 応答の組み立て時に `fedi_content_warning::fedi_content_warning_html` で行う（`actor_type = fedi` の投稿だけ。タグの形をしていない `<` は文字として残す）。Misskey 互換 API の `cw` は変換前の文字列を返す。添付または投稿全体の `sensitive` が真なら画像を閲覧注意として返す。
 
 ### Fedi投稿のURLカード
 
