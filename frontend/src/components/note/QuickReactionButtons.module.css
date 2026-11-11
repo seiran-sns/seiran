@@ -1,89 +1,73 @@
-.heartWrap {
-  position: relative;
-  display: inline-flex;
-}
-
-/* タッチでのフリック操作中にページのスクロール・長押しメニュー・文字選択が割り込まないようにする。 */
-.heartBtn {
-  touch-action: none;
-  -webkit-touch-callout: none;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-/* ❤️の中心を原点に、よく使う絵文字を左・上・右へせり出させる。 */
-.flickLayer {
+/* ボタンバーのすぐ下に重ねて出す。カードの本文の幅（カードより左右の余白ぶん狭い）いっぱいに広げる。
+   どのカードのポップアップかがわかるよう、ボタンバーの下余白（ボタンの padding ぶん、絵文字には
+   かからない）に食い込ませて上へ寄せ、高さも詰めて、ほぼ自分のカードの下端に収める（次のカードへ
+   大きくはみ出すと、どちらのカードに効くのかわかりづらい）。
+   表示する条件（ホバー中・画面内でいちばん上）を満たすまでは出さない。 */
+.popup {
+  display: none;
   position: absolute;
-  left: 50%;
-  top: 50%;
-  width: 0;
-  height: 0;
-  z-index: 50;
-  pointer-events: none;
+  top: calc(100% - 4px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  padding: 2px 4px;
+  border-radius: 0;
+  border: 1px solid var(--border-strong);
+  background: var(--card-bg-opaque);
+  box-shadow: var(--shadow-card-hover);
 }
 
-.flickItem {
-  --flick-dx: 0px;
-  --flick-dy: 0px;
-  position: absolute;
-  width: 48px;
-  height: 48px;
-  margin: -24px 0 0 -24px;
+.popup.popupShown {
+  display: block;
+}
+
+/* 絵文字1行ぶんの高さに固定し、横幅に入りきらない絵文字は折り返した2行目ごと見せない。 */
+.row {
   display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  height: 28px;
+  overflow: hidden;
+}
+
+.item {
+  flex: none;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
-  background: var(--card-bg-opaque);
-  border: 1px solid var(--border-strong);
-  box-shadow: var(--shadow-card-hover);
-  transform: translate(var(--flick-dx), var(--flick-dy));
-  animation: flickOut 0.12s ease-out both;
-  transition: background 0.08s, border-color 0.08s;
-}
-
-.left {
-  --flick-dx: -58px;
-}
-
-.up {
-  --flick-dy: -58px;
-}
-
-.right {
-  --flick-dx: 58px;
-}
-
-@keyframes flickOut {
-  from {
-    transform: translate(0, 0) scale(0.4);
-    opacity: 0;
-  }
-  to {
-    transform: translate(var(--flick-dx), var(--flick-dy)) scale(1);
-    opacity: 1;
-  }
-}
-
-/* 自分が付けている絵文字は、アクション行のボタンと同じく枠で示す（選ぶと取り消しになる）。 */
-.flickItemActive {
-  border: 2px solid var(--accent);
-}
-
-/* 指を滑らせている方向の絵文字。 */
-.flickItemSelected {
-  background: var(--accent-deep);
-  border-color: var(--accent);
-}
-
-/* TwemojiEmoji 既定の 1.2em 指定より優先させるため .flickItem で限定する。 */
-.flickItem .flickGlyph {
-  width: 28px;
   height: 28px;
+  min-width: 28px;
+  padding: 0 4px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+.item:hover {
+  background: var(--accent-deep);
+}
+
+.item:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* 自分が付けている絵文字。ボタンバーのリアクション済み表示と同じく枠で示す（押すと取り消し）。 */
+.itemActive {
+  border-color: var(--accent);
+  background: var(--accent-deep);
+}
+
+/* TwemojiEmoji 既定の 1.2em 指定より優先させるため .item で限定する。 */
+.item .unicodeEmoji {
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+}
+
+.customEmoji {
   object-fit: contain;
   vertical-align: middle;
-  transition: transform 0.08s;
-}
-
-.flickItem.flickItemSelected .flickGlyph {
-  transform: scale(1.25);
 }
