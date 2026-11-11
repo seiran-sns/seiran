@@ -7,7 +7,7 @@ import noteCardStyles from "./NoteCard.module.css";
 import styles from "./QuickReactionButtons.module.css";
 
 /** ポップアップの絵文字の高さ（px）。横長のカスタム絵文字は高さを揃えて横に伸ばす。 */
-const POPUP_EMOJI_PX = 22;
+const POPUP_EMOJI_PX = 20;
 /** 横長のカスタム絵文字の最大幅（高さに対する倍率）。リアクション表示欄（`ReactionChips`）と揃える。 */
 const POPUP_EMOJI_MAX_ASPECT = 4;
 

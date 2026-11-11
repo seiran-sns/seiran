@@ -1,14 +1,16 @@
 /* ボタンバーのすぐ下に重ねて出す。カードの本文の幅（カードより左右の余白ぶん狭い）いっぱいに広げる。
+   どのカードのポップアップかがわかるよう、ボタンバーの下余白（ボタンの padding ぶん、絵文字には
+   かからない）に食い込ませて上へ寄せ、高さも詰めて、ほぼ自分のカードの下端に収める（次のカードへ
+   大きくはみ出すと、どちらのカードに効くのかわかりづらい）。
    表示する条件（ホバー中・画面内でいちばん上）を満たすまでは出さない。 */
 .popup {
   display: none;
   position: absolute;
-  top: 100%;
+  top: calc(100% - 4px);
   left: 0;
   right: 0;
   z-index: 20;
-  margin-top: 4px;
-  padding: 3px 4px;
+  padding: 2px 4px;
   border-radius: 0;
   border: 1px solid var(--border-strong);
   background: var(--card-bg-opaque);
@@ -25,7 +27,7 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 2px;
-  height: 32px;
+  height: 28px;
   overflow: hidden;
 }
 
@@ -34,8 +36,8 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  height: 32px;
-  min-width: 32px;
+  height: 28px;
+  min-width: 28px;
   padding: 0 4px;
   background: none;
   border: 1px solid transparent;
@@ -60,8 +62,8 @@
 
 /* TwemojiEmoji 既定の 1.2em 指定より優先させるため .item で限定する。 */
 .item .unicodeEmoji {
-  width: 22px;
-  height: 22px;
+  width: 20px;
+  height: 20px;
   vertical-align: middle;
 }
 
