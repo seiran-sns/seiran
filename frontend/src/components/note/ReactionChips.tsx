@@ -80,8 +80,7 @@ function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, kn
   const [actors, setActors] = useState<ReactionActor[] | null>(null);
   const [failed, setFailed] = useState(false);
   const fetchedRef = useRef(false);
-  const timerRef = useRef<number | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
+  const chipRef = useRef<HTMLButtonElement>(null);
 
   // 自分が既に付けているリアクションの取消は常に許可する（バックエンドは絵文字の実在確認をせず削除する）。
   // 新規追加は、カスタム絵文字ならこのサーバーに登録済みの場合のみ許可する
@@ -98,32 +97,31 @@ function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, kn
         .catch(() => setFailed(true))
         .finally(() => setLoading(false));
     }
-    if (timerRef.current) window.clearTimeout(timerRef.current);
     setOpen(true);
   }, [noteId, viaRepostId, r.emoji]);
 
-  const onLeave = useCallback(() => {
-    // 少し遅延させてから閉じる（ポップオーバーへのカーソル移動を許容）。
-    timerRef.current = window.setTimeout(() => setOpen(false), 120);
-  }, []);
+  const onLeave = useCallback(() => setOpen(false), []);
 
+  // ポップオーバーはカーソルがチップ（ボタン）の上にある間だけ出す。ポップオーバー自体は
+  // `pointer-events: none` で、下に隠れたリポスト・リアクション等のボタンをそのまま押せる。
+  //
   // `onMouseEnter`/`onMouseLeave`（Reactの合成イベント）はDOM階層ではなくReactツリー上の
   // 親子関係に基づいて伝播範囲が決まる。EmojiContextMenu配下のメニュー・インポートダイアログは
-  // `createPortal`でDOM上はbody直下に描画されるが、Reactツリー上はこの chipWrap の子孫のまま
+  // `createPortal`でDOM上はbody直下に描画されるが、Reactツリー上はこのチップの子孫のまま
   // なので合成イベントの mouseleave が発火せず、マウスをそちらへ移動してもポップオーバーが
   // 開いたままになってしまう。DOM階層（`relatedTarget`が実際にこの要素の外かどうか）で正しく
   // 判定するため、ネイティブイベントリスナーで実装する。
   useEffect(() => {
-    const el = wrapRef.current;
+    const el = chipRef.current;
     if (!el) return;
     function handleOver(e: MouseEvent) {
       const related = e.relatedTarget as Node | null;
-      if (related && wrapRef.current?.contains(related)) return;
+      if (related && chipRef.current?.contains(related)) return;
       onEnter();
     }
     function handleOut(e: MouseEvent) {
       const related = e.relatedTarget as Node | null;
-      if (related && wrapRef.current?.contains(related)) return;
+      if (related && chipRef.current?.contains(related)) return;
       onLeave();
     }
     el.addEventListener("mouseover", handleOver);
@@ -135,9 +133,10 @@ function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, kn
   }, [onEnter, onLeave]);
 
   return (
-    <div className={styles.chipWrap} ref={wrapRef}>
+    <div className={styles.chipWrap}>
       <button
         type="button"
+        ref={chipRef}
         className={`${styles.chip} ${r.reactedByMe ? styles.chipActive : ""}`}
         onClick={(e) => {
           e.stopPropagation();
@@ -158,7 +157,7 @@ function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, kn
       </button>
 
       {open && (
-        <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
+        <div className={styles.popover}>
           {shortcode && <p className={styles.emojiName}>{r.emoji}</p>}
           {loading && <p className={styles.dim}>{t("common:loading")}</p>}
           {failed && <p className={styles.dim}>{t("home:reactionChips.actorsFetchFailed")}</p>}

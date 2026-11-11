@@ -78,7 +78,10 @@
   font-weight: 600;
 }
 
+/* カーソルがチップの上にある間だけ出す表示専用のポップオーバー。下に隠れたボタンを押せるよう、
+   マウス操作はすべて透過させる（ポップオーバーにカーソルが乗って開閉がちらつくこともない）。 */
 .popover {
+  pointer-events: none;
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
