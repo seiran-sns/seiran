@@ -3,7 +3,7 @@ import { registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
 
 // NoteCard のクイックリアクション: ボタンバーの❤️（1クリック）と、ボタンバーのすぐ下に出る
 // よく使う絵文字のポップアップ（❤️を除く、横幅に入るだけ）。ポップアップはマウス環境では
-// ホバー中のカード、タッチ環境では画面内でいちばん上のカードにだけ出る。
+// ホバー中のカード、タッチ環境では上端が見えているカードのうちいちばん上にだけ出る。
 
 async function createNote(request: APIRequestContext, token: string, text: string) {
   const res = await request.post("/api/notes/create", {
@@ -166,7 +166,7 @@ test.describe("タッチ環境", () => {
     });
   }
 
-  test("画面内でいちばん上のカードにだけポップアップが出て、スクロールで移る。❤️の上から始めたスクロールでは付かない", async ({
+  test("上端が見えているカードのうちいちばん上にだけポップアップが出て、スクロールで移る。❤️の上から始めたスクロールでは付かない", async ({
     page,
     request,
   }) => {
@@ -188,9 +188,14 @@ test.describe("タッチ環境", () => {
     await popup(top).getByTitle("🎉 でリアクション", { exact: true }).tap();
     await expect(top.getByRole("button", { name: /🎉\s*1/ })).toBeVisible({ timeout: 15_000 });
 
-    // 上のカードのボタンバーが画面外へ出ると、次のカードに移る。
+    // 上のカードの上端が見えなくなると、ボタンバーがまだ見えていても次のカードに移る。上端が画面内でも、
+    // 画面上部に張り付いたタブの下に隠れていれば見えていない扱い。
     const topBox = (await top.boundingBox())!;
-    await page.evaluate((y) => window.scrollBy(0, y), topBox.y + topBox.height);
+    await page.evaluate((y) => window.scrollBy(0, y), topBox.y - 10);
+    await expect
+      .poll(async () => (await top.boundingBox())!.y)
+      .toBeLessThan(20);
+    await expect(top.getByTitle("❤️ でリアクション", { exact: true })).toBeInViewport();
     await expect(popup(next)).toBeVisible({ timeout: 15_000 });
     await expect(popup(top)).toBeHidden();
 

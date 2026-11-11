@@ -1,6 +1,6 @@
 import { CSSProperties, RefObject, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useIsTopmostVisible } from "../../hooks/useIsTopmostVisible";
+import { useIsTopmostCard } from "../../hooks/useIsTopmostCard";
 import { isSameReaction, QUICK_REACTION_HEART, QuickReaction } from "../../lib/quickReactions";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import noteCardStyles from "./NoteCard.module.css";
@@ -75,7 +75,7 @@ function useCanHover(): boolean {
 interface QuickReactionPopupProps {
   /** よく使う絵文字（❤️を除く、よく使う順）。 */
   reactions: QuickReaction[];
-  /** ボタンバー。タッチ環境では、これが画面内でいちばん上に見えているカードにだけ出す。 */
+  /** ボタンバー。タッチ環境では、これを含むカードが「上端が見えているカードのうちいちばん上」のときだけ出す。 */
   anchorRef: RefObject<HTMLElement>;
   myReactionEmoji: string | undefined;
   disabled: boolean;
@@ -91,7 +91,7 @@ function customEmojiStyle(q: QuickReaction): CSSProperties {
 /**
  * ボタンバーのすぐ下に出す、よく使う絵文字を1行に並べたポップアップ。マウス環境ではカードに
  * ホバーしている間（キーボード操作中はカード内にフォーカスがある間）、タッチ環境では画面内で
- * いちばん上のカードにだけ出す（全カードに出すと、どれを押すか目が迷うため）。
+ * 上端が見えているカードのうちいちばん上の1枚にだけ出す（全カードに出すと、どれを押すか目が迷うため）。
  *
  * 横幅に入るだけ並べる: 1行の高さで折り返させ、2行目以降に回った絵文字を `overflow: hidden` で
  * 見せない（途中で切れた絵文字を出さないため、はみ出しではなく折り返しで落とす）。
@@ -105,7 +105,7 @@ export function QuickReactionPopup({
 }: QuickReactionPopupProps) {
   const title = useReactionTitle();
   const canHover = useCanHover();
-  const isTopmost = useIsTopmostVisible(anchorRef, !canHover && reactions.length > 0);
+  const isTopmost = useIsTopmostCard(anchorRef, !canHover && reactions.length > 0);
   if (reactions.length === 0) return null;
 
   return (
