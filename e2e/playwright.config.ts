@@ -47,18 +47,19 @@ const backendEnv: Record<string, string> = {
 
 // 全specが同じE2E DBを共有するが、実際にグローバル状態（site_settings・
 // appviewスタブのプロセスグローバルなsearchRequests・storage_providersの
-// アクティブプロバイダ選択順）に触れるのは以下の6ファイルだけで、残りは自前ユーザー・
+// アクティブプロバイダ選択順）に触れるのは以下のリストのファイルだけで、残りは自前ユーザー・
 // 動的ポートstubで完結し並列安全（調査・検証済み）。
 //
 // - storage_providers: バックエンドの `list_active` が `WHERE is_active = true
 //   ORDER BY id` の先頭プロバイダを全アップロードに使うため、複数specが同時に
-//   stub S3 を登録すると相互に取り違える。3specはproject内で直列にしつつ、
-//   `main` とはインターリーブする。
+//   stub S3 を登録すると相互に取り違える。`/api/admin/storage-providers` で stub S3 を
+//   登録するspecは必ずここに加え、project内で直列にしつつ `main` とはインターリーブする。
 const STORAGE_SERIAL_SPECS = [
   "**/notifications.spec.ts",
   "**/misskey-compat.spec.ts",
   "**/mastodon-compat.spec.ts",
   "**/federation-delivery.spec.ts",
+  "**/note-redraft.spec.ts",
 ];
 // - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests
 //   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。

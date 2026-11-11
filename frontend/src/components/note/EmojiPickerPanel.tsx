@@ -1,4 +1,4 @@
-import { RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, RefObject, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
 import { useLazyVisible } from "../../hooks/useLazyVisible";

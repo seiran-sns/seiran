@@ -278,7 +278,7 @@ pub struct SearchSession {
 
 ## 8. フロントエンド
 
-React 18 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<BrowserRouter>` とフック）で使い、データルーターは使わない。`frontend/src/`:
+React 19 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<BrowserRouter>` とフック）で使い、データルーターは使わない。`frontend/src/`:
 
 - `api/` — API クライアント。`core.ts`（`request`/`uploadFormData`/`ApiError`/`getErrorMessage()`）、`types.ts`（型と `Note` の正規化）、`webauthn.ts`、領域別モジュール（`auth`/`notes`/`users`/`admin`/`follows`/`lists`/`misc`）。`client.ts` はそれらを `api` に集約するだけ。フォロー操作は actor 行を持つ画面では `actorId` で呼ぶ（`follows.ts` の `followTargetOf`）。
 - `components/layout/` — `AppShell`（3ペインの外枠）、`LeftNav`
@@ -343,7 +343,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 **CI**（GitHub Actions）:
 - `Rust` job: `cargo fmt --all -- --check` と `clippy -- -D warnings`。
 - `Frontend` job: 型チェック・lint（警告も失敗）・Vitest。
-- `E2E` job（Node.js 20・Chromium・E2E 専用 PostgreSQL）: まず DB 結合テスト（`crates/seiran-api/tests/*_integration.rs`、`#[ignore]` 付き。`cargo test -p seiran-api --tests -- --ignored`）を同じ専用DBで実行し、`docker compose down -v` で DB を捨ててから全 Playwright テストを実行する（E2E は空のDBから始める前提）。結合テストのハーネス（`tests/support/mod.rs`）がマイグレーションとテストユーザー（`seiran1` 等、パスワード `seiranda`）を用意する。失敗時は `playwright-report`/`test-results` を7日間保存する。rust-cache は `Rust` job と `shared-key` で共有（E2E 側は読み取りのみ）、Postgres イメージは Buildx の GHA キャッシュ、Playwright のブラウザは `actions/cache`。
+- `E2E` job（Node.js 26・Chromium・E2E 専用 PostgreSQL）: まず DB 結合テスト（`crates/seiran-api/tests/*_integration.rs`、`#[ignore]` 付き。`cargo test -p seiran-api --tests -- --ignored`）を同じ専用DBで実行し、`docker compose down -v` で DB を捨ててから全 Playwright テストを実行する（E2E は空のDBから始める前提）。結合テストのハーネス（`tests/support/mod.rs`）がマイグレーションとテストユーザー（`seiran1` 等、パスワード `seiranda`）を用意する。失敗時は `playwright-report`/`test-results` を7日間保存する。rust-cache は `Rust` job と `shared-key` で共有（E2E 側は読み取りのみ）、Postgres イメージは Buildx の GHA キャッシュ、Playwright のブラウザは `actions/cache`。
 - `dtolnay/rust-toolchain@stable` は両 job とも `toolchain` のバージョンを固定する。固定しないと新しい stable のたびに clippy に lint が増え、コード変更なしに CI が落ちる。更新するときは両 job を揃える。
 
 **E2E**（`e2e/`、`cd e2e && npm test`）: 外部の実サービス（Fedi/Bsky・PLC・Relay）とは通信せず、相手をすべてローカルのスタブに置き換える。ポートは開発サーバーと別（バックエンド3100・フロント5273、`e2e/ports.ts`）なので、開発サーバーを止めなくてよい。

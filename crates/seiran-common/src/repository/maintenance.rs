@@ -235,12 +235,12 @@ pub async fn orphaned_media_files(
     pool: &PgPool,
     limit: i64,
 ) -> Result<Vec<OrphanedMediaFile>, sqlx::Error> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT id, storage_provider_id, storage_key
          FROM media_files
          WHERE {ORPHANED_MEDIA_FILE_CONDITION}
          LIMIT $1"
-    ))
+    )))
     .bind(limit)
     .fetch_all(pool)
     .await
@@ -252,7 +252,7 @@ pub async fn orphaned_media_files(
 /// 論理削除済みポストの `post_attachments` 行は外部キーでメディアを参照し続けているため、
 /// 同じ文の中で一緒に消す（先に消すと、その後に孤立判定が変わったときに参照だけ失う）。
 pub async fn delete_media_file_if_orphaned(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
-    let deleted: Option<i64> = sqlx::query_scalar(&format!(
+    let deleted: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
         "WITH gone AS (
              DELETE FROM media_files WHERE id = $1 AND {ORPHANED_MEDIA_FILE_CONDITION} RETURNING id
          ), dead_attachments AS (
@@ -260,7 +260,7 @@ pub async fn delete_media_file_if_orphaned(pool: &PgPool, id: i64) -> Result<boo
              WHERE EXISTS (SELECT 1 FROM gone WHERE gone.id = pa.media_file_id)
          )
          SELECT id FROM gone"
-    ))
+    )))
     .bind(id)
     .fetch_optional(pool)
     .await?;

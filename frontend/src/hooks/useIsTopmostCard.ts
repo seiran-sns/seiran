@@ -70,7 +70,7 @@ function stopIfIdle() {
 }
 
 /** `ref`（カードの中の要素）を含むカードが、`enabled` の間、上端が見えているカードのうち文書順の最初か。 */
-export function useIsTopmostCard(ref: RefObject<Element>, enabled: boolean): boolean {
+export function useIsTopmostCard(ref: RefObject<Element | null>, enabled: boolean): boolean {
   const [isTopmost, setIsTopmost] = useState(false);
 
   useEffect(() => {

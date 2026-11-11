@@ -84,14 +84,14 @@ pub async fn outbox_owner(
     pool: &PgPool,
     username: &str,
 ) -> Result<Option<(i64, i64)>, sqlx::Error> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT a.id, COUNT(p.id) AS total
          FROM actors a
          LEFT JOIN posts p ON p.actor_id = a.id AND {PUBLIC_POST_CONDITION}
          WHERE a.username = $1 AND a.actor_type = 'local' AND a.withdrawn_at IS NULL
          GROUP BY a.id
          LIMIT 1"
-    ))
+    )))
     .bind(username)
     .fetch_optional(pool)
     .await
@@ -120,7 +120,7 @@ pub async fn outbox_page(
     max_id: Option<i64>,
     limit: i64,
 ) -> Result<Vec<OutboxRow>, sqlx::Error> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT p.id, p.body, p.created_at, p.repost_of_post_id, p.ap_object_id,
                 orig.ap_object_id AS orig_ap_object_id, orig.at_uri AS orig_at_uri,
                 oa.username AS orig_username, oa.display_name AS orig_display_name,
@@ -131,7 +131,7 @@ pub async fn outbox_page(
          WHERE p.actor_id = $1 AND {PUBLIC_POST_CONDITION}
            AND p.id < COALESCE($2::bigint, 9223372036854775807)
          ORDER BY p.id DESC LIMIT $3"
-    ))
+    )))
     .bind(actor_id)
     .bind(max_id)
     .bind(limit)
@@ -144,13 +144,13 @@ pub async fn featured_posts(
     pool: &PgPool,
     actor_id: i64,
 ) -> Result<Vec<(i64, String, DateTime<Utc>)>, sqlx::Error> {
-    sqlx::query_as(&format!(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "SELECT p.id, p.body, p.created_at
          FROM pinned_posts pp
          JOIN posts p ON p.id = pp.post_id
          WHERE pp.actor_id = $1 AND {PUBLIC_POST_CONDITION}
          ORDER BY pp.pinned_at DESC"
-    ))
+    )))
     .bind(actor_id)
     .fetch_all(pool)
     .await

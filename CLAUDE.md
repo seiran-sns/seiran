@@ -45,7 +45,7 @@
 2. 新しいマイグレーションファイルを追加した場合は `cargo sqlx migrate run` でローカル DB に適用する（後述）
 3. `cargo build` でコンパイルエラーがないことを確認
 4. `cargo clippy --workspace --all-targets -- -D warnings` を実行し、指摘が無いことを確認（CI と同じコマンド）
-5. `frontend/package.json` を変更した場合（依存追加・更新・削除）は、CI と同じ Node バージョン（20系）で `frontend/` 内から `npm ci` を実行し、`package-lock.json` が package.json と整合していることを確認する（`npm install` は lockfile のずれを黙って許容してしまい検出できない。`npm ci` は CI が実際に叩くコマンドそのものなので、ローカルで通れば CI でも通る）
+5. `frontend/package.json` を変更した場合（依存追加・更新・削除）は、CI と同じ Node バージョン（26系）で `frontend/` 内から `npm ci` を実行し、`package-lock.json` が package.json と整合していることを確認する（`npm install` は lockfile のずれを黙って許容してしまい検出できない。`npm ci` は CI が実際に叩くコマンドそのものなので、ローカルで通れば CI でも通る）
 6. フロントエンド・バックエンドの挙動に関わる変更をした場合は `cd e2e && npm test` を実行し、E2Eテストが全て成功することを確認する（E2E側はバックエンド3100・フロントエンド5273という専用ポート（`e2e/ports.ts`）で動くため、`scripts/dev-up.sh` 等のローカル確認用サーバー（バックエンド3000・フロントエンド`build:watch`+`preview`4174）を止める必要はない）
 7. 関連する設計文書を更新（上記の対応表に従う）
 8. `docs/roadmap.md` の進捗チェックを更新

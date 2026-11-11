@@ -51,7 +51,7 @@ pub async fn resolve_bridge_target(
     };
     // 列名はプログラム内定数からのみ選択されるためSQLインジェクションの懸念は無い。
     let sql = format!("SELECT id FROM posts WHERE {column} = $1 AND deleted_at IS NULL LIMIT 1");
-    sqlx::query_scalar::<_, i64>(&sql)
+    sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(sql))
         .bind(target_uri)
         .fetch_optional(pool)
         .await
@@ -73,7 +73,7 @@ pub async fn set_original_bridge_pointer(
         BridgeTargetProtocol::Atp => "atp_bridge_post_id",
     };
     let sql = format!("UPDATE posts SET {column} = $1 WHERE id = $2");
-    sqlx::query(&sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(bridge_post_id)
         .bind(original_post_id)
         .execute(pool)

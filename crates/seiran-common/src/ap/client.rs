@@ -4,7 +4,7 @@
 //! および受信リクエストの HTTP Signatures 署名検証を行う。
 
 use rsa::pkcs8::{DecodePrivateKey, DecodePublicKey};
-use rsa::{Pkcs1v15Sign, RsaPrivateKey, RsaPublicKey};
+use rsa::{Pkcs1v15Sign, PrivateKey, PublicKey};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -531,7 +531,7 @@ impl ApClient {
         signing_string: &str,
         signature_bytes: &[u8],
     ) -> Result<(), ApError> {
-        let public_key = RsaPublicKey::from_public_key_pem(pem.trim())
+        let public_key = PublicKey::from_public_key_pem(pem.trim())
             .map_err(|e| ApError::Signature(format!("RSA公開鍵のパース失敗: {}", e)))?;
 
         let mut hasher = Sha256::new();
@@ -575,7 +575,7 @@ impl ApClient {
         let actor_key_id_owned = actor_key_id.to_string();
         let private_key_pem_owned = private_key_pem.to_string();
         let signature_header = tokio::task::spawn_blocking(move || -> Result<String, ApError> {
-            let private_key = RsaPrivateKey::from_pkcs8_pem(&private_key_pem_owned)
+            let private_key = PrivateKey::from_pkcs8_pem(&private_key_pem_owned)
                 .map_err(|e| ApError::Signature(format!("RSA 秘密鍵パース失敗: {}", e)))?;
 
             let mut hasher = Sha256::new();
@@ -646,7 +646,7 @@ impl ApClient {
         );
 
         // RSA-SHA256 署名
-        let private_key = RsaPrivateKey::from_pkcs8_pem(private_key_pem)
+        let private_key = PrivateKey::from_pkcs8_pem(private_key_pem)
             .map_err(|e| ApError::Signature(format!("RSA 秘密鍵パース失敗: {}", e)))?;
 
         let mut hasher = Sha256::new();
@@ -1109,7 +1109,7 @@ mod tests {
 
     #[test]
     fn verify_with_pem_accepts_pleroma_trailing_blank_line() {
-        // 末尾の空行があっても `RsaPublicKey::from_public_key_pem` がエラーにならない
+        // 末尾の空行があっても `PublicKey::from_public_key_pem` がエラーにならない
         // ことだけを確認する（署名検証自体は失敗して構わない）。
         let result =
             ApClient::verify_with_pem(PLEROMA_STYLE_PEM_TRAILING_BLANK_LINE, "dummy", &[0u8; 32]);

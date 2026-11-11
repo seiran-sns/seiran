@@ -242,9 +242,9 @@ impl AtMigrationRepository for PgAtMigrationRepository {
     }
 
     async fn get(&self, id: i64) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
-        sqlx::query_as::<_, AtMigrationRequestRow>(&format!(
+        sqlx::query_as::<_, AtMigrationRequestRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLUMNS} FROM at_migration_requests WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -254,9 +254,9 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         &self,
         request_token_hash: &str,
     ) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
-        sqlx::query_as::<_, AtMigrationRequestRow>(&format!(
+        sqlx::query_as::<_, AtMigrationRequestRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLUMNS} FROM at_migration_requests WHERE request_token_hash = $1"
-        ))
+        )))
         .bind(request_token_hash)
         .fetch_optional(&self.pool)
         .await

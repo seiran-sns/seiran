@@ -246,9 +246,9 @@ fn optimize_list(values: Vec<SearchCondition>, and: bool) -> SearchCondition {
     }
 }
 
-pub fn append_sql<'args>(
+pub fn append_sql(
     condition: &SearchCondition,
-    builder: &mut QueryBuilder<'args, Postgres>,
+    builder: &mut QueryBuilder<Postgres>,
     me: Option<(i64, &str)>,
 ) {
     match condition {
@@ -322,11 +322,7 @@ pub fn append_sql<'args>(
     }
 }
 
-fn append_actor_handle_sql<'args>(
-    builder: &mut QueryBuilder<'args, Postgres>,
-    value: &str,
-    alias: &str,
-) {
+fn append_actor_handle_sql(builder: &mut QueryBuilder<Postgres>, value: &str, alias: &str) {
     let (username, domain) = value.split_once('@').unwrap_or((value, ""));
     builder
         .push("LOWER(")

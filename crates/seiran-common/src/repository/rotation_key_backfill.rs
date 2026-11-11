@@ -63,9 +63,9 @@ impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {
         &self,
         after_id: Option<i64>,
     ) -> Result<Option<(i64, String)>, sqlx::Error> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT id, at_did FROM actors WHERE {CANDIDATE_WHERE} AND id > $1 ORDER BY id LIMIT 1"
-        ))
+        )))
         .bind(after_id.unwrap_or(0))
         .fetch_optional(&self.pool)
         .await
@@ -85,9 +85,9 @@ impl RotationKeyBackfillRepository for PgRotationKeyBackfillRepository {
     }
 
     async fn count_pending(&self) -> Result<i64, sqlx::Error> {
-        sqlx::query_scalar(&format!(
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT COUNT(*) FROM actors WHERE {CANDIDATE_WHERE}"
-        ))
+        )))
         .fetch_one(&self.pool)
         .await
     }

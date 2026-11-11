@@ -17,7 +17,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     && cp target/release/seiran-server /seiran-server
 
 # ─── フロントエンド ────────────────────────────────────────────────────────────
-FROM node:22-bookworm-slim AS frontend
+FROM node:26-bookworm-slim AS frontend
 WORKDIR /src/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 # postinstall（twemoji のコピー・絵文字注釈の生成）が scripts/ を使う。

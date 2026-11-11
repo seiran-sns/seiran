@@ -134,9 +134,9 @@ impl MediaFileRepository for PgMediaFileRepository {
         sha256: &str,
         blurhash: &str,
     ) -> Result<Option<MediaFile>, MediaFileError> {
-        let row = sqlx::query_as::<_, MediaFile>(&format!(
+        let row = sqlx::query_as::<_, MediaFile>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLS} FROM media_files WHERE sha256 = $1 AND blurhash = $2 LIMIT 1"
-        ))
+        )))
         .bind(sha256)
         .bind(blurhash)
         .fetch_optional(&self.pool)
@@ -145,9 +145,9 @@ impl MediaFileRepository for PgMediaFileRepository {
     }
 
     async fn find_by_sha256(&self, sha256: &str) -> Result<Option<MediaFile>, MediaFileError> {
-        let row = sqlx::query_as::<_, MediaFile>(&format!(
+        let row = sqlx::query_as::<_, MediaFile>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLS} FROM media_files WHERE sha256 = $1 AND blurhash IS NULL LIMIT 1"
-        ))
+        )))
         .bind(sha256)
         .fetch_optional(&self.pool)
         .await?;
@@ -155,9 +155,9 @@ impl MediaFileRepository for PgMediaFileRepository {
     }
 
     async fn find_by_id(&self, id: i64) -> Result<Option<MediaFile>, MediaFileError> {
-        let row = sqlx::query_as::<_, MediaFile>(&format!(
+        let row = sqlx::query_as::<_, MediaFile>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLS} FROM media_files WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await?;
@@ -189,13 +189,13 @@ impl MediaFileRepository for PgMediaFileRepository {
     }
 
     async fn upsert(&self, req: CreateMediaFile) -> Result<(MediaFile, bool), MediaFileError> {
-        let row = sqlx::query(&format!(
+        let row = sqlx::query(sqlx::AssertSqlSafe(format!(
             "INSERT INTO media_files \
              (id, storage_provider_id, sha256, blurhash, size, width, height, mime_type, storage_key, duration_ms, thumbnail_key, uploaded_by_actor_id, is_animated_image) \
              VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13) \
              ON CONFLICT (sha256, blurhash) DO UPDATE SET last_uploaded_at = now() \
              RETURNING {SELECT_COLS}, (xmax = 0) AS inserted"
-        ))
+        )))
         .bind(req.id)
         .bind(req.storage_provider_id)
         .bind(req.sha256)
@@ -248,13 +248,13 @@ impl MediaFileRepository for PgMediaFileRepository {
         until_id: Option<i64>,
         since_id: Option<i64>,
     ) -> Result<Vec<MediaFile>, MediaFileError> {
-        let rows = sqlx::query_as::<_, MediaFile>(&format!(
+        let rows = sqlx::query_as::<_, MediaFile>(sqlx::AssertSqlSafe(format!(
             "SELECT {SELECT_COLS} FROM media_files
              WHERE uploaded_by_actor_id = $1
                AND id < COALESCE($2::bigint, 9223372036854775807)
                AND id > COALESCE($3::bigint, 0)
              ORDER BY id DESC LIMIT $4"
-        ))
+        )))
         .bind(actor_id)
         .bind(until_id)
         .bind(since_id)
