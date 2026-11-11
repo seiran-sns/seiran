@@ -9,8 +9,9 @@
 # ⚠️ このディレクトリを Docker ボリュームにマウントして永続化してください。
 config/
 
-# フロントエンド依存パッケージ
-frontend/node_modules/
+# npm 依存パッケージ（frontend・e2e、およびリポジトリ直下で vite を動かしたときのキャッシュ）。
+# 末尾に / を付けるとディレクトリにしか一致せず、メインからの symlink が未追跡として残る。
+node_modules
 frontend/dist/
 *.tsbuildinfo
 
