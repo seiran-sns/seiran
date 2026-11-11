@@ -2,15 +2,10 @@ import { useEffect, useState } from "react";
 import { api, FrequentReaction } from "../api/client";
 import { useAuth } from "../contexts/AuthContext";
 import { fetchCustomEmojis } from "../lib/customEmojis";
-import {
-  mergeQuickReactionsStable,
-  QUICK_REACTION_HEART,
-  QuickReaction,
-  selectQuickReactions,
-} from "../lib/quickReactions";
+import { mergeQuickReactionsStable, QuickReaction, selectQuickReactions } from "../lib/quickReactions";
 import { currentUtcOffsetMinutes, localTimeSlotKey, msUntilNextTimeSlot } from "../lib/reactionTimeSlot";
 
-const HEART_ONLY: QuickReaction[] = [{ content: QUICK_REACTION_HEART }];
+const NONE: QuickReaction[] = [];
 
 /** 自分のリアクション後に候補を取り直すまでの待ち時間。連続して付けたときに1回にまとめる。 */
 const REFRESH_DELAY_MS = 2000;
@@ -20,7 +15,7 @@ const TIME_SLOT_MARGIN_MS = 5000;
 
 // タイムラインの全 NoteCard が同じ候補を使うため、プロセス内で1つだけ持って購読させる
 // （カードごとに `GET /api/reactions/frequent` を叩かない）。ログインユーザーが替わったら取り直す。
-let current: QuickReaction[] = HEART_ONLY;
+let current: QuickReaction[] = NONE;
 let loadedFor: string | null = null;
 /** 今の候補をどの時間帯（`localTimeSlotKey`）のランキングで並べたか。 */
 let loadedSlot: string | null = null;
@@ -84,7 +79,7 @@ export function scheduleQuickReactionsRefresh() {
   }, REFRESH_DELAY_MS);
 }
 
-/** NoteCard のクイックリアクションボタンに並べる絵文字（先頭は常に ❤️）。 */
+/** NoteCard のクイックリアクションのポップアップに並べる絵文字（❤️を除くよく使う順）。 */
 export function useQuickReactions(): QuickReaction[] {
   const { user } = useAuth();
   const userId = user ? String(user.id) : null;
@@ -98,10 +93,10 @@ export function useQuickReactions(): QuickReaction[] {
         loadedSlot = null;
         if (slotTimer !== null) window.clearTimeout(slotTimer);
         slotTimer = null;
-        publish(HEART_ONLY);
+        publish(NONE);
       }
     } else if (loadedFor !== userId) {
-      publish(HEART_ONLY);
+      publish(NONE);
       load(userId);
     }
     setItems(current);

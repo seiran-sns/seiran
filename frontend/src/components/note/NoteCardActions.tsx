@@ -7,11 +7,11 @@ import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
 import { useFitCount } from "../../hooks/useFitCount";
 import { useQuickReactions } from "../../hooks/useQuickReactions";
-import { QUICK_REACTION_FREQUENT_LIMIT, QuickReaction } from "../../lib/quickReactions";
+import { QUICK_REACTION_HEART } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
-import QuickReactionButtons from "./QuickReactionButtons";
+import { QuickHeartButton, QuickReactionPopup } from "./QuickReactionButtons";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -117,20 +117,10 @@ export default function NoteCardActions({
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
   const myReaction = reactions.find((r) => r.reactedByMe);
   const quickReactions = useQuickReactions();
-  // ❤️の後ろの「よく使う」枠は、候補が足りなくても常に上限数ぶんの場所を取る（空き枠は
-  // 見えない置き場所）。ホバーでの表示切り替えや候補数の違いでケバブメニューの位置が
-  // 動かないようにするため。
-  const quickSlots: (QuickReaction | null)[] = [
-    ...quickReactions,
-    ...Array<null>(Math.max(0, 1 + QUICK_REACTION_FREQUENT_LIMIT - quickReactions.length)).fill(null),
-  ];
   const actionsRef = useRef<HTMLDivElement>(null);
-  // クイックリアクションボタンは幅が足りない分を末尾（使用頻度の低い側）から隠し、
-  // ケバブメニューのボタンを行からはみ出させない（メニューにしか無い操作があるため）。
-  const visibleQuickCount = useFitCount(
-    actionsRef,
-    quickSlots.map((q, i) => q?.content ?? `slot:${i}`)
-  );
+  // ❤️ボタンは幅が足りなければ隠し、ケバブメニューのボタンを行からはみ出させない
+  // （メニューにしか無い操作があるため）。
+  const heartVisible = useFitCount(actionsRef, [QUICK_REACTION_HEART]) > 0;
   const hasLoss =
     replyCount > 0 ||
     quoteCount > 0 ||
@@ -242,82 +232,90 @@ export default function NoteCardActions({
         indent={indent}
       />
 
-      <div className={styles.actions} ref={actionsRef}>
-        <button
-          className={styles.actionBtn}
-          onClick={onReply}
-          disabled={isGateReplyBlocked}
-          title={
-            isGateReplyBlocked
-              ? t("home:noteCard.replyGateDisabledTitle")
-              : t("home:noteCard.replyButton")
-          }
-        >
-          <TwemojiEmoji emoji="💬" />{" "}
-          {replyCount > 0 && (
-            <span className={styles.actionCount}>{formatCount(replyCount)}</span>
-          )}
-        </button>
-        <button
-          className={styles.actionBtn}
-          onClick={onQuote}
-          disabled={isPrivateQuoteTarget || isGateQuoteBlocked}
-          title={
-            isPrivateQuoteTarget
-              ? t("home:noteCard.quoteDisabledTitle")
-              : isGateQuoteBlocked
-                ? t("home:noteCard.quoteGateDisabledTitle")
-                : t("home:noteCard.quoteButton")
-          }
-        >
-          ❝{" "}
-          {quoteCount > 0 && (
-            <span className={styles.actionCount}>{formatCount(quoteCount)}</span>
-          )}
-        </button>
-        <button
-          className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
-          onClick={onRepost}
-          disabled={
-            reposting ||
-            unreposting ||
-            ((isPrivateRepostTarget || repostCoolingDown) && !reposted)
-          }
-          title={
-            isPrivateRepostTarget
-              ? t("home:noteCard.repostDisabledTitle")
-              : reposted
-                ? t("home:noteCard.unrepostTitle")
-                : repostCoolingDown
-                  ? t("home:noteCard.repostCooldownTitle")
-                  : t("home:noteCard.repostTitle")
-          }
-        >
-          <TwemojiEmoji emoji="🔁" />{" "}
-          {repostCount > 0 && (
-            <span className={styles.actionCount}>{formatCount(repostCount)}</span>
-          )}
-        </button>
-        <ReactionPicker
-          onPick={onToggleReaction}
-          disabled={reactionPending}
-          open={reactionPickerOpen}
-          onOpenChange={setReactionPickerOpen}
-          count={totalReactionCount}
-          active={myReaction !== undefined}
-        />
-        <QuickReactionButtons
-          slots={quickSlots}
-          visibleCount={visibleQuickCount}
+      <div className={styles.actionsArea}>
+        <div className={styles.actions} ref={actionsRef}>
+          <button
+            className={styles.actionBtn}
+            onClick={onReply}
+            disabled={isGateReplyBlocked}
+            title={
+              isGateReplyBlocked
+                ? t("home:noteCard.replyGateDisabledTitle")
+                : t("home:noteCard.replyButton")
+            }
+          >
+            <TwemojiEmoji emoji="💬" />{" "}
+            {replyCount > 0 && (
+              <span className={styles.actionCount}>{formatCount(replyCount)}</span>
+            )}
+          </button>
+          <button
+            className={styles.actionBtn}
+            onClick={onQuote}
+            disabled={isPrivateQuoteTarget || isGateQuoteBlocked}
+            title={
+              isPrivateQuoteTarget
+                ? t("home:noteCard.quoteDisabledTitle")
+                : isGateQuoteBlocked
+                  ? t("home:noteCard.quoteGateDisabledTitle")
+                  : t("home:noteCard.quoteButton")
+            }
+          >
+            ❝{" "}
+            {quoteCount > 0 && (
+              <span className={styles.actionCount}>{formatCount(quoteCount)}</span>
+            )}
+          </button>
+          <button
+            className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
+            onClick={onRepost}
+            disabled={
+              reposting ||
+              unreposting ||
+              ((isPrivateRepostTarget || repostCoolingDown) && !reposted)
+            }
+            title={
+              isPrivateRepostTarget
+                ? t("home:noteCard.repostDisabledTitle")
+                : reposted
+                  ? t("home:noteCard.unrepostTitle")
+                  : repostCoolingDown
+                    ? t("home:noteCard.repostCooldownTitle")
+                    : t("home:noteCard.repostTitle")
+            }
+          >
+            <TwemojiEmoji emoji="🔁" />{" "}
+            {repostCount > 0 && (
+              <span className={styles.actionCount}>{formatCount(repostCount)}</span>
+            )}
+          </button>
+          <ReactionPicker
+            onPick={onToggleReaction}
+            disabled={reactionPending}
+            open={reactionPickerOpen}
+            onOpenChange={setReactionPickerOpen}
+            count={totalReactionCount}
+            active={myReaction !== undefined}
+          />
+          <QuickHeartButton
+            myReactionEmoji={myReaction?.emoji}
+            disabled={reactionPending}
+            hidden={!heartVisible}
+            onToggleReaction={onToggleReaction}
+          />
+          <ActionsMenu
+            items={menuItems}
+            triggerTitle={t("home:noteCard.menuTitle")}
+            triggerClassName={styles.actionBtn}
+            onOpen={redraft?.onMenuOpen}
+          />
+        </div>
+        <QuickReactionPopup
+          reactions={quickReactions}
+          anchorRef={actionsRef}
           myReactionEmoji={myReaction?.emoji}
           disabled={reactionPending}
           onToggleReaction={onToggleReaction}
-        />
-        <ActionsMenu
-          items={menuItems}
-          triggerTitle={t("home:noteCard.menuTitle")}
-          triggerClassName={styles.actionBtn}
-          onOpen={redraft?.onMenuOpen}
         />
       </div>
 
