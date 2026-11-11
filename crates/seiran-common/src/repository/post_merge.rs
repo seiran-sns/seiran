@@ -60,7 +60,7 @@ pub async fn cleanup_merged_post(
     let mut skipped = Vec::new();
     for (table, column) in REPARENT_SIMPLE {
         let sql = format!("UPDATE {table} SET {column} = $1 WHERE {column} = $2");
-        if let Err(e) = sqlx::query(&sql)
+        if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(survivor_post_id)
             .bind(doomed_post_id)
             .execute(pool)
@@ -79,7 +79,7 @@ pub async fn cleanup_merged_post(
              UPDATE posts SET {count_column} = {count_column} + (SELECT count(*) FROM moved)
              WHERE id = $1 AND EXISTS (SELECT 1 FROM moved)"
         );
-        if let Err(e) = sqlx::query(&sql)
+        if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(survivor_post_id)
             .bind(doomed_post_id)
             .execute(pool)

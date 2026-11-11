@@ -1522,7 +1522,7 @@ impl PostRepository for PgPostRepository {
         let (post_id_col, _uri_col, status_col) = kind.columns();
         if let Some(resolved) = resolved_post_id {
             let sql = format!("UPDATE posts SET {post_id_col} = $1 WHERE id = $2");
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql))
                 .bind(resolved)
                 .bind(post_id)
                 .execute(&self.pool)
@@ -1530,7 +1530,7 @@ impl PostRepository for PgPostRepository {
         } else if let Some(status) = ref_status {
             let sql =
                 format!("UPDATE posts SET {status_col} = $1::post_reference_status WHERE id = $2");
-            sqlx::query(&sql)
+            sqlx::query(sqlx::AssertSqlSafe(sql))
                 .bind(status)
                 .bind(post_id)
                 .execute(&self.pool)

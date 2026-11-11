@@ -13,18 +13,11 @@
 //! ```
 
 use p256::ecdsa::SigningKey;
-use p256::pkcs8::{
-    EncodePrivateKey as P256EncodePrivateKey, EncodePublicKey as P256EncodePublicKey, LineEnding,
-};
-// rsa と argon2 は同じ rand_core v0.6.x を使うため、argon2 が再エクスポートする OsRng を
-// RSA 鍵生成・乱数バイト生成に使う。p256 は rand_core 0.10 系なので `Generate` で鍵を作る。
+// rsa と p256 は同じ pkcs8 0.11 系なので、PEM 変換のトレイトを共有する。
+use p256::pkcs8::{EncodePrivateKey, EncodePublicKey, LineEnding};
+// 乱数バイト生成には argon2 が再エクスポートする OsRng（rand_core 0.6 系）を使う。
+// rsa の鍵生成は rand_core 0.10 系の RNG を要求するため、getrandom の SysRng を渡す。
 use argon2::password_hash::rand_core::OsRng;
-// rsa は pkcs8 0.10 系、p256 は 0.11 系で、同名のトレイトが別物になる。
-use rsa::pkcs8::{
-    EncodePrivateKey as RsaEncodePrivateKey, EncodePublicKey as RsaEncodePublicKey,
-    LineEnding as RsaLineEnding,
-};
-use rsa::RsaPrivateKey;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
@@ -85,7 +78,7 @@ impl Secrets {
             .map_err(|e| SecretsError::KeyGen(e.to_string()))?;
 
         // --- ActivityPub HTTP Signatures 用 RSA-2048 鍵ペア ---
-        let (ap_private_key_pem, ap_public_key_pem) = generate_rsa_key_pair(&mut rng)?;
+        let (ap_private_key_pem, ap_public_key_pem) = generate_rsa_key_pair()?;
 
         // --- AES-256-GCM 汎用暗号化鍵: 256bit ランダム値 (hex) ---
         let mut enc_bytes = [0u8; 32];
@@ -107,8 +100,7 @@ impl Secrets {
         if self.ap_private_key_pem.is_some() && self.ap_public_key_pem.is_some() {
             return Ok(false);
         }
-        let mut rng = OsRng;
-        let (priv_pem, pub_pem) = generate_rsa_key_pair(&mut rng)?;
+        let (priv_pem, pub_pem) = generate_rsa_key_pair()?;
         self.ap_private_key_pem = Some(priv_pem);
         self.ap_public_key_pem = Some(pub_pem);
         tracing::info!("[seiran] AP RSA 鍵ペアを新規生成しました。");
@@ -252,18 +244,18 @@ pub enum SecretsError {
 }
 
 /// RSA-2048 鍵ペアを生成し (秘密鍵 PEM, 公開鍵 PEM) を返す
-fn generate_rsa_key_pair(rng: &mut OsRng) -> Result<(String, String), SecretsError> {
-    let private_key = RsaPrivateKey::new(rng, 2048)
+fn generate_rsa_key_pair() -> Result<(String, String), SecretsError> {
+    let private_key = rsa::PrivateKey::new(&mut getrandom::SysRng, 2048)
         .map_err(|e| SecretsError::KeyGen(format!("RSA鍵生成失敗: {}", e)))?;
     let public_key = private_key.to_public_key();
 
     let private_pem = private_key
-        .to_pkcs8_pem(RsaLineEnding::LF)
+        .to_pkcs8_pem(LineEnding::LF)
         .map_err(|e| SecretsError::KeyGen(format!("RSA秘密鍵PEM変換失敗: {}", e)))?
         .to_string();
 
     let public_pem = public_key
-        .to_public_key_pem(RsaLineEnding::LF)
+        .to_public_key_pem(LineEnding::LF)
         .map_err(|e| SecretsError::KeyGen(format!("RSA公開鍵PEM変換失敗: {}", e)))?;
 
     Ok((private_pem, public_pem))

@@ -336,9 +336,9 @@ impl PgActorRepository {
 #[async_trait]
 impl ActorRepository for PgActorRepository {
     async fn find_local_by_user_id(&self, user_id: i64) -> Result<Option<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1"
-        ))
+        )))
         .bind(user_id)
         .fetch_optional(&self.pool)
         .await
@@ -351,9 +351,9 @@ impl ActorRepository for PgActorRepository {
     ) -> Result<Option<Actor>, sqlx::Error> {
         // username は DNS ラベルとして扱う（大文字小文字を区別しない）。
         // `crates/seiran-common/src/username.rs` のモジュールドキュメント参照。
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE LOWER(username) = LOWER($1) AND domain = $2 AND withdrawn_at IS NULL LIMIT 1"
-        ))
+        )))
         .bind(username)
         .bind(domain)
         .fetch_optional(&self.pool)
@@ -367,9 +367,9 @@ impl ActorRepository for PgActorRepository {
     ) -> Result<Option<Actor>, sqlx::Error> {
         // username は DNS ラベルとして扱う（大文字小文字を区別しない）。
         // `crates/seiran-common/src/username.rs` のモジュールドキュメント参照。
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE LOWER(username) = LOWER($1) AND domain = $2 LIMIT 1"
-        ))
+        )))
         .bind(username)
         .bind(domain)
         .fetch_optional(&self.pool)
@@ -377,18 +377,18 @@ impl ActorRepository for PgActorRepository {
     }
 
     async fn find_by_ap_uri(&self, ap_uri: &str) -> Result<Option<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE ap_uri = $1 LIMIT 1"
-        ))
+        )))
         .bind(ap_uri)
         .fetch_optional(&self.pool)
         .await
     }
 
     async fn find_by_did(&self, did: &str) -> Result<Option<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE at_did = $1 LIMIT 1"
-        ))
+        )))
         .bind(did)
         .fetch_optional(&self.pool)
         .await
@@ -399,12 +399,12 @@ impl ActorRepository for PgActorRepository {
         limit: i64,
         cursor_id: Option<i64>,
     ) -> Result<Vec<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors
              WHERE at_did IS NOT NULL AND id > COALESCE($2::bigint, 0)
              ORDER BY id ASC
              LIMIT $1"
-        ))
+        )))
         .bind(limit)
         .bind(cursor_id)
         .fetch_all(&self.pool)
@@ -412,18 +412,18 @@ impl ActorRepository for PgActorRepository {
     }
 
     async fn find_by_id(&self, id: i64) -> Result<Option<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE id = $1 LIMIT 1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
     }
 
     async fn find_by_ids(&self, ids: &[i64]) -> Result<Vec<Actor>, sqlx::Error> {
-        sqlx::query_as::<_, Actor>(&format!(
+        sqlx::query_as::<_, Actor>(sqlx::AssertSqlSafe(format!(
             "SELECT {ACTOR_COLS} FROM actors WHERE id = ANY($1)"
-        ))
+        )))
         .bind(ids)
         .fetch_all(&self.pool)
         .await

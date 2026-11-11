@@ -1,18 +1,15 @@
 # cargo-audit / rustsec/audit-check（CI）の設定（docs/code_audit_2026-08-05.md S-9）。
 #
-# 現時点で修正版が存在しない既知のadvisoryを一時的に無視する。新規に混入する
+# 現時点で修正版を使えない既知のadvisoryを一時的に無視する。新規に混入する
 # 脆弱性はここに無いものだけがCIを落とすため、監視自体は機能する。無視した項目は
 # 定期的に見直すこと。
 [advisories]
 ignore = [
-    # rsa: Marvin Attack（タイミングサイドチャネル）。修正版が存在しない
-    # （2026-08-05時点）。seiran-common がAP HTTP SignaturesのRSA-SHA256署名に
-    # 使用しており、フェディバース標準に合わせるための直接依存で代替が無い。
-    "RUSTSEC-2023-0071",
-    # libsqlite3-sys: 同梱の C SQLite の脆弱性（修正版は0.39.0以上）。sqlx 0.8 が
+    # libsqlite3-sys: 同梱の C SQLite の脆弱性（修正版は0.39.0以上）。sqlx が
     # SQLite対応（sqlx-sqlite）を任意依存として Cargo.lock に載せるため検出されるが、
     # seiran は postgres 機能しか有効にしておらず、どのターゲットでもビルドに含まれない
-    # （`cargo tree -i libsqlite3-sys --target all` が空）。修正版の libsqlite3-sys を
-    # 使えるのは sqlx 0.9 以降なので、sqlx を 0.9 へ上げたらこの行を消す。
+    # （`cargo tree -i libsqlite3-sys --target all` が空）。sqlx 0.9.0 の sqlx-sqlite は
+    # libsqlite3-sys を `<0.38.0` に制限しているため修正版を選べない。上流の main では
+    # `<0.40.0` に緩和済みなので、それを含む sqlx が出たら更新してこの行を消す。
     "RUSTSEC-2026-0459",
 ]
