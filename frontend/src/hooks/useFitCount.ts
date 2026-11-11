@@ -12,7 +12,7 @@ const UNMEASURED_WIDTH = 32;
  *
  * 一度表示した要素の幅を覚えておき、隠している要素はその幅で収まるかを判定する。
  */
-export function useFitCount(rowRef: RefObject<HTMLElement>, keys: string[]): number {
+export function useFitCount(rowRef: RefObject<HTMLElement | null>, keys: string[]): number {
   const [fit, setFit] = useState(keys.length);
   const widths = useRef(new Map<string, number>());
   const keysSig = keys.join("\n");

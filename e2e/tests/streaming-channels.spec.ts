@@ -7,8 +7,8 @@ import { BACKEND_PORT, BACKEND_URL as SEIRAN_BASE_URL } from "../ports.ts";
 // Misskey互換のタイムラインチャンネル購読（connect/channel/disconnect）のE2E。
 // ローカルタイムラインにリモートフォロー先の投稿が混入しないこと、リストチャンネル・
 // disconnectの動作を確認する。
-// CIはNode 20固定（グローバルWebSocket非搭載）のため、`ws`パッケージを使う
-// （`fixtures/subscribe-repos-client.ts`と同じ方式）。
+// 接続完了・失敗を`once`で待つため、Node標準のWebSocketではなく`ws`パッケージを使う
+// （`mastodon-compat.spec.ts`と同じ方式）。
 
 interface ChannelEvent {
   type: string;

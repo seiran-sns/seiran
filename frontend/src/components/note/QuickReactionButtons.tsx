@@ -76,7 +76,7 @@ interface QuickReactionPopupProps {
   /** よく使う絵文字（❤️を除く、よく使う順）。 */
   reactions: QuickReaction[];
   /** ボタンバー。タッチ環境では、これを含むカードが「上端が見えているカードのうちいちばん上」のときだけ出す。 */
-  anchorRef: RefObject<HTMLElement>;
+  anchorRef: RefObject<HTMLElement | null>;
   myReactionEmoji: string | undefined;
   disabled: boolean;
   onToggleReaction: (emoji: string) => void;

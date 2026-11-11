@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import type { TFunction } from "i18next";
 import { useTranslation } from "react-i18next";
 import {
   ActorSuggestion,
@@ -179,7 +180,7 @@ function buildEmbedCandidates(
   attachments: DriveFile[],
   bodyUrls: string[],
   hasPoll: boolean,
-  t: (key: string, opts?: Record<string, unknown>) => string,
+  t: TFunction,
 ): EmbedCandidate[] {
   const images = attachments.filter(
     (a) => !a.isAnimatedImage && a.mimeType.startsWith("image/"),
