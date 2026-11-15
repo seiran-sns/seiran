@@ -420,7 +420,7 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 | `com.atproto.identity.signPlcOperation` | コードを検証し、アカウント専用ローテーションキーで署名して返す（提出はしない）。有効なコードが1件も無ければ検証を省く（SMTP 未設定のサーバーではメインパスワードだけが防壁になることを運営者が受け入れている前提） |
 | `com.atproto.identity.submitPlcOperation` | plc.directory へ提出（不可逆境界）。`#identity`/`#account` を発火し `did_moved_out_at` を設定 |
 | `com.atproto.server.deactivateAccount` | `did_moved_out_at` を設定 |
-| `com.atproto.server.createSession`（`authFactorToken`） | メール2FA。SMTP 未設定なら省く |
+| `com.atproto.server.createSession`（`authFactorToken`） | メール2FA。SMTP 未設定なら省く。空文字・空白だけの `authFactorToken` は未指定として扱う（bsky.app はコード入力欄を出す前から空文字を送ってくるため） |
 
 ## 4. クロスプロトコル配送ルール
 

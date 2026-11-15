@@ -260,7 +260,15 @@ pub async fn xrpc_create_session(
     let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
     if crate::mailer::is_smtp_configured(&smtp_settings) {
         const PURPOSE: &str = "atp_session_2fa";
-        match req.auth_factor_token.as_deref() {
+        // bsky.app はコード入力欄を出す前の初回ログインでも `authFactorToken: ""` を送る。
+        // 空文字を「コード入力あり」と扱うと照合に失敗して AuthenticationRequired になり、
+        // コード入力欄に進めないままログインできなくなるため、未指定と同じに扱う（公式PDS準拠）。
+        match req
+            .auth_factor_token
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+        {
             None => {
                 let code = format!("{:06}", uuid::Uuid::new_v4().as_u128() % 1_000_000);
                 let code_hash = hex::encode(sha2::Sha256::digest(code.as_bytes()));
@@ -298,7 +306,7 @@ pub async fn xrpc_create_session(
                 return auth_factor_token_required_error();
             }
             Some(token) => {
-                let code_hash = hex::encode(sha2::Sha256::digest(token.trim().as_bytes()));
+                let code_hash = hex::encode(sha2::Sha256::digest(token.as_bytes()));
                 match state
                     .email_short_codes
                     .consume(actor.id, PURPOSE, &code_hash)
