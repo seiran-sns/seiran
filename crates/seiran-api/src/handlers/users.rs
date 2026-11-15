@@ -88,16 +88,17 @@ pub async fn user_posts(
     .await
     .ok()
     .map(|u| u.user_id);
-    let my_actor_id: Option<i64> = match my_user_id {
-        Some(uid) => state
-            .actors
-            .find_local_by_user_id(uid)
-            .await
-            .ok()
-            .flatten()
-            .map(|a| a.id),
-        None => None,
-    };
+    // 管理者がローカルユーザーのプロフィールを見るときは、対象本人と同じ可視範囲で投稿を取る
+    // （`resolve_profile_viewer`、本来見えない投稿には後で`visible_by_admin_override`を付ける）。
+    let actor_is_local = matches!(
+        state.actors.find_by_id(actor_id).await,
+        Ok(Some(ref a)) if a.actor_type == "local"
+    );
+    let (my_actor_id, posts_viewer_actor_id) =
+        match resolve_profile_viewer(&state, my_user_id, actor_id, actor_is_local).await {
+            Ok(v) => v,
+            Err(e) => return e.into_response(),
+        };
 
     // 種別を指定したときだけ、投稿・リアクションのどちらを取るかが決まる（`reaction` だけなら
     // 投稿は取らず、投稿の種別だけならリアクションは取らない）。
@@ -118,7 +119,7 @@ pub async fn user_posts(
             .posts
             .timeline_by_actor_filtered(
                 actor_id,
-                my_actor_id,
+                posts_viewer_actor_id,
                 seiran_common::repository::Page {
                     limit,
                     until_id,
@@ -138,7 +139,18 @@ pub async fn user_posts(
     } else {
         Vec::new()
     };
-    let notes = build_note_responses(&state, post_rows, my_actor_id).await;
+    let mut notes = build_note_responses(&state, post_rows, my_actor_id).await;
+    if posts_viewer_actor_id != my_actor_id {
+        if let Err(e) = crate::handlers::notes::queries::mark_admin_override_posts(
+            &state,
+            &mut notes,
+            my_actor_id,
+        )
+        .await
+        {
+            return e.into_response();
+        }
+    }
 
     if !params.include_reactions {
         return Json(notes).into_response();
@@ -773,11 +785,13 @@ async fn build_profile_response(
         .into_response()
 }
 
-/// 閲覧者の actor_id と、投稿一覧の可視性判定に使う閲覧者（管理者は対象本人と同じ可視範囲）を返す。
+/// 閲覧者の actor_id と、投稿一覧の可視性判定に使う閲覧者（管理者がローカルユーザーを
+/// 見るときは対象本人と同じ可視範囲）を返す。
 async fn resolve_profile_viewer(
     state: &AppState,
     my_user_id: Option<i64>,
     actor_id: i64,
+    actor_is_local: bool,
 ) -> Result<(Option<i64>, Option<i64>), ApiError> {
     // 自分の actor_id を取得
     let my_actor_id: Option<i64> = if let Some(uid) = my_user_id {
@@ -794,17 +808,11 @@ async fn resolve_profile_viewer(
     };
     // 管理者が通報対象プロフィールを調査する場合は、対象本人と同じ可視範囲で
     // followers-only/directを含む投稿を表示する（操作主体自体はmy_actor_idのまま）。
-    let is_admin = if let Some(uid) = my_user_id {
-        state
-            .users
-            .find_role_by_user_id(uid)
-            .await
-            .ok()
-            .flatten()
-            .as_deref()
-            == Some("admin")
-    } else {
-        false
+    // ローカルユーザーに限るのは、モデレーションの責任範囲が自サーバーのユーザーまでで、
+    // リモートの非公開投稿は自サーバーの宛先ユーザーに届いたものにすぎないため。
+    let is_admin = match (my_user_id, actor_is_local) {
+        (Some(uid), true) => crate::handlers::notes::queries::user_is_admin(state, uid).await?,
+        _ => false,
     };
     let profile_viewer_actor_id = if is_admin {
         Some(actor_id)
@@ -939,6 +947,14 @@ async fn load_profile_posts(
         }
     };
     let mut recent_posts = build_note_responses(state, post_rows, my_actor_id).await;
+    if profile_viewer_actor_id != my_actor_id {
+        crate::handlers::notes::queries::mark_admin_override_posts(
+            state,
+            &mut recent_posts,
+            my_actor_id,
+        )
+        .await?;
+    }
 
     // ピン留め投稿（#61）。ローカルユーザーの pin/unpin 操作結果、またはリモートアクターの
     // Fedi featured collection / Bsky pinnedPost 同期結果（`sync_remote_pinned_posts` 参照）。
@@ -1233,7 +1249,7 @@ async fn build_profile_response_inner(
 ) -> Result<Json<ProfileResponse>, ApiError> {
     let actor_id = actor.id;
     let (my_actor_id, profile_viewer_actor_id) =
-        resolve_profile_viewer(state, my_user_id, actor_id).await?;
+        resolve_profile_viewer(state, my_user_id, actor_id, actor.actor_type == "local").await?;
     let ViewerRelationship {
         follow_status,
         is_followed,

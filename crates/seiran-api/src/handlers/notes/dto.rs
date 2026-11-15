@@ -262,6 +262,12 @@ pub struct NoteResponse {
     /// `queries::attach_reply_quote_gates`が事後に評価・設定する（`to_note_response`単体では常に
     /// `false`）。
     pub quote_blocked: bool,
+    /// 閲覧者の公開範囲外のローカル投稿を、管理者のモデレーション権限で表示しているか
+    /// （`true`のみ送出、`GET /api/notes/:id`だけが設定する）。本来見えない投稿なので、
+    /// 返信・リアクション等の操作APIは`NOTE_NOT_FOUND`を返す。フロントはカードを
+    /// グレー表示にして操作ボタンを無効化する。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible_by_admin_override: Option<bool>,
     /// リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。
     /// ローカル投稿、または元URIを未取得のリモート投稿では省略（#リモートで表示バナー）。
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -568,6 +574,7 @@ pub fn to_note_response(
         reply_bsky_allowed,
         reply_blocked: false,
         quote_blocked: false,
+        visible_by_admin_override: None,
         remote_url,
         bridge_original_post_id: p.bridge_of_post_id.map(|i| i.to_string()),
         content_warning_html,
@@ -653,6 +660,10 @@ pub struct TimelineQuery {
     /// seiranフロントエンドはDM専用画面と区別するため常にこれを付与する。
     #[serde(alias = "excludeDirect", default)]
     pub exclude_direct: bool,
+    /// ローカルタイムラインだけが見る。`true`なら管理者のモデレーション表示として、
+    /// ひかえめ・プライベートを含むローカルの全投稿（DMを除く）を返す。管理者以外は403。
+    #[serde(default)]
+    pub moderation: bool,
 }
 
 #[derive(Serialize)]

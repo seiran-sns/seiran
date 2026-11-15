@@ -53,9 +53,12 @@ export const notes = {
     until_id?: string;
     since_id?: string;
     exclude_direct?: boolean;
+    /** 管理者のモデレーション表示（ひかえめ・プライベートも含める。管理者以外は403）。 */
+    moderation?: boolean;
   }) {
     const q = cursorParams(params);
     if (params?.exclude_direct) q.set("exclude_direct", "true");
+    if (params?.moderation) q.set("moderation", "true");
     const qs = q.toString();
     const rows = await request<RawNote[]>(
       "GET",

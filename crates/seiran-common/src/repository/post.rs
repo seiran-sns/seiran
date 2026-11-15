@@ -542,6 +542,16 @@ pub trait PostRepository: Send + Sync {
         exclude_direct: bool,
     ) -> Result<Vec<TimelinePost>, sqlx::Error>;
 
+    /// 管理者のモデレーション用ローカルタイムライン。`local_timeline`と違い`unlisted`・
+    /// `followers_only`も閲覧者の可視性に関わらず含める（`direct`は含めない）。管理者が
+    /// ローカルユーザーの投稿を監視するためのもので、呼び出し側で管理者であることを確かめる。
+    /// ミュート・ブロック・リポストミュートは`local_timeline`と同じく効かせる。
+    async fn local_timeline_for_moderation(
+        &self,
+        viewer_actor_id: i64,
+        page: super::Page,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error>;
+
     /// ソーシャルタイムライン（自分 + フォロー中 + ローカル全アクターの投稿、リプライ含む、#78）を取得する。
     /// `home_timeline`（自分+フォロー中のみ）と`local_timeline`（ローカル全体のみ）を合成した形。
     /// フォロー中経由（自分+フォロー中）のパートは`home_timeline`と同じリプライ先フォロー条件を
@@ -965,6 +975,32 @@ impl PostRepository for PgPostRepository {
         .bind(since_id)
         .bind(limit)
         .bind(exclude_direct)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn local_timeline_for_moderation(
+        &self,
+        viewer_actor_id: i64,
+        page: super::Page,
+    ) -> Result<Vec<TimelinePost>, sqlx::Error> {
+        // 可視性を`post_is_visible_to`で判定しないのは、閲覧範囲外の投稿を管理者に見せること
+        // 自体がこのクエリの目的だから。`direct`だけは常に除外する。
+        sqlx::query_as::<_, TimelinePost>(
+            concat!("SELECT ", crate::timeline_post_columns!(), "
+             FROM posts p ", crate::timeline_post_joins!(), "
+             WHERE p.is_local = true AND p.deleted_at IS NULL
+               AND p.id < COALESCE($2::bigint, 9223372036854775807)
+               AND p.id > COALESCE($3::bigint, 0)
+               AND p.visibility <> 'direct'
+               AND (p.actor_id = $1 OR NOT actor_is_hidden_for_viewer($1, p.actor_id))
+               AND NOT ((p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL) AND repost_is_muted_for_viewer($1, p.actor_id))
+             ORDER BY p.id DESC LIMIT $4"),
+        )
+        .bind(viewer_actor_id)
+        .bind(page.until_id)
+        .bind(page.since_id)
+        .bind(page.limit)
         .fetch_all(&self.pool)
         .await
     }

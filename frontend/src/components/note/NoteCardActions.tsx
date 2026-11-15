@@ -67,6 +67,9 @@ interface NoteCardActionsProps {
   redraft?: RedraftActionProps;
   /** リアクションチップに50pxインデントを付けるか（`ReactionChips`の`indent`をそのまま透過）。 */
   indent?: boolean;
+  /** 管理者権限で公開範囲外の投稿を表示しているとき。本来見えない投稿なので、返信・引用・
+   * リポスト・リアクションを全て無効にする（サーバーも`NOTE_NOT_FOUND`で拒否する）。 */
+  locked?: boolean;
 }
 
 /**
@@ -105,6 +108,7 @@ export default function NoteCardActions({
   onDelete,
   redraft,
   indent = true,
+  locked = false,
 }: NoteCardActionsProps) {
   const { t } = useTranslation();
   const { showError } = useToast();
@@ -114,6 +118,11 @@ export default function NoteCardActions({
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const replyDisabled = locked || isGateReplyBlocked;
+  const quoteDisabled = locked || isPrivateQuoteTarget || isGateQuoteBlocked;
+  const repostDisabled =
+    locked || reposting || unreposting || ((isPrivateRepostTarget || repostCoolingDown) && !reposted);
+  const reactionDisabled = locked || reactionPending;
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
   const myReaction = reactions.find((r) => r.reactedByMe);
   const quickReactions = useQuickReactions();
@@ -162,28 +171,25 @@ export default function NoteCardActions({
       key: "reply",
       label: `💬 ${t("home:noteCard.replyButton")}`,
       onClick: () => onReply(),
-      disabled: isGateReplyBlocked,
+      disabled: replyDisabled,
     },
     {
       key: "quote",
       label: `❝ ${t("home:noteCard.quoteButton")}`,
       onClick: () => onQuote(),
-      disabled: isPrivateQuoteTarget || isGateQuoteBlocked,
+      disabled: quoteDisabled,
     },
     {
       key: "repost",
       label: `🔁 ${reposted ? t("home:noteCard.unrepostTitle") : t("home:noteCard.repostTitle")}`,
       onClick: () => onRepost(),
-      disabled:
-        reposting ||
-        unreposting ||
-        ((isPrivateRepostTarget || repostCoolingDown) && !reposted),
+      disabled: repostDisabled,
     },
     {
       key: "reaction",
       label: `🙂 ${t("home:reactionPicker.addReactionButton")}`,
       onClick: () => setReactionPickerOpen(true),
-      disabled: reactionPending,
+      disabled: reactionDisabled,
     },
   ];
   if (isSelf) {
@@ -228,7 +234,7 @@ export default function NoteCardActions({
         viaRepostId={viaRepostId}
         reactions={reactions}
         onToggle={onToggleReaction}
-        disabled={reactionPending}
+        disabled={reactionDisabled}
         indent={indent}
       />
 
@@ -237,7 +243,7 @@ export default function NoteCardActions({
           <button
             className={styles.actionBtn}
             onClick={onReply}
-            disabled={isGateReplyBlocked}
+            disabled={replyDisabled}
             title={
               isGateReplyBlocked
                 ? t("home:noteCard.replyGateDisabledTitle")
@@ -252,7 +258,7 @@ export default function NoteCardActions({
           <button
             className={styles.actionBtn}
             onClick={onQuote}
-            disabled={isPrivateQuoteTarget || isGateQuoteBlocked}
+            disabled={quoteDisabled}
             title={
               isPrivateQuoteTarget
                 ? t("home:noteCard.quoteDisabledTitle")
@@ -269,11 +275,7 @@ export default function NoteCardActions({
           <button
             className={`${styles.actionBtn} ${reposted ? styles.actionBtnActive : ""}`}
             onClick={onRepost}
-            disabled={
-              reposting ||
-              unreposting ||
-              ((isPrivateRepostTarget || repostCoolingDown) && !reposted)
-            }
+            disabled={repostDisabled}
             title={
               isPrivateRepostTarget
                 ? t("home:noteCard.repostDisabledTitle")
@@ -291,7 +293,7 @@ export default function NoteCardActions({
           </button>
           <ReactionPicker
             onPick={onToggleReaction}
-            disabled={reactionPending}
+            disabled={reactionDisabled}
             open={reactionPickerOpen}
             onOpenChange={setReactionPickerOpen}
             count={totalReactionCount}
@@ -299,7 +301,7 @@ export default function NoteCardActions({
           />
           <QuickHeartButton
             myReactionEmoji={myReaction?.emoji}
-            disabled={reactionPending}
+            disabled={reactionDisabled}
             hidden={!heartVisible}
             onToggleReaction={onToggleReaction}
           />
@@ -314,7 +316,7 @@ export default function NoteCardActions({
           reactions={quickReactions}
           anchorRef={actionsRef}
           myReactionEmoji={myReaction?.emoji}
-          disabled={reactionPending}
+          disabled={reactionDisabled}
           onToggleReaction={onToggleReaction}
         />
       </div>

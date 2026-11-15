@@ -273,6 +273,8 @@ function PostContent({
   const [pollResults, setPollResults] = useState(false);
   const [pollSelection, setPollSelection] = useState<number[]>([]);
   const [pollPending, setPollPending] = useState(false);
+  // 管理者権限で公開範囲外の投稿を見ているときは投票させない（本来見えない投稿のため）。
+  const pollLocked = pollPending || !!note.visibleByAdminOverride;
   const [pollRenderedAt] = useState(() => Date.now());
   // フォロー状態は共有ストア（stores/followStatusStore）を参照する。プロフィール画面や
   // 同一ユーザーの他ポストのフォロースイッチと状態が一本化されるため、一方で操作するか
@@ -606,7 +608,7 @@ function PostContent({
                               <input
                                 type="checkbox"
                                 checked={pollSelection.includes(index)}
-                                disabled={pollPending}
+                                disabled={pollLocked}
                                 onChange={(e) =>
                                   setPollSelection((selected) =>
                                     e.target.checked
@@ -623,7 +625,7 @@ function PostContent({
                             <button
                               className={styles.pollChoice}
                               key={option.name}
-                              disabled={pollPending}
+                              disabled={pollLocked}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 void submitPollVote([index]);
@@ -644,7 +646,7 @@ function PostContent({
                       <div className={styles.pollControls}>
                         {poll.multiple && !pollResults && (
                           <button
-                            disabled={pollPending || pollSelection.length === 0}
+                            disabled={pollLocked || pollSelection.length === 0}
                             onClick={(e) => {
                               e.stopPropagation();
                               void submitPollVote(pollSelection);
@@ -755,6 +757,7 @@ function PostContent({
             : undefined
         }
         indent={!large}
+        locked={note.visibleByAdminOverride}
       />
 
       <Modal
@@ -924,7 +927,11 @@ export default function NoteCard({
   }
 
   return (
-    <article className={`${styles.card} ${sizeClass}`}>
+    <article
+      className={`${styles.card} ${sizeClass} ${
+        note.visibleByAdminOverride ? styles.adminOverride : ""
+      }`}
+    >
       <PostContent
         note={note}
         linkToDetail={linkToDetail}

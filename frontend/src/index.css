@@ -24,6 +24,8 @@
   /* card-bgがtransparentのため実際に透けて見える背景色（ページ背景と同じ）。
    * card-bgをそのままグラデーション終端等に使うと透明同士になり効果が消えるため。 */
   --card-bg-opaque: var(--bg);
+  /* 管理者権限で公開範囲外の投稿を表示しているカード（本来見えない投稿だと分かるよう無彩色にする）。 */
+  --card-bg-admin-override: #e4e5e8;
   color-scheme: light;
 }
 
@@ -53,6 +55,7 @@
   --card-bg: var(--bg-elev);
   --card-bg-hover: var(--bg-elev-2);
   --card-bg-opaque: var(--card-bg);
+  --card-bg-admin-override: #2c2e33;
   color-scheme: dark;
 }
 

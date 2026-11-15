@@ -797,3 +797,10 @@
   font-size: 0.88rem;
   cursor: pointer;
 }
+
+/* 管理者権限で公開範囲外の投稿を表示しているカード。本来見えない投稿だと一目で分かるよう
+   ホバー時も含めて無彩色の背景に固定する（操作ボタンは NoteCardActions 側で無効化する）。 */
+.card.adminOverride,
+.card.adminOverride:hover {
+  background: var(--card-bg-admin-override);
+}

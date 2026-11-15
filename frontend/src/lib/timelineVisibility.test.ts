@@ -38,4 +38,8 @@ describe("filterTimelineNotes", () => {
   it.each(["home", "social"] as const)("%sではひかえめ・プライベートを保持する", (kind) => {
     expect(filterTimelineNotes({ kind }, notes)).toEqual(notes);
   });
+
+  it("管理者のモデレーション表示のlocalではひかえめ・プライベートを保持する", () => {
+    expect(filterTimelineNotes({ kind: "local", moderation: true }, notes)).toEqual(notes);
+  });
 });

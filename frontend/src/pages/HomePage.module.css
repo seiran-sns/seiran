@@ -70,3 +70,14 @@
   min-height: 100%;
 }
 
+
+/* 管理者だけに出す、ローカルTLのモデレーション表示切り替え。 */
+.moderationToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 8px 16px 0;
+  font-size: 0.85rem;
+  color: var(--text-dim);
+  cursor: pointer;
+}

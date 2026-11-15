@@ -358,6 +358,9 @@ export interface Note {
   replyBlocked: boolean;
   /** リモートBsky投稿のpostgateにより、閲覧中ユーザーが引用できないか。 */
   quoteBlocked: boolean;
+  /** 閲覧者の公開範囲外のローカル投稿を、管理者のモデレーション権限で表示しているか。
+   * 本来見えない投稿のため、カードをグレー表示にし返信・リアクション等の操作を無効化する。 */
+  visibleByAdminOverride?: boolean;
   /** リモート投稿を元サーバー（Fedi）/ bsky.app（Bsky）上で開くための URL。ローカル投稿は省略。 */
   remoteUrl?: string;
   /** brid.gyブリッジポスト対応: このノート自身がブリッジポスト（brid.gyが別プロトコルへ
@@ -648,6 +651,7 @@ export interface RawNote {
   replyBskyAllowed?: boolean;
   replyBlocked?: boolean;
   quoteBlocked?: boolean;
+  visibleByAdminOverride?: boolean;
   remoteUrl?: string;
   remote_url?: string;
   bridgeOriginalPostId?: string;
@@ -711,6 +715,7 @@ export function normalizeNote(r: RawNote): Note {
     replyBskyAllowed: r.replyBskyAllowed ?? false,
     replyBlocked: r.replyBlocked ?? false,
     quoteBlocked: r.quoteBlocked ?? false,
+    visibleByAdminOverride: r.visibleByAdminOverride,
     remoteUrl: r.remoteUrl ?? r.remote_url,
     bridgeOriginalPostId: r.bridgeOriginalPostId ?? r.bridge_original_post_id,
     contentWarning: r.contentWarning ?? r.content_warning,

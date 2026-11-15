@@ -6,6 +6,7 @@
     "title": "Heim",
     "homeTab": "Heim",
     "localTab": "Lokal",
+    "localModerationToggle": "Moderationsansicht (auch nicht gelistete und nur für Follower sichtbare Beiträge anzeigen)",
     "socialTab": "Sozial",
     "globalTab": "Global",
     "manageListsLink": "+ Listen verwalten",

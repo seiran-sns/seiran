@@ -21,7 +21,7 @@ pub async fn pin_note(
         .await
     {
         Ok(Some(p)) => p,
-        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Ok(None) => return ApiError::NotFound("NOTE_NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
     if post.actor_id != me.actor_id {

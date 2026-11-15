@@ -8,6 +8,7 @@ import NoteList from "../components/note/NoteList";
 import PostComposer from "../components/note/PostComposer";
 import NotificationsPanel from "../components/right/NotificationsPanel";
 import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
+import { useAuth } from "../contexts/AuthContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
 import { ChannelSpec, useStreamingContext } from "../contexts/StreamingContext";
@@ -21,6 +22,23 @@ import styles from "./HomePage.module.css";
 const PAGE_SIZE = 30;
 const COMPOSER_COLLAPSED_KEY = "seiran_composer_collapsed";
 const SCROLL_KEY_PREFIX = "seiran_home_scroll:";
+const LOCAL_MODERATION_KEY = "seiran_home_local_moderation";
+
+function loadLocalModeration(): boolean {
+  try {
+    return localStorage.getItem(LOCAL_MODERATION_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveLocalModeration(on: boolean) {
+  try {
+    localStorage.setItem(LOCAL_MODERATION_KEY, on ? "1" : "0");
+  } catch {
+    // 保存できなくても表示の切り替え自体は効く（次回は既定のOFFに戻るだけ）。
+  }
+}
 
 function saveScrollPosition(key: string, y: number) {
   sessionStorage.setItem(`${SCROLL_KEY_PREFIX}${key}`, String(y));
@@ -38,7 +56,7 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
   const request = feed.kind === "home"
     ? api.notes.homeTimeline({ ...params, exclude_direct: true })
     : feed.kind === "local"
-    ? api.notes.localTimeline({ ...params, exclude_direct: true })
+    ? api.notes.localTimeline({ ...params, exclude_direct: true, moderation: feed.moderation })
     : feed.kind === "social"
     ? api.notes.socialTimeline({ ...params, exclude_direct: true })
     : feed.kind === "global"
@@ -55,7 +73,7 @@ function feedToChannelSpec(feed: Feed): ChannelSpec {
     case "home":
       return { channel: "homeTimeline" };
     case "local":
-      return { channel: "localTimeline" };
+      return feed.moderation ? { channel: "localTimelineModeration" } : { channel: "localTimeline" };
     case "social":
       return { channel: "hybridTimeline" };
     case "global":
@@ -70,7 +88,21 @@ function feedToChannelSpec(feed: Feed): ChannelSpec {
 export default function HomePage() {
   const { t } = useTranslation();
   const { showError } = useToast();
-  const { feed, setFeed, getCache, setCache } = useHomeFeed();
+  const { feed: selectedFeed, setFeed, getCache, setCache } = useHomeFeed();
+  const { user } = useAuth();
+  const isAdmin = user?.role === "admin";
+  // 管理者のモデレーション表示（ローカルTLにひかえめ・プライベートも混ぜる）。選択タブとは
+  // 別に保存し、ローカルタブ選択中だけ実際のフィードに反映する。以降の`feed`は反映後のもので、
+  // キャッシュ・取得API・購読チャンネルが通常のローカルTLと分かれる。
+  const [localModeration, setLocalModeration] = useState(loadLocalModeration);
+  const feed = useMemo(
+    (): Feed =>
+      selectedFeed.kind === "local" && isAdmin && localModeration
+        ? { kind: "local", moderation: true }
+        : selectedFeed,
+    [selectedFeed, isAdmin, localModeration],
+  );
+  const selectedFeedKey = feedKey(selectedFeed);
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
   const [loading, setLoading] = useState(true);
@@ -147,13 +179,13 @@ export default function HomePage() {
   // 選択中のタブを再度クリックした場合はタブ切替（実質no-op）ではなく先頭へスクロールする。
   const handleFeedTabClick = useCallback(
     (target: Feed) => {
-      if (feedKey(target) === currentFeedKey) {
+      if (feedKey(target) === selectedFeedKey) {
         window.scrollTo({ top: 0, behavior: "smooth" });
         return;
       }
       setFeed(target);
     },
-    [currentFeedKey, setFeed],
+    [selectedFeedKey, setFeed],
   );
 
   // フィード切り替え時にアクティブなタブ要素が見えるようにスクロール
@@ -467,6 +499,20 @@ export default function HomePage() {
           </button>
         ))}
       </div>
+
+      {selectedFeed.kind === "local" && isAdmin && (
+        <label className={styles.moderationToggle}>
+          <input
+            type="checkbox"
+            checked={localModeration}
+            onChange={(e) => {
+              setLocalModeration(e.target.checked);
+              saveLocalModeration(e.target.checked);
+            }}
+          />
+          {t("home:homePage.localModerationToggle")}
+        </label>
+      )}
 
       <NoteList
         notes={notes}

@@ -72,7 +72,7 @@ pub async fn reaction_actors(
         .await
     {
         Ok(Some(_)) => {}
-        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Ok(None) => return ApiError::NotFound("NOTE_NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
 
@@ -123,7 +123,7 @@ pub async fn note_reposts(
         .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     let entries = state
         .posts
@@ -197,7 +197,7 @@ async fn find_reactable_post(
         .find_by_id_for_viewer(note_id, Some(actor_id))
         .await
         .map_err(|e| ApiError::Internal(format!("ポスト取得失敗: {}", e)))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))
 }
 
 /// タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の

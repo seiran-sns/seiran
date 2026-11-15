@@ -6,6 +6,7 @@
     "title": "主页",
     "homeTab": "主页",
     "localTab": "本地",
+    "localModerationToggle": "审核视图（同时显示不公开和仅关注者可见的帖子）",
     "socialTab": "社交",
     "globalTab": "全球",
     "manageListsLink": "+ 管理列表",

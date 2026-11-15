@@ -6,6 +6,7 @@
     "title": "Home",
     "homeTab": "Home",
     "localTab": "Local",
+    "localModerationToggle": "Moderation view (also show unlisted and followers-only posts)",
     "socialTab": "Social",
     "globalTab": "Global",
     "manageListsLink": "+ Manage lists",

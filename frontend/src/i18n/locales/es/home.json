@@ -6,6 +6,7 @@
     "title": "Hogar",
     "homeTab": "Hogar",
     "localTab": "Local",
+    "localModerationToggle": "Vista de moderación (mostrar también publicaciones no listadas y solo para seguidores)",
     "socialTab": "Social",
     "globalTab": "Global",
     "manageListsLink": "+ Administrar listas",

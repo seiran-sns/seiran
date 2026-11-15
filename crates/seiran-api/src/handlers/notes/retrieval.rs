@@ -13,35 +13,51 @@ pub async fn get_note(
     State(state): State<AppState>,
 ) -> Result<Json<NoteResponse>, ApiError> {
     let my_actor_id: Option<i64> = user.as_ref().map(|u| u.actor_id);
-    let is_admin = if let Some(ref authed) = user {
-        state
-            .users
-            .find_role_by_user_id(authed.user_id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?
-            .as_deref()
-            == Some("admin")
-    } else {
-        false
-    };
-
     let post_id: i64 = id.parse().map_err(|_| ApiError::NotFound("NOT_FOUND"))?;
-    let mut post = if is_admin {
-        state.posts.find_by_id(post_id).await
-    } else {
-        state
-            .posts
-            .find_by_id_for_viewer(post_id, my_actor_id)
-            .await
-    }
-    .map_err(|e| ApiError::Internal(e.to_string()))?
-    .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+    let visible = state
+        .posts
+        .find_by_id_for_viewer(post_id, my_actor_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let (mut post, admin_override) = match visible {
+        Some(post) => (post, false),
+        None => (
+            find_local_post_for_admin(&state, user.as_ref(), post_id)
+                .await?
+                .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?,
+            true,
+        ),
+    };
     resolve_pending_post_references(&state, &mut post).await;
-    let nr = build_note_responses(&state, vec![post], my_actor_id)
+    let mut nr = build_note_responses(&state, vec![post], my_actor_id)
         .await
         .pop()
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
+    nr.visible_by_admin_override = admin_override.then_some(true);
     Ok(Json(nr))
+}
+
+/// 管理者のモデレーション用に、閲覧範囲外のローカル投稿を可視性判定なしで取得する。
+/// 対象をローカル投稿に限るのは、モデレーションの責任範囲が自サーバーのユーザーまでで、
+/// リモートのフォロワー限定投稿は自サーバーのフォロワー宛てに届いたものにすぎないため。
+/// 閲覧者が管理者でない・投稿がリモートなら`None`。
+async fn find_local_post_for_admin(
+    state: &AppState,
+    user: Option<&AuthedUser>,
+    post_id: i64,
+) -> Result<Option<TimelinePost>, ApiError> {
+    let Some(authed) = user else {
+        return Ok(None);
+    };
+    if !super::queries::user_is_admin(state, authed.user_id).await? {
+        return Ok(None);
+    }
+    let post = state
+        .posts
+        .find_by_id(post_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(post.filter(|p| p.actor_type == "local"))
 }
 
 /// 投稿詳細取得のタイムアウト（1秒）。この画面はログイン不要（未ログイン閲覧・OGP等)でも
@@ -358,7 +374,7 @@ pub async fn note_context(
         .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     let actor_id = post.actor_id;
 
@@ -455,7 +471,7 @@ pub async fn note_replies(
         .find_by_id_for_viewer(post_id, my_actor_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     let posts = state
         .posts
@@ -504,7 +520,7 @@ pub async fn resolve_note_reference(
         .find_by_id(post_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::NotFound("NOT_FOUND"))?;
+        .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
 
     let (resolved_post_id, status, uri) = match kind {
         ReferenceKind::Reply => (

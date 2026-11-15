@@ -6,6 +6,7 @@
     "title": "ホーム",
     "homeTab": "ホーム",
     "localTab": "ローカル",
+    "localModerationToggle": "モデレーション表示（ひかえめ・プライベートの投稿も表示する）",
     "socialTab": "ソーシャル",
     "globalTab": "グローバル",
     "manageListsLink": "+ リスト管理",

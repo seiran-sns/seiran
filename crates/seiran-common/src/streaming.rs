@@ -23,6 +23,10 @@ use crate::repository::{DmRepository, FollowRepository, ReactionRepository};
 pub enum ChannelKind {
     HomeTimeline,
     LocalTimeline,
+    /// 管理者のモデレーション表示のローカルタイムライン（`localTimeline`に加えてひかえめ・
+    /// プライベートのローカル投稿も流す）。購読時に管理者であることを確かめる
+    /// （`handlers::streaming`）。
+    LocalTimelineModeration,
     /// Misskey本家の`hybridTimeline`（ソーシャルタイムライン、ホーム+ローカル）。
     HybridTimeline,
     GlobalTimeline,
@@ -37,6 +41,7 @@ impl ChannelKind {
         match channel {
             "homeTimeline" => Some(Self::HomeTimeline),
             "localTimeline" => Some(Self::LocalTimeline),
+            "localTimelineModeration" => Some(Self::LocalTimelineModeration),
             "hybridTimeline" => Some(Self::HybridTimeline),
             "globalTimeline" => Some(Self::GlobalTimeline),
             "userList" => {
@@ -87,6 +92,7 @@ impl ChannelScope {
         match kind {
             ChannelKind::HomeTimeline => self.home_recipients.contains(&viewer_actor_id),
             ChannelKind::LocalTimeline => self.is_local && is_public_ish,
+            ChannelKind::LocalTimelineModeration => self.is_local,
             ChannelKind::HybridTimeline => {
                 (self.is_local && is_public_ish) || self.home_recipients.contains(&viewer_actor_id)
             }
@@ -422,6 +428,16 @@ mod tests {
 
         let local_followers_only = scope(true, "followers_only", &[], &[], &[]);
         assert!(!local_followers_only.matches(&ChannelKind::LocalTimeline, 999));
+    }
+
+    #[test]
+    fn local_timeline_moderation_includes_restricted_local_posts() {
+        for visibility in ["public", "unlisted", "followers_only"] {
+            let local = scope(true, visibility, &[], &[], &[]);
+            assert!(local.matches(&ChannelKind::LocalTimelineModeration, 999));
+        }
+        let remote = scope(false, "public", &[1], &[], &[]);
+        assert!(!remote.matches(&ChannelKind::LocalTimelineModeration, 1));
     }
 
     #[test]

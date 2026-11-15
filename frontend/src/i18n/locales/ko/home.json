@@ -6,6 +6,7 @@
     "title": "집",
     "homeTab": "집",
     "localTab": "현지의",
+    "localModerationToggle": "모더레이션 보기 (미등록 및 팔로워 전용 게시물도 표시)",
     "socialTab": "사회의",
     "globalTab": "글로벌",
     "manageListsLink": "+ 목록 관리",

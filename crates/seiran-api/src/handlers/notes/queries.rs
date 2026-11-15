@@ -15,6 +15,41 @@ use super::dto::{
     LinkCardResponse, NoteResponse, ReactionSummary,
 };
 
+/// ユーザーが管理者（role=admin）か。管理者のモデレーション用の閲覧（公開範囲外の
+/// ローカル投稿の表示）を許すかの判定に使う。
+pub async fn user_is_admin(state: &AppState, user_id: i64) -> Result<bool, ApiError> {
+    let role = state
+        .users
+        .find_role_by_user_id(user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(role.as_deref() == Some("admin"))
+}
+
+/// 管理者が閲覧範囲を広げて取得した投稿のうち、管理者自身からは本来見えないものに
+/// `visible_by_admin_override`を付ける（フロントはグレー表示・操作不可にする。
+/// 操作APIは管理者自身の可視性で判定するため、付けないと押せるのに`NOTE_NOT_FOUND`になる）。
+pub async fn mark_admin_override_posts(
+    state: &AppState,
+    posts: &mut [NoteResponse],
+    my_actor_id: Option<i64>,
+) -> Result<(), ApiError> {
+    let ids: Vec<i64> = posts.iter().filter_map(|n| n.id.parse().ok()).collect();
+    let visible: HashSet<String> =
+        seiran_common::repository::find_visible_posts_by_ids(&state.db, &ids, my_actor_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .into_iter()
+            .map(|p| p.id.to_string())
+            .collect();
+    for nr in posts.iter_mut() {
+        if !visible.contains(&nr.id) {
+            nr.visible_by_admin_override = Some(true);
+        }
+    }
+    Ok(())
+}
+
 /// 認証中アクターの回答選択肢を通常投稿と埋め込みリポスト元の `poll.votedByMe` へ付与する。
 pub async fn attach_poll_votes(
     db: &sqlx::PgPool,

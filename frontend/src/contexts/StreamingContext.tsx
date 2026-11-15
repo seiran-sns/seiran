@@ -15,6 +15,7 @@ type ResyncListener = () => void;
 export type ChannelSpec =
   | { channel: "homeTimeline" }
   | { channel: "localTimeline" }
+  | { channel: "localTimelineModeration" }
   | { channel: "hybridTimeline" }
   | { channel: "globalTimeline" }
   | { channel: "userList"; params: { listId: string } }

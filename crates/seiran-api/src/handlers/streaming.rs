@@ -19,7 +19,7 @@ use axum::{
     },
     response::IntoResponse,
 };
-use seiran_common::streaming::ChannelKind;
+use seiran_common::streaming::{ChannelBroadcast, ChannelKind};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -60,7 +60,8 @@ pub async fn streaming(
         Ok(Some(a)) => a.id,
         _ => return ApiError::NotFound("actor not found").into_response(),
     };
-    ws.on_upgrade(move |socket| handle_stream(socket, actor_id, state))
+    let user_id = verified.user_id;
+    ws.on_upgrade(move |socket| handle_stream(socket, actor_id, user_id, state))
 }
 
 /// `userList`チャンネルの`connect`要求を認可する（`GET /api/lists/:id`と同じ判定:
@@ -72,6 +73,32 @@ async fn authorize_user_list(state: &AppState, actor_id: i64, list_id: i64) -> b
     }
 }
 
+/// モデレーション表示のチャンネルで流すノートのうち、購読者（管理者）自身からは本来見えない
+/// ものに`visibleByAdminOverride`を付けたJSONを返す（付けなくてよければ`None`）。対象は
+/// プライベート（`followers_only`）だけで、著者・フォロワー（`home_recipients`）は確実に見える
+/// のでDBに問い合わせない。フロントはこのフラグでグレー表示・操作不可にする。
+async fn moderation_override_body(
+    state: &AppState,
+    ch: &ChannelBroadcast,
+    actor_id: i64,
+) -> Option<serde_json::Value> {
+    if ch.scope.visibility != "followers_only" || ch.scope.home_recipients.contains(&actor_id) {
+        return None;
+    }
+    let post_id: i64 = ch.note_json.get("id")?.as_str()?.parse().ok()?;
+    let visible =
+        seiran_common::repository::find_visible_posts_by_ids(&state.db, &[post_id], Some(actor_id))
+            .await
+            .map(|rows| !rows.is_empty())
+            .unwrap_or(false);
+    if visible {
+        return None;
+    }
+    let mut body = (*ch.note_json).clone();
+    body["visibleByAdminOverride"] = serde_json::Value::Bool(true);
+    Some(body)
+}
+
 /// サーバーの停止（無停止更新で旧プロセスを止めるとき）に送る Close フレーム。
 /// 1012（Service Restart）を受けたクライアントはすぐ再接続してよく、新しいプロセスにつながる。
 pub(crate) fn restart_close_message() -> Message {
@@ -81,7 +108,7 @@ pub(crate) fn restart_close_message() -> Message {
     }))
 }
 
-async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
+async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state: AppState) {
     let mut rx = state.stream_hub.subscribe();
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     // クライアント指定の subscription id（uuid文字列）-> 購読チャンネル。
@@ -103,9 +130,15 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
                     if let Some(ref ch) = ev.channel {
                         for (sub_id, kind) in subscriptions.iter() {
                             if ch.scope.matches(kind, actor_id) {
+                                let override_body = if *kind == ChannelKind::LocalTimelineModeration {
+                                    moderation_override_body(&state, ch, actor_id).await
+                                } else {
+                                    None
+                                };
+                                let body = override_body.as_ref().unwrap_or(&ch.note_json);
                                 let frame = serde_json::json!({
                                     "type": "channel",
-                                    "body": { "id": sub_id, "type": "note", "body": ch.note_json },
+                                    "body": { "id": sub_id, "type": "note", "body": body },
                                 })
                                 .to_string();
                                 if socket.send(Message::Text(frame)).await.is_err() {
@@ -139,6 +172,14 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, state: AppState) {
                                     } else {
                                         None
                                     }
+                                }
+                                Some(ChannelKind::LocalTimelineModeration) => {
+                                    let is_admin = crate::handlers::notes::queries::user_is_admin(
+                                        &state, user_id,
+                                    )
+                                    .await
+                                    .unwrap_or(false);
+                                    is_admin.then_some(ChannelKind::LocalTimelineModeration)
                                 }
                                 other => other,
                             };

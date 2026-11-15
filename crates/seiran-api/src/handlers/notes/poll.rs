@@ -61,7 +61,7 @@ async fn record_vote(
             post_author_id: v.post_author_id,
             indexes: v.choice,
         }),
-        Err(LocalVoteRejected::NotFound) => Err(ApiError::NotFound("NOT_FOUND")),
+        Err(LocalVoteRejected::NotFound) => Err(ApiError::NotFound("NOTE_NOT_FOUND")),
         Err(LocalVoteRejected::NotAPoll) => Err(ApiError::BadRequest("NOT_A_POLL".to_owned())),
         Err(LocalVoteRejected::Invalid(e)) => Err(e),
         Err(LocalVoteRejected::AlreadyVoted) => Err(ApiError::Conflict("ALREADY_VOTED")),

@@ -101,7 +101,7 @@ pub async fn delete_note(
 
     let info = match state.posts.find_delete_info(note_id).await {
         Ok(Some(info)) => info,
-        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Ok(None) => return ApiError::NotFound("NOTE_NOT_FOUND").into_response(),
         Err(e) => return ApiError::Internal(format!("ポスト取得失敗: {}", e)).into_response(),
     };
     if info.actor_id != me.actor_id {

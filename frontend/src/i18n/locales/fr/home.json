@@ -6,6 +6,7 @@
     "title": "Maison",
     "homeTab": "Maison",
     "localTab": "Locale",
+    "localModerationToggle": "Vue de modération (afficher aussi les publications non répertoriées et réservées aux abonnés)",
     "socialTab": "Sociale",
     "globalTab": "Mondial",
     "manageListsLink": "+ Gérer les listes",

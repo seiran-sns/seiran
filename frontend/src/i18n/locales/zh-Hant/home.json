@@ -6,6 +6,7 @@
     "title": "首頁",
     "homeTab": "首頁",
     "localTab": "本地",
+    "localModerationToggle": "審核檢視（同時顯示不公開和僅追蹤者可見的貼文）",
     "socialTab": "社群",
     "globalTab": "全球",
     "manageListsLink": "＋ 管理列表",

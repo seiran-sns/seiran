@@ -9,13 +9,16 @@ import type { Note } from "../api/client";
  */
 export type Feed =
   | { kind: "home" }
-  | { kind: "local" }
+  /** `moderation`は管理者のモデレーション表示（ひかえめ・プライベートも含むローカルTL）。
+   * 選択タブとしては保存せず、HomePageが管理者の切り替え状態から付ける。 */
+  | { kind: "local"; moderation?: boolean }
   | { kind: "social" }
   | { kind: "global" }
   | { kind: "list"; id: string }
   | { kind: "hashtag"; name: string };
 
 export function feedKey(feed: Feed): string {
+  if (feed.kind === "local" && feed.moderation) return "local:moderation";
   return feed.kind === "list" ? `list:${feed.id}` : feed.kind === "hashtag" ? `hashtag:${feed.name}` : feed.kind;
 }
 
