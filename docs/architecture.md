@@ -114,7 +114,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 **リリース**（開発機、`scripts/release.sh`）: `Cargo.toml` の版（と `frontend/package.json` の一致）を確かめ、未コミットの変更が無く push 済みであることを確かめてから、イメージを両方のレジストリへ `<版>` と `latest`（版に接尾辞があるときは付けない）で push し、git タグ `v<版>` を付けて push する。
 
-**自動リリース**（`.github/workflows/release.yml`）: main への push で CI が成功すると、そのコミットについて `scripts/release.sh` と同じことを行う。両方のレジストリに `<版>` のタグが既にあればビルドしない（版を上げていないコミットでは何もせず、既存の版を別のコミットのイメージで上書きしない）。片方にだけ無ければ、無い方にだけ push する。Docker Hub はシークレット `DOCKERHUB_USERNAME`・`DOCKERHUB_TOKEN`、GHCR は `GITHUB_TOKEN`（`packages: write`）で push する。手動実行（workflow_dispatch）もできる。
+**自動リリース**（`.github/workflows/ci.yml` の `image-build`・`image-publish`）: main への push で、そのコミットについて `scripts/release.sh` と同じことを行う。両方のレジストリに `<版>` のタグが既にあればビルドしない（版を上げていないコミットでは何もせず、既存の版を別のコミットのイメージで上書きしない。判定は `.github/scripts/image-targets.sh`）。片方にだけ無ければ、無い方にだけ push する。待ち時間を減らすため、`image-build` は検査ジョブと並行してビルドし結果を GitHub Actions のキャッシュに置くだけにし、`image-publish` が全ジョブ成功後に同じビルドをキャッシュから再現して push する（キャッシュが消えていれば作り直すだけで、検査を通っていないイメージは出ない）。Docker Hub はシークレット `DOCKERHUB_USERNAME`・`DOCKERHUB_TOKEN`、GHCR は `GITHUB_TOKEN`（`packages: write`）で push する。手動実行（workflow_dispatch）もできる。
 
 ## 4. 認証
 
