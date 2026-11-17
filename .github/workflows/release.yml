@@ -1,0 +1,131 @@
+name: Release image
+
+# main の CI が通ったコミットについて、公開イメージ（docker/seiran/Dockerfile）を
+# Docker Hub と GHCR へ push する。scripts/release.sh を CI で行うもの。
+# 同じ版のタグが両方のレジストリに既にあればビルドしない（版を上げていないコミットでは
+# 何もしない。既存の版のイメージを別のコミットで上書きしないため）。
+#
+# 必要なシークレット: DOCKERHUB_USERNAME、DOCKERHUB_TOKEN（seiranorg へ push できるトークン）。
+# GHCR は GITHUB_TOKEN で push する（パッケージ側でこのリポジトリに書き込み権限が要る）。
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release-image
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and push
+    # workflow_run は PR の CI でも main を対象ブランチとして発火するので、main への push に限る
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # git タグ v<版> の push
+      packages: write # GHCR への push
+    env:
+      DOCKERHUB_IMAGE: docker.io/seiranorg/seiran
+      GHCR_IMAGE: ghcr.io/seiran-sns/seiran
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
+
+      - name: Read version
+        id: version
+        run: |
+          workspace_value() {
+              sed -n '/^\[workspace.package\]/,/^\[/{s/^'"$1"' *= *"\(.*\)"/\1/p}' Cargo.toml
+          }
+          suffix="$(workspace_value version_suffix)"
+          version="$(workspace_value version)$suffix"
+          [ -n "$version" ] || { echo "::error::Cargo.toml から版を読めません"; exit 1; }
+          frontend_version="$(node -p 'const p = require("./frontend/package.json"); p.version + (p.versionSuffix ?? "")')"
+          if [ "$version" != "$frontend_version" ]; then
+              echo "::error::Cargo.toml（$version）と frontend/package.json（$frontend_version）の版が違います"
+              exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "suffix=$suffix" >> "$GITHUB_OUTPUT"
+          echo "revision=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Check existing tags
+        id: targets
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SUFFIX: ${{ steps.version.outputs.suffix }}
+        run: |
+          # 片方のレジストリにだけある場合は、無い方にだけ push する（ある方を上書きしない）
+          tags=""
+          for image in "$DOCKERHUB_IMAGE" "$GHCR_IMAGE"; do
+              if docker buildx imagetools inspect "$image:$VERSION" > /dev/null 2>&1; then
+                  echo "$image:$VERSION は既にあります"
+                  continue
+              fi
+              tags+="$image:$VERSION"$'\n'
+              # 接尾辞付き（フォーク・試験版）は latest にしない
+              [ -n "$SUFFIX" ] || tags+="$image:latest"$'\n'
+          done
+          if [ -z "$tags" ]; then
+              echo "版 $VERSION は両方のレジストリにあるのでビルドしません" >> "$GITHUB_STEP_SUMMARY"
+              echo "build=false" >> "$GITHUB_OUTPUT"
+          else
+              echo "build=true" >> "$GITHUB_OUTPUT"
+              { echo "tags<<EOF"; printf '%s' "$tags"; echo "EOF"; } >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+        if: steps.targets.outputs.build == 'true'
+      - name: Build and push
+        if: steps.targets.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/seiran/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.targets.outputs.tags }}
+          labels: |
+            org.opencontainers.image.version=${{ steps.version.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.version.outputs.revision }}
+            org.opencontainers.image.source=https://github.com/seiran-sns/seiran
+            org.opencontainers.image.licenses=AGPL-3.0
+          cache-from: type=gha,scope=release-image
+          cache-to: type=gha,scope=release-image,mode=max
+
+      - name: Push git tag
+        if: steps.targets.outputs.build == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          REVISION: ${{ steps.version.outputs.revision }}
+        run: |
+          tag="v$VERSION"
+          git fetch -q origin "refs/tags/$tag:refs/tags/$tag" 2> /dev/null || true
+          if tagged="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
+              [ "$tagged" = "$REVISION" ] \
+                  || echo "::warning::タグ $tag は別のコミット（$tagged）に付いています"
+              exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "seiran $VERSION" "$REVISION"
+          git push -q origin "refs/tags/$tag"
+          echo "版 $VERSION を push しました" >> "$GITHUB_STEP_SUMMARY"

@@ -114,6 +114,8 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 **リリース**（開発機、`scripts/release.sh`）: `Cargo.toml` の版（と `frontend/package.json` の一致）を確かめ、未コミットの変更が無く push 済みであることを確かめてから、イメージを両方のレジストリへ `<版>` と `latest`（版に接尾辞があるときは付けない）で push し、git タグ `v<版>` を付けて push する。
 
+**自動リリース**（`.github/workflows/release.yml`）: main への push で CI が成功すると、そのコミットについて `scripts/release.sh` と同じことを行う。両方のレジストリに `<版>` のタグが既にあればビルドしない（版を上げていないコミットでは何もせず、既存の版を別のコミットのイメージで上書きしない）。片方にだけ無ければ、無い方にだけ push する。Docker Hub はシークレット `DOCKERHUB_USERNAME`・`DOCKERHUB_TOKEN`、GHCR は `GITHUB_TOKEN`（`packages: write`）で push する。手動実行（workflow_dispatch）もできる。
+
 ## 4. 認証
 
 認証の実体はローカル ID/PW（`auth::local::LocalAuthProvider`）の JWT だけで、MiAuth・Misskey 互換・Mastodon 互換 OAuth はその発行・受け渡しの窓口。外部認証プロバイダ連携は無い。
