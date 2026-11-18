@@ -510,6 +510,8 @@ Bridgy Fed 等が別プロトコルへ自動変換したコピー投稿（ブリ
 
 **表示**: ブリッジポストの詳細には「ブリッジポストです【元ポストを表示】」バナーを「リモートで表示」と並べて出す。返信・リアクションしようとすると確認ダイアログを挟む。
 
+**リアクションの合算**: 元ポストとそのブリッジポスト（AP 側・ATP 側の最大2つ）は、どれを表示してもグループ全体のリアクションを合算した件数を出す（SQL 関数 `bridge_group_post_ids`）。件数（`note_extras::reaction_counts_for_posts`、ストリーミング用の `aggregate_for_post`）と「誰が付けたか」一覧（`actors_for_reaction`）は、ブリッジユーザーを `actors.bridge_real_actor_id` で実ユーザーに寄せて、同じ人の同じリアクションを1件にする（Bridgy Fed がブリッジポストへの反応を元ポストにもブリッジユーザー名義で付けるため）。`reactedByMe` だけは表示中の投稿に付けたものに限る（チップを押すとその投稿のリアクションを取り消すため）。`noteUpdated` はリアクションされた投稿に加えて、グループの他の投稿にもその投稿者とフォロワー宛てに `reactorActorId: null` で送る。
+
 **リポスト・引用の配送先**（`delivery::redirect_bridge_post_meta`、`with_bridge_delivery_targets`）:
 - 対象がブリッジポスト: 元ポストへのリポスト/引用として扱う（`repost_of_post_id`/`quote_of_post_id` は元ポスト）。
 - 対象が対向側にブリッジポストを持つ元ポスト: 配送先の識別子（`ap_object_id`/`at_uri`/`at_cid`）をブリッジポストのものに差し替える。元ポストが `LocalOrSeiran`（両プロトコルにネイティブ実体を持つ）なら差し替えない。

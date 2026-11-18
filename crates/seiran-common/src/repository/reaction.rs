@@ -121,7 +121,8 @@ pub trait ReactionRepository: Send + Sync {
         content: Option<&str>,
     ) -> Result<Option<StoredReaction>, sqlx::Error>;
 
-    /// 指定ポストの絵文字ごとの件数集計（多い順、`(content, count, emoji_url)`）。
+    /// 指定ポストの絵文字ごとの件数集計（多い順、`(content, count, emoji_url)`）。ブリッジ関係の
+    /// 投稿の合算・重複の数え方は `note_extras::reaction_counts_for_posts` と同じ。
     /// ストリーミング配信ペイロード（`noteUpdated`）の組み立てに使う。閲覧者ごとの `reactedByMe`
     /// は含まない（API 公開用の集計は `fetch_reactions_map` を使う）。`emoji_url` は同一 `content`
     /// の行のうち非NULLな値を代表として1つ返す（異なるドメインの同名カスタム絵文字が
@@ -137,8 +138,15 @@ pub trait ReactionRepository: Send + Sync {
     /// 「過去の使用履歴」ではなく「現在も付いている自分のリアクション」になる。
     async fn list_uses_by_actor(&self, actor_id: i64) -> Result<Vec<ReactionUse>, sqlx::Error>;
 
+    /// 指定ポストとブリッジ関係にある他の投稿 `(post_id, 投稿者の actor_id)`（自分自身は含まない）。
+    /// リアクションの件数はグループで合算して見せるので、`noteUpdated` をそれらの投稿の表示にも
+    /// 届けるのに使う。
+    async fn bridge_siblings(&self, post_id: i64) -> Result<Vec<(i64, i64)>, sqlx::Error>;
+
     /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
-    /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。
+    /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。件数
+    /// （`note_extras::reaction_counts_for_posts`）と同じく、ブリッジ関係の投稿へのリアクションも
+    /// 含め、ブリッジユーザーと実ユーザーの両方が付けていれば実ユーザーの1件にまとめる。
     /// `viewer_actor_id` がミュート・ブロックしているアクターは除外する
     /// （`actor_is_hidden_for_viewer`）。
     async fn actors_for_reaction(
@@ -290,9 +298,12 @@ impl ReactionRepository for PgReactionRepository {
         post_id: i64,
     ) -> Result<Vec<(String, i64, Option<String>)>, sqlx::Error> {
         let rows = sqlx::query(
-            "SELECT content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url FROM reactions
-             WHERE post_id = $1
-             GROUP BY content
+            "SELECT r.content, COUNT(DISTINCT COALESCE(a.bridge_real_actor_id, r.actor_id)) AS cnt,
+                    MAX(r.emoji_url) AS emoji_url
+             FROM unnest(bridge_group_post_ids($1)) AS g(member_id)
+             JOIN reactions r ON r.post_id = g.member_id
+             JOIN actors a ON a.id = r.actor_id
+             GROUP BY r.content
              ORDER BY cnt DESC",
         )
         .bind(post_id)
@@ -313,6 +324,18 @@ impl ReactionRepository for PgReactionRepository {
         .await
     }
 
+    async fn bridge_siblings(&self, post_id: i64) -> Result<Vec<(i64, i64)>, sqlx::Error> {
+        sqlx::query_as(
+            "SELECT p.id, p.actor_id
+             FROM unnest(bridge_group_post_ids($1)) AS g(member_id)
+             JOIN posts p ON p.id = g.member_id
+             WHERE p.id <> $1",
+        )
+        .bind(post_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
     async fn actors_for_reaction(
         &self,
         post_id: i64,
@@ -325,11 +348,18 @@ impl ReactionRepository for PgReactionRepository {
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     a.emoji_map,
                     r.id AS reaction_id, r.created_at AS reaction_created_at
-             FROM reactions r
+             FROM (
+                 SELECT DISTINCT ON (COALESCE(a.bridge_real_actor_id, a.id)) a.id AS actor_id, r.id, r.created_at
+                 FROM unnest(bridge_group_post_ids($1)) AS g(member_id)
+                 JOIN reactions r ON r.post_id = g.member_id
+                 JOIN actors a ON a.id = r.actor_id
+                 WHERE r.content = $2
+                 ORDER BY COALESCE(a.bridge_real_actor_id, a.id), (a.bridge_real_actor_id IS NOT NULL), r.created_at DESC
+             ) r
              JOIN actors a ON a.id = r.actor_id
              LEFT JOIN media_files amf ON amf.id = a.avatar_media_id
              LEFT JOIN storage_providers asp ON asp.id = amf.storage_provider_id
-             WHERE r.post_id = $1 AND r.content = $2 AND a.withdrawn_at IS NULL AND a.suspended_at IS NULL
+             WHERE a.withdrawn_at IS NULL AND a.suspended_at IS NULL
                AND ($4::bigint IS NULL OR NOT actor_is_hidden_for_viewer($4, a.id))
                AND ($4::bigint IS NOT NULL OR a.actor_type = 'local')
              ORDER BY r.created_at DESC

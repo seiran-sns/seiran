@@ -233,7 +233,7 @@ fn publish_reaction_update(
     recipients: HashSet<i64>,
     post_id: i64,
     reactions_json: Vec<serde_json::Value>,
-    reactor_actor_id: i64,
+    reactor_actor_id: Option<i64>,
     reactor_emoji: Option<&str>,
 ) {
     stream_hub.publish_event(
@@ -242,7 +242,7 @@ fn publish_reaction_update(
         serde_json::json!({
             "postId": post_id.to_string(),
             "reactions": reactions_json,
-            "reactorActorId": reactor_actor_id.to_string(),
+            "reactorActorId": reactor_actor_id.map(|id| id.to_string()),
             "reactorEmoji": reactor_emoji,
         }),
     );
@@ -259,6 +259,10 @@ fn publish_reaction_update(
 /// 切替/追加なら `Some(新しい絵文字)`、取消（他に付け直さなかった場合）なら `None`。
 /// 受信側はこれと自分の actor_id を比較して `reactedByMe` を再計算できる（他人のリアクションは
 /// 件数のみ更新すればよい）。
+///
+/// 件数はブリッジ関係の投稿と合算した値なので、それらの投稿（`bridge_siblings`）の表示にも、
+/// その投稿者とフォロワーへ同じ集計を送る。こちらは `reactorActorId` を null にする
+/// （reactor が付けたのは別の投稿なので、受信側でその投稿の `reactedByMe` を変えさせない）。
 pub async fn broadcast_reaction_update(
     stream_hub: &StreamHub,
     follows: &dyn FollowRepository,
@@ -274,23 +278,38 @@ pub async fn broadcast_reaction_update(
         .unwrap_or_default();
     let reactions_json = reaction_agg_to_json(agg);
 
-    let mut recipients: HashSet<i64> = HashSet::new();
-    recipients.insert(post_author_id);
-    if let Ok(rows) = follows
-        .find_accepted_local_follower_ids(post_author_id)
-        .await
-    {
-        recipients.extend(rows);
-    }
-
     publish_reaction_update(
         stream_hub,
-        recipients,
+        author_and_followers(follows, post_author_id).await,
         post_id,
-        reactions_json,
-        reactor_actor_id,
+        reactions_json.clone(),
+        Some(reactor_actor_id),
         reactor_emoji,
     );
+
+    let siblings = reactions
+        .bridge_siblings(post_id)
+        .await
+        .unwrap_or_default();
+    for (sibling_id, sibling_author_id) in siblings {
+        publish_reaction_update(
+            stream_hub,
+            author_and_followers(follows, sibling_author_id).await,
+            sibling_id,
+            reactions_json.clone(),
+            None,
+            None,
+        );
+    }
+}
+
+async fn author_and_followers(follows: &dyn FollowRepository, author_id: i64) -> HashSet<i64> {
+    let mut recipients: HashSet<i64> = HashSet::new();
+    recipients.insert(author_id);
+    if let Ok(rows) = follows.find_accepted_local_follower_ids(author_id).await {
+        recipients.extend(rows);
+    }
+    recipients
 }
 
 /// `broadcast_reaction_update`のDM（`visibility='direct'`）専用版。配信先を
@@ -324,7 +343,7 @@ pub async fn broadcast_dm_reaction_update(
         recipients,
         post_id,
         reactions_json,
-        reactor_actor_id,
+        Some(reactor_actor_id),
         reactor_emoji,
     );
 }

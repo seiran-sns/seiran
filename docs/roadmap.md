@@ -100,6 +100,7 @@
 - [x] **NoteCardのリモートサーバー表示** — `docs/ui_spec.md`
 - [x] **未取り込み参照の表示とその場取り込み（#230-234）** — `docs/protocols.md` 1節
 - [x] **brid.gy ブリッジポスト・ブリッジユーザー** — `docs/protocols.md` 5節
+- [x] **ブリッジポストのリアクション合算表示** — `docs/protocols.md` 5節
 - [x] **「開く」（URL・ID・QR・OCR）（#165）** — `docs/architecture.md`
 - [x] **プロフィール（bio HTML・key-value・バナー・別のアカウント・生年月日）** — `docs/ui_spec.md` 2.2節、`docs/protocols.md`
 - [x] **未設定アバターの生成（#211）** — `docs/architecture.md`

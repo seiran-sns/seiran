@@ -26,8 +26,8 @@ export interface ReactionUpdate {
   postId: string;
   /** 更新後の権威的な集計（`reactedByMe` は含まない。閲覧者ごとに異なるため）。 */
   reactions: Pick<ReactionSummary, "emoji" | "count" | "emojiUrl">[];
-  /** 操作した本人の actor_id（Snowflake ID、文字列）。自分自身の別タブ/端末からの操作かの判定に使う。 */
-  reactorActorId: string;
+  /** 操作した本人の actor_id（Snowflake ID、文字列）。自分自身の別タブ/端末からの操作かの判定に使う。ブリッジ関係にある別の投稿への操作で件数だけが変わったときは null。 */
+  reactorActorId: string | null;
   /** 操作後、reactor がこの投稿に付けているリアクション（切替/追加なら絵文字、取消なら null）。 */
   reactorEmoji: string | null;
 }
