@@ -77,12 +77,14 @@ jobs:
           (cd frontend && npm audit --omit=dev --json > "$out/npm.json") || true
           for f in alerts prs cargo npm; do jq -e . "$out/$f.json" > /dev/null; done
 
-      # 前回 DM した一覧のハッシュ。同じ内容を毎回送らないため（audit-notify.sh）
+      # 前回 DM した一覧のハッシュ。同じ内容を毎回送らないため（audit-notify.sh）。キャッシュは
+      # 同じキーへ上書きできないので、キーに試行回数を含める（含めないと再実行で保存できず、
+      # 次の実行で同じ DM をまた送る）
       - name: Restore notified state
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/audit-notified
-          key: audit-notified-${{ github.run_id }}
+          key: audit-notified-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: audit-notified-
       - name: Notify
         id: notify
@@ -100,7 +102,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/audit-notified
-          key: audit-notified-${{ github.run_id }}
+          key: audit-notified-${{ github.run_id }}-${{ github.run_attempt }}
       - name: Check findings
         if: steps.notify.outputs.pending == 'true'
         run: |
