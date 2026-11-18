@@ -26,14 +26,16 @@ x-seiran: &seiran
     DB_PORT: "5432"
     REDIS_URL: redis://redis:6379
     SEIRAN_CONFIG_DIR: /app/config
-    # OGP の HTML の元になる index.html を、同じコンテナの nginx から取る
-    FRONTEND_ORIGIN: http://127.0.0.1
+    # アクセスログ（nginx の combined 形式）。ホストの ./logs に access.log.YYYY-MM-DD で
+    # 日ごとに書き出し、14日分残す。blue と green は同じファイルに追記する。
+    SEIRAN_ACCESS_LOG_DIR: /var/log/seiran
   volumes:
     - config-data:/app/config
+    - ./logs:/var/log/seiran
   # 停止の合図から、実行中のジョブ（最長60秒）と常駐処理の片付けを待つ
   stop_grace_period: 120s
   healthcheck:
-    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1/health"]
+    test: ["CMD", "curl", "-fsS", "-o", "/dev/null", "http://127.0.0.1:3000/health"]
     interval: 5s
     timeout: 3s
     retries: 3

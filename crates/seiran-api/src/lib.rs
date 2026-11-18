@@ -103,8 +103,13 @@ pub struct AppState {
     /// bio/profile_fields中のURL解決結果のキャッシュ（#リンク解決）。
     pub link_resolutions: Arc<dyn LinkResolutionRepository>,
     /// OGP対応（`handlers::ogp`）で SPA の index.html を取得する先。未設定時は Docker
-    /// 構成のデフォルト（`http://frontend:5173`）を使う。
+    /// 構成のデフォルト（`http://frontend:5173`）を使う。`frontend_dir` があればそちらを使う。
     pub frontend_origin: String,
+    /// ビルド済みフロントエンド（`frontend/dist`）のディレクトリ（`SEIRAN_FRONTEND_DIR`）。
+    /// 設定されていれば、どのルートにも当たらないリクエストに静的ファイルと SPA の
+    /// index.html を返す（`handlers::frontend`）。公開イメージが前段の Web サーバー無しで
+    /// フロントエンドを配るため。開発時はフロントエンドを Vite が配るので設定しない。
+    pub frontend_dir: Option<std::path::PathBuf>,
     pub secrets: Arc<Secrets>,
     pub atp_service: Arc<AtpCommitService>,
     pub http_client: Arc<reqwest::Client>,
@@ -907,6 +912,9 @@ pub async fn init_state(
         link_resolutions,
         frontend_origin: std::env::var("FRONTEND_ORIGIN")
             .unwrap_or_else(|_| "http://frontend:5173".to_string()),
+        frontend_dir: std::env::var_os("SEIRAN_FRONTEND_DIR")
+            .filter(|v| !v.is_empty())
+            .map(std::path::PathBuf::from),
         secrets,
         atp_service,
         http_client,

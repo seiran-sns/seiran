@@ -119,6 +119,13 @@ fn parse_hop(hop: &str) -> Option<IpAddr> {
         .map(|ip| ip.to_canonical())
 }
 
+impl ClientIp {
+    /// `TRUSTED_PROXIES` の設定で判定する（アクセスログ等、エクストラクタを通さない箇所用）。
+    pub fn resolve_with_env(peer: Option<IpAddr>, headers: &HeaderMap) -> Self {
+        Self::resolve(peer, headers, &TRUSTED_PROXIES)
+    }
+}
+
 #[async_trait]
 impl<S> FromRequestParts<S> for ClientIp
 where

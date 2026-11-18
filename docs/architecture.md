@@ -101,12 +101,13 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 ## 3.1 公開イメージと本番・単騎運用
 
-**公開イメージ**（`docker/seiran/Dockerfile`、Docker Hub `seiranorg/seiran` と `ghcr.io/seiran-sns/seiran`、linux/amd64）: seiran-server のリリースビルド、ビルド済みのフロントエンド（`/usr/share/seiran/frontend`）、それを配る nginx、ffmpeg を1つにまとめる。フロントとサーバーは同じコミットからビルドされるので版が常に一致する。役割は `SEIRAN_ROLE` で選ぶ（`docker/seiran/entrypoint.sh`、PID 1 は tini）。
-- `all`（既定）: nginx（:80）と `seiran-server --role all` を同じコンテナで動かす。nginx は静的ファイルを配り、バックエンドのパスを `127.0.0.1:3000` へ転送する（`docker/seiran/site.conf.template`）。OGP の元になる index.html は同じコンテナの nginx から取る（`FRONTEND_ORIGIN=http://127.0.0.1`）。どちらかのプロセスが止まったらもう片方も止めてコンテナごと終了し、再起動は compose に任せる。SIGTERM は両方へ伝える。
-- `frontend`: nginx だけ。振り分け先を `SEIRAN_API_UPSTREAM`・`SEIRAN_FEDERATION_UPSTREAM` で渡す（split-role の入口）。
-- `api` / `federation` / `worker` / `firehose`: seiran-server をその役割だけで動かす。
+**公開イメージ**（`docker/seiran/Dockerfile`、Docker Hub `seiranorg/seiran` と `ghcr.io/seiran-sns/seiran`、linux/amd64）: seiran-server のリリースビルド、ビルド済みのフロントエンド（`/usr/share/seiran/frontend`）、ffmpeg を1つにまとめる。フロントとサーバーは同じコミットからビルドされるので版が常に一致する。コンテナの中で動くのは seiran-server の1プロセスだけで（PID 1 は tini。シグナルの中継と ffmpeg 等の子プロセスの刈り取り）、Web サーバーは入れない。役割は `SEIRAN_ROLE` で選ぶ（`docker/seiran/entrypoint.sh`。root で設定ボリュームの所有権を揃えてから seiran ユーザーで exec する）。
+- `all`（既定）・`api`: `PORT`（既定 3000）で API を受け、フロントエンドも配る（`SEIRAN_FRONTEND_DIR`、下記）。`all` は federation も同じポートで受け、worker・firehose も動かす。
+- `federation` / `worker` / `firehose`: seiran-server をその役割だけで動かす。split-role 構成では、前段のロードバランサーが連合のパス（`/inbox`・`/users/`・WebFinger・NodeInfo）を `federation` へ、それ以外を `api` へ振り分ける。
+- **フロントエンドの配信**（`seiran-api::handlers::frontend`、`SEIRAN_FRONTEND_DIR` が設定されているとき）: どのルートにも当たらない GET/HEAD に、そのディレクトリの静的ファイルを返し、無ければ SPA の index.html を返す。`/assets/`（ファイル名にハッシュが入る）は `Cache-Control: public, max-age=31536000, immutable` で、無ければ 404（消えた古いビルドの JS に HTML を返すとブラウザが壊れるため）。それ以外は `no-cache`（更新後すぐ新しい版を読ませる）。バックエンドのパス（`/api/`・`/xrpc/`・`/.well-known/` 等）で当たらなかったものは 404（API クライアントに HTML の 200 を返さない）。`/xrpc/` は従来どおり `atproto-proxy` の透過転送へ回す。OGP の元になる index.html もこのディレクトリから直接読む（`FRONTEND_ORIGIN` から取りに行かない）。開発時はフロントエンドを Vite が配るので設定しない。
+- **アクセスログ**（`seiran-api::middleware::access_log`、`SEIRAN_ACCESS_LOG_DIR`）: 動作ログ（標準エラー、`docker logs` で見る）とは分けて、指定したディレクトリに `access.log.YYYY-MM-DD` で日ごとに書き出し、`SEIRAN_ACCESS_LOG_KEEP_DAYS` 日分（既定 14）残す。未設定なら書かない。形式は nginx の combined に処理時間（秒）を足したもので、nginx 向けの解析ツールでそのまま読める。接続元はクライアントIP（4節。信頼するプロキシが追記した X-Forwarded-For だけをたどるので偽装されない）。パスと Referer にはクエリ文字列を書かない（トークンを含むことがある）。送信バイト数は本文の長さ（前もって分からないストリーミング等は 0）、処理時間はレスポンスヘッダーまで（WebSocket は 101 まで）。書き込みは別スレッドで、詰まったら行を捨ててリクエストを待たせない。1行を1回で追記するので、無停止更新で新旧が同じファイルに書いても行は混ざらない。
 
-**本番・単騎運用**（`docker-compose.prod.yml`）: `db` / `redis`（追記ログで永続化）/ `lb` / `seiran-blue` / `seiran-green` / `cron` / `tunnel`（公開ホスト名の向き先は `http://lb:80`）。`seiran-blue`・`seiran-green` は同じ定義（`all`）で、プロファイルに入れてあるので `docker compose up -d` だけでは起動しない。版は `.env` の `SEIRAN_VERSION`。
+**本番・単騎運用**（`docker-compose.prod.yml`）: `db` / `redis`（追記ログで永続化）/ `lb` / `seiran-blue` / `seiran-green` / `cron` / `tunnel`（公開ホスト名の向き先は `http://lb:80`）。`lb` は色の `:3000` へ転送する。アクセスログはホストの `./logs` に書き出す。`seiran-blue`・`seiran-green` は同じ定義（`all`）で、プロファイルに入れてあるので `docker compose up -d` だけでは起動しない。版は `.env` の `SEIRAN_VERSION`。
 - 更新は blue-green（`scripts/deploy.sh`）: 動いていない方の色を新しい版で起動し、`/health` が通ったら `lb`（標準の nginx。版の入れ替えでは作り直さない）の向き先 `docker/lb/active.conf` を書き換えて reload し、古い方を `docker stop` する。reload は graceful なので処理中のリクエストは古い方で終わり、新しいリクエストは新しい方にだけ流れる。新しい方が healthy にならなければ止めて終わり、動いている方には触れない。版を戻すのも `SEIRAN_VERSION` を戻して同じ手順。
 - 新旧が重なっている間は、ジョブキュー・リアルタイム配信・subscribeRepos を Redis で共有し、常駐処理は片方だけが動く（3節）。同じアクターの ATP コミットが両方で起きても SERIALIZABLE のトランザクションで直列化される（`docs/protocols.md` 6節）。
 - 新しい版は起動時にマイグレーションを適用し、古い版はそのスキーマのまま動き続ける。管理者は版を大きく飛ばして更新しうるので、スキーマは互換を保つ範囲のすべての版（1.0.0 以降は同じメジャー版のそれより前のすべての版と、1つ前のメジャー版の最終版。0.x では1つ前の版）が動けるものにし、守れない変更はメジャー版を上げる（`docs/coding_rules.md` 21）。管理者は各メジャー版の最終版を順に経由すれば、どの版からでも更新できる（例: 1.4.2 → 1 系の最終版 → 2 系の最新）。
@@ -383,6 +384,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 | プロセス間の共有 | `REDIS_URL`（ジョブキュー・リアルタイム配信・subscribeRepos。複数のプロセスが同時に動く構成で必須。`all` を1つだけ動かすなら不要。3節） |
 | クライアントIP | `TRUSTED_PROXIES`（カンマ区切りの CIDR、既定はループバックとプライベートアドレス。4節） |
 | 本番・単騎運用 | `SEIRAN_VERSION`（動かす版）、`SEIRAN_IMAGE`（既定 `seiranorg/seiran`）。3.1節 |
+| フロントエンドの配信・アクセスログ | `SEIRAN_FRONTEND_DIR`（ビルド済みフロントエンドのディレクトリ。公開イメージでは設定済み）、`SEIRAN_ACCESS_LOG_DIR`（アクセスログの書き出し先。未設定なら書かない）、`SEIRAN_ACCESS_LOG_KEEP_DAYS`（既定14）。3.1節 |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWT secret 等は `secrets.toml` で自動生成する |
 | DBバックアップ | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_DEFAULT_REGION`/`S3_ENDPOINT`（R2 の API トークン）、`BACKUP_OBJECT_S3URL`（`s3://<bucket>/<prefix>`）。`cron` サービスと `scripts/backup-db.sh` が `.env` から読む |
 | 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel。ハンドル検証 TXT 用の Cloudflare DNS トークン/Zone ID は環境変数ではなく管理画面設定 `site_settings`）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |

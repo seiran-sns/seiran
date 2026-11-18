@@ -1126,10 +1126,11 @@ pub fn router(state: AppState) -> Router {
         .merge(misskey_routes())
         .merge(mastodon_routes())
         .merge(xrpc_routes())
-        // 未実装のXRPCメソッドへの `atproto-proxy` ヘッダー付きリクエストをAppView等へ
-        // 透過転送する（明示的な `.route()` の方が優先されるため、ここに置いても既存の
-        // XRPCハンドラを妨げない）。
-        .fallback(handlers::xrpc::proxy::xrpc_proxy_fallback)
+        // どのルートにも当たらないリクエスト。未実装のXRPCメソッドは `atproto-proxy`
+        // ヘッダー付きなら AppView 等へ透過転送し、それ以外はフロントエンドの静的ファイル・
+        // SPA の index.html を返す（`handlers::frontend`。明示的な `.route()` の方が優先
+        // されるため、ここに置いても既存のハンドラを妨げない）。
+        .fallback(handlers::frontend::fallback)
         .with_state(state)
         // Misskey クライアントの `i`（ボディ/クエリ）トークンを Authorization ヘッダーへ
         // 合成するブリッジ。既存ハンドラの extract_auth 呼び出しは無改修のまま両対応になる。
