@@ -1,12 +1,14 @@
 #!/bin/bash
-# SEIRAN_ROLE で役割を選んで起動する（既定は all）。
+# SEIRAN_ROLE で役割を選んで seiran-server を起動する（既定は all）。
 #
-#   all        nginx（:80、フロントエンドの配信とバックエンドへの振り分け）と
-#              seiran-server --role all を同じコンテナで動かす
-#   frontend   nginx だけ。振り分け先は SEIRAN_API_UPSTREAM（必須）と
-#              SEIRAN_FEDERATION_UPSTREAM（省略時は API と同じ）で渡す
-#   api / federation / worker / firehose
-#              seiran-server をその役割だけで動かす
+#   all        api と federation を1ポート（PORT、既定 3000）で受け、worker と firehose も
+#              動かす。フロントエンドの静的ファイルも配る（SEIRAN_FRONTEND_DIR）
+#   api        API とフロントエンド（PORT、既定 3000）
+#   federation ActivityPub の受信（FEDERATION_INBOX_PORT、既定 3001）
+#   worker / firehose
+#
+# split-role 構成では、前段のロードバランサーが連合のパス（/inbox・/users/・WebFinger 等）を
+# federation へ、それ以外を api へ振り分ける。
 #
 # 引数を渡したときは、それをそのまま実行する（調査用: docker run ... bash など）。
 #
@@ -20,54 +22,23 @@ if [ "$#" -gt 0 ]; then
 fi
 
 role="${SEIRAN_ROLE:-all}"
-chown -R seiran:seiran /app/config
-
-render_nginx() {
-    SEIRAN_API_UPSTREAM="$1" SEIRAN_FEDERATION_UPSTREAM="$2" \
-        envsubst '${SEIRAN_API_UPSTREAM} ${SEIRAN_FEDERATION_UPSTREAM}' \
-        < /etc/nginx/seiran/site.conf.template \
-        > /etc/nginx/conf.d/seiran.conf
-}
-
 case "$role" in
-    all)
-        backend="127.0.0.1:${PORT:-3000}"
-        render_nginx "$backend" "$backend"
-        # OGP の HTML の元になる index.html を、同じコンテナの nginx から取る。
-        export FRONTEND_ORIGIN="${FRONTEND_ORIGIN:-http://127.0.0.1}"
-
-        gosu seiran seiran-server --role all &
-        server=$!
-        nginx -g 'daemon off;' &
-        web=$!
-
-        # docker stop の SIGTERM を両方へ伝える。seiran-server は処理中のリクエストと
-        # ジョブを終えてから、nginx は処理中のリクエストを終えてから止まる。
-        stop() {
-            kill -TERM "$server" 2>/dev/null || true
-            nginx -s quit 2>/dev/null || true
-        }
-        trap stop TERM INT
-
-        # どちらかが止まったら（異常終了を含む）もう片方も止め、コンテナごと終了する。
-        # 再起動は compose の restart ポリシーに任せる。
-        wait -n "$server" "$web" || true
-        stop
-        status=0
-        wait "$server" || status=$?
-        wait "$web" || true
-        exit "$status"
-        ;;
+    all | api | federation | inbox | worker | firehose | atp-repo) ;;
     frontend)
-        api="${SEIRAN_API_UPSTREAM:?SEIRAN_API_UPSTREAM を指定してください（例: api:3000）}"
-        render_nginx "$api" "${SEIRAN_FEDERATION_UPSTREAM:-$api}"
-        exec nginx -g 'daemon off;'
-        ;;
-    api | federation | inbox | worker | firehose | atp-repo)
-        exec gosu seiran seiran-server --role "$role"
+        echo "SEIRAN_ROLE=frontend は廃止しました。フロントエンドは all / api の seiran-server が配ります" >&2
+        exit 64
         ;;
     *)
-        echo "不明な SEIRAN_ROLE: $role（all / frontend / api / federation / worker / firehose）" >&2
+        echo "不明な SEIRAN_ROLE: $role（all / api / federation / worker / firehose）" >&2
         exit 64
         ;;
 esac
+
+chown -R seiran:seiran /app/config
+# アクセスログの書き出し先（ホストのディレクトリをマウントする想定）。ファイルは
+# 0644 で作るので、ホストの一般ユーザーからも読める。
+if [ -n "${SEIRAN_ACCESS_LOG_DIR:-}" ]; then
+    mkdir -p "$SEIRAN_ACCESS_LOG_DIR"
+    chown seiran:seiran "$SEIRAN_ACCESS_LOG_DIR"
+fi
+exec gosu seiran seiran-server --role "$role"

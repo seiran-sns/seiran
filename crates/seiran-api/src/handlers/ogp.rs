@@ -117,7 +117,8 @@ fn replace_title(html: &str, title: &str) -> String {
     )
 }
 
-/// `state.frontend_origin` から SPA の index.html を取得する。フロントエンドがどのパスに
+/// `state.frontend_origin` から SPA の index.html を取得する（`state.frontend_dir` があれば
+/// そこから読む）。フロントエンドがどのパスに
 /// 対しても同じ index.html を返す（SPA fallback）前提のため、常にルート `/` を取得する
 /// （`/notes`・`/@` に対する Vite の proxy 設定と衝突させないため）。
 /// `frontend_origin`は運用者が設定する内部ホスト（Docker の`frontend`等、private IP）のため、
@@ -136,6 +137,13 @@ fn internal_http_client() -> &'static reqwest::Client {
 }
 
 async fn fetch_spa_html(state: &AppState) -> Result<String, Response> {
+    // 自分でフロントエンドを配っている（公開イメージ）ならファイルを直接読む
+    if let Some(dir) = state.frontend_dir.as_deref() {
+        return super::frontend::read_index_html(dir).await.map_err(|e| {
+            tracing::error!("[ogp] フロントエンドの index.html の読み出し失敗: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR.into_response()
+        });
+    }
     let resp = internal_http_client()
         .get(format!("{}/", state.frontend_origin))
         .send()

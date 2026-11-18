@@ -59,7 +59,7 @@ done
 log "seiran-${next} が healthy になりました。LB の向き先を切り替えます。"
 
 # 同じディレクトリに書いてから置き換える（書きかけのファイルを nginx に読ませない）。
-printf 'set $seiran_backend seiran-%s:80;\n' "$next" > "$active_conf.tmp"
+printf 'set $seiran_backend seiran-%s:3000;\n' "$next" > "$active_conf.tmp"
 mv "$active_conf.tmp" "$active_conf"
 if [ -n "$("${compose[@]}" ps -q --status running lb)" ]; then
     "${compose[@]}" exec -T lb nginx -t -q

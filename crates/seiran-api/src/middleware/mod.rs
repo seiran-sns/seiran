@@ -1,3 +1,4 @@
+pub mod access_log;
 pub mod admin_layer;
 pub mod auth;
 pub mod authed_user;

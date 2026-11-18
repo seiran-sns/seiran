@@ -40,3 +40,6 @@ nohup.out
 
 # docker-compose.prod.yml の LB の向き先（scripts/deploy.sh が書き換える）
 docker/lb/active.conf
+
+# 本番構成（docker-compose.prod.yml）のアクセスログ
+/logs/

@@ -149,6 +149,14 @@ async fn serve(
     port: u16,
     shutdown: CancellationToken,
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // アクセスログは動作ログと分けてファイルに書く（SEIRAN_ACCESS_LOG_DIR。未設定なら書かない）
+    let app = match seiran_api::middleware::access_log::AccessLog::from_env() {
+        Some(log) => app.layer(axum::middleware::from_fn_with_state(
+            log,
+            seiran_api::middleware::access_log::record,
+        )),
+        None => app,
+    };
     let addr = format!("0.0.0.0:{}", port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     tracing::info!("[seiran-server] リッスン開始: http://{}", addr);
@@ -496,25 +504,7 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
     ));
 
     // パスが衝突しないため単一ポートに合流できる
-    let app = seiran_api::router(api_state)
-        .merge(seiran_federation_inbox::router(inbox_state))
-        // サードパーティクライアント（Misskey互換クライアント等）がどのパスを叩いて
-        // 404/401になっているか事後から追えるようにする（アクセスログが他に無いため）。
-        // クエリ文字列は記録しない（`/api/streaming?token=...`等、JWTがそのまま
-        // ログに残るのを避けるため、パスのみを使う）。
-        .layer(
-            tower_http::trace::TraceLayer::new_for_http()
-                .make_span_with(|request: &axum::http::Request<_>| {
-                    tracing::info_span!(
-                        "request",
-                        method = %request.method(),
-                        path = %request.uri().path(),
-                    )
-                })
-                .on_response(
-                    tower_http::trace::DefaultOnResponse::new().level(tracing::Level::INFO),
-                ),
-        );
+    let app = seiran_api::router(api_state).merge(seiran_federation_inbox::router(inbox_state));
     serve(app, env_port("PORT", 3000), shutdown).await?;
     let _ = tokio::join!(worker, firehose);
     Ok(())
