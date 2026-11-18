@@ -1,0 +1,56 @@
+name: Security release
+
+# Dependabot のセキュリティ更新が main に入って CI が通ったら、リビジョン桁を上げて main へ
+# push する。その push の CI（ci.yml の image-build・image-publish）が公開イメージを出す。
+# 判断と版上げは .github/scripts/security-bump.sh。
+#
+# 版上げを PR に含めずマージ後にここで直列に行うのは、複数の修正 PR が同時に来たときに
+# 版の行で衝突させないため。push は GitHub App のトークンで行う（GITHUB_TOKEN の push では
+# main の CI が起動しない。App は main のルールセットの例外にしておく）。
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+concurrency:
+  group: security-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    name: Bump revision
+    if: >-
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_commit.author.name == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 26
+      - name: Configure git author
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+      - name: Bump and push
+        env:
+          FIXED_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: .github/scripts/security-bump.sh "$FIXED_SHA"

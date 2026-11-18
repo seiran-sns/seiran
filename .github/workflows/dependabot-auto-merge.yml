@@ -1,0 +1,57 @@
+name: Dependabot auto-merge
+
+# Dependabot のセキュリティ更新 PR に auto-merge を設定する。main のルールセットが CI の
+# 通過を必須にしているので、マージは CI が通ってから行われる。マージ後の版上げとリリースは
+# security-release.yml が行う（docs/architecture.md 3.1節）。
+#
+# 対象はセキュリティ勧告に紐づく更新（alert-lookup で GHSA が引けるもの）で、メジャー更新では
+# ないものに限る。それ以外の PR は人が判断するまで置いておく。
+# auto-merge の設定は GitHub App のトークンで行う。GITHUB_TOKEN で設定したマージの push では
+# 後続のワークフロー（main の CI）が起動しないため。
+#
+# Dependabot が起こしたワークフローは Dependabot シークレットしか読めないので、
+# RELEASE_APP_CLIENT_ID・RELEASE_APP_PRIVATE_KEY は Dependabot シークレットにも登録する。
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  auto-merge:
+    name: Enable auto-merge
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: dependabot/fetch-metadata@v3
+        id: meta
+        with:
+          github-token: ${{ steps.app.outputs.token }}
+          alert-lookup: true
+      - name: Enable auto-merge
+        if: >-
+          steps.meta.outputs.ghsa-id != '' &&
+          steps.meta.outputs.update-type != 'version-update:semver-major'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          GHSA: ${{ steps.meta.outputs.ghsa-id }}
+        run: |
+          gh pr merge --auto --squash "$PR_URL"
+          echo "$GHSA の修正として auto-merge を設定しました" >> "$GITHUB_STEP_SUMMARY"
+      - name: Leave for review
+        if: >-
+          steps.meta.outputs.ghsa-id == '' ||
+          steps.meta.outputs.update-type == 'version-update:semver-major'
+        env:
+          UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
+          GHSA: ${{ steps.meta.outputs.ghsa-id }}
+        run: |
+          echo "自動マージの対象外です（GHSA: ${GHSA:-なし}、更新種別: $UPDATE_TYPE）。人が確認してください。" \
+              >> "$GITHUB_STEP_SUMMARY"
