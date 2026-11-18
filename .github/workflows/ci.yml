@@ -8,27 +8,34 @@ on:
   workflow_dispatch:
 
 jobs:
-  # ─── 変更範囲の判定 ──────────────────────────────────────────────────────
-  # 変更に関係しない検査ジョブはスキップする（判定は .github/scripts/ci-changes.sh）。
+  # ─── 検査の要否の判定 ────────────────────────────────────────────────────
+  # 検査ジョブごとに検査対象のファイル群の指紋を取り、同じ指紋で通った記録（各ジョブが最後に
+  # 残すアーティファクト ci-pass-<ジョブ>-<指紋>、7日保存）があればそのジョブをスキップする
+  # （.github/scripts/ci-changes.sh）。PR で通った中身が main に入っても、版上げだけの
+  # コミットでも、検査をやり直さない。
   # ワークフローごと paths で絞らないのは、必須チェックに指定したジョブが報告されないと
   # 「未着」として扱われ、マージ（auto-merge を含む）が止まるため。ジョブの if でスキップ
   # した場合は skipped が報告され、必須チェックを満たす。
   changes:
     name: Changes
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read # 通った記録（アーティファクト）を探す
     outputs:
       rust: ${{ steps.changes.outputs.rust }}
       frontend: ${{ steps.changes.outputs.frontend }}
       e2e: ${{ steps.changes.outputs.e2e }}
+      rust_fp: ${{ steps.changes.outputs.rust_fp }}
+      frontend_fp: ${{ steps.changes.outputs.frontend_fp }}
+      e2e_fp: ${{ steps.changes.outputs.e2e_fp }}
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Detect changes
+      - name: Decide which checks to run
         id: changes
         env:
-          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
-        run: .github/scripts/ci-changes.sh "$BASE"
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: .github/scripts/ci-changes.sh
 
   # ─── シークレット検出 ────────────────────────────────────────────────────
   gitleaks:
@@ -89,6 +96,14 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
       - name: Test
         run: cargo test --workspace
+      # 同じ中身なら次から省けるよう、通った記録を残す（.github/scripts/ci-changes.sh）
+      - name: Record pass
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-pass-rust-${{ needs.changes.outputs.rust_fp }}
+          path: .github/workflows/ci.yml
+          retention-days: 7
+          overwrite: true
 
   # ─── フロントエンド: 型チェック / ESLint ────────────────────────────────
   frontend:
@@ -118,6 +133,14 @@ jobs:
         run: npm run lint
       - name: Unit test
         run: npm test
+      # 同じ中身なら次から省けるよう、通った記録を残す（.github/scripts/ci-changes.sh）
+      - name: Record pass
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-pass-frontend-${{ needs.changes.outputs.frontend_fp }}
+          path: .github/workflows/ci.yml
+          retention-days: 7
+          overwrite: true
 
   # ─── ブラウザE2E: 実API + 隔離DB + 外部サービスstub ────────────────────
   e2e:
@@ -206,6 +229,14 @@ jobs:
             e2e/test-results/
           if-no-files-found: ignore
           retention-days: 7
+      # 同じ中身なら次から省けるよう、通った記録を残す（.github/scripts/ci-changes.sh）
+      - name: Record pass
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-pass-e2e-${{ needs.changes.outputs.e2e_fp }}
+          path: .github/workflows/ci.yml
+          retention-days: 7
+          overwrite: true
 
   # ─── 公開イメージ: 検査と並行してビルドし、全部通ったら push ─────────────
   # main への push（と手動実行）のときだけ。同じ版のタグが両方のレジストリに既にあれば
