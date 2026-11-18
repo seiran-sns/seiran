@@ -21,7 +21,12 @@ permissions:
 jobs:
   auto-merge:
     name: Enable auto-merge
-    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    # PR の作成者だけでなく、このイベントを起こしたのも Dependabot であることを求める。
+    # 書き込み権限のある人が Dependabot の PR のブランチにコミットを足した場合、作成者は
+    # Dependabot のままなので、作成者だけで判定すると人の変更まで自動でマージしてしまう。
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v3

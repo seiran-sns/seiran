@@ -118,7 +118,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 **依存の脆弱性修正の自動リリース**: 勧告が出た依存の修正は、人を介さずに公開イメージまで進む。全面的な依存更新はサプライチェーン攻撃の入口を広げるので行わず、勧告が示す修正版への更新だけを対象にする。
 - 修正 PR は Dependabot security updates（リポジトリ設定で有効化。version updates は使わない）が作る。勧告ごとに、脆弱性が直る最小の版へ上げる。
-- `.github/workflows/dependabot-auto-merge.yml` が、勧告（GHSA）に紐づきメジャー更新でない PR に auto-merge を設定する。main のルールセットが CI の通過を必須にしているので、マージは CI 成功後になる。それ以外の Dependabot PR は人が判断する。
+- `.github/workflows/dependabot-auto-merge.yml` が、勧告（GHSA）に紐づきメジャー更新でない PR に auto-merge を設定する。PR の作成者とイベントを起こした者の両方が Dependabot であることを求め、人がコミットを足した PR は自動でマージしない。人が立てた PR には何もしない（フォークからの PR にはシークレットも渡らない）。main のルールセットが CI の通過を必須にしているので、マージは CI 成功後になる。それ以外の Dependabot PR は人が判断する。
 - `.github/workflows/security-release.yml` が、Dependabot のマージコミットで main の CI が通ったらリビジョン桁を上げて main へ push する（`.github/scripts/security-bump.sh`）。その push の CI が公開イメージを出す。版上げを PR に含めずマージ後に直列で行うのは、複数の修正 PR が同時に来ても版の行で衝突させないため。イメージの中身が変わらない修正（Cargo.lock とフロントの本番依存が変わらない、開発用依存・E2E の依存だけの修正）、main の版がまだリリース前（タグ `v<版>` が無く、その版のリリースに修正が含まれる）、リリース済みの版が既に修正を含む、のいずれかなら版を上げない。
 - auto-merge の設定と版上げの push は GitHub App（シークレット `RELEASE_APP_CLIENT_ID`・`RELEASE_APP_PRIVATE_KEY`。Dependabot が起こすワークフローは Dependabot シークレットしか読めないので両方に登録する）のトークンで行う。`GITHUB_TOKEN` によるマージや push では後続のワークフローが起動しないため。App は main のルールセットの例外にする。
 - `.github/workflows/audit.yml` が毎日、Rust（RustSec）とフロントの本番依存を検査する。勧告はコードを変えなくても後から出るため。修正版が無い・Dependabot が直せない勧告はここで落ち続け、人が対応する（Rust は勧告ごとに Issue が立つ）。
