@@ -1,4 +1,4 @@
-# cargo-audit / rustsec/audit-check（CI）の設定（docs/code_audit_2026-08-05.md S-9）。
+# cargo audit（CI の Rust ジョブと定期監査 audit.yml）の設定（docs/code_audit_2026-08-05.md S-9）。
 #
 # 現時点で修正版を使えない既知のadvisoryを一時的に無視する。新規に混入する
 # 脆弱性はここに無いものだけがCIを落とすため、監視自体は機能する。無視した項目は

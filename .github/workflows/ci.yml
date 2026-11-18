@@ -66,7 +66,6 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      checks: write
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
@@ -90,10 +89,20 @@ jobs:
         run: cargo check --workspace
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
-      - name: Audit dependencies
-        uses: rustsec/audit-check@v2.0.0
+      # cargo audit を直接使う（版は audit.yml と揃える）。勧告があれば終了コードで落ちる。
+      # 結果を GitHub のチェックとして書き込むアクションは、PR の実行でチェックの更新に
+      # 失敗してジョブを落とすことがあるので使わない。
+      - name: Cache cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v6
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-0.23.0
+      - name: Install cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version 0.23.0 --locked
+      - name: Audit dependencies
+        run: cargo audit
       - name: Test
         run: cargo test --workspace
       # 同じ中身なら次から省けるよう、通った記録を残す（.github/scripts/ci-changes.sh）
