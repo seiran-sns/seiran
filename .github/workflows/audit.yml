@@ -1,12 +1,12 @@
 name: Dependency audit
 
-# 依存の勧告はコードを変えなくても後から出るので、push 時の CI とは別に毎日検査する。
+# 依存の勧告はコードを変えなくても後から出るので、push 時の CI とは別に8時間ごとに検査する。
 # Rust は RustSec、フロントは本番依存だけ（ci.yml と同じ基準）。修正版のある勧告は
 # Dependabot のセキュリティ更新が PR にし、dependabot-auto-merge.yml・security-release.yml が
 # リリースまで進める。ここで落ちたまま残るのは、修正版が無いか Dependabot が直せないもの。
 on:
   schedule:
-    - cron: "17 18 * * *" # 毎日 03:17（JST）
+    - cron: "17 */8 * * *" # 8時間ごと（JST 1:17・9:17・17:17）
   workflow_dispatch:
 
 permissions:

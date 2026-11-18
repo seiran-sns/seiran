@@ -116,12 +116,14 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 **自動リリース**（`.github/workflows/ci.yml` の `image-build`・`image-publish`）: main への push で、そのコミットについて `scripts/release.sh` と同じことを行う。両方のレジストリに `<版>` のタグが既にあればビルドしない（版を上げていないコミットでは何もせず、既存の版を別のコミットのイメージで上書きしない。判定は `.github/scripts/image-targets.sh`）。片方にだけ無ければ、無い方にだけ push する。待ち時間を減らすため、`image-build` は検査ジョブと並行してビルドし結果を GitHub Actions のキャッシュに置くだけにし、`image-publish` が全ジョブ成功後に同じビルドをキャッシュから再現して push する（キャッシュが消えていれば作り直すだけで、検査を通っていないイメージは出ない）。Docker Hub はシークレット `DOCKERHUB_USERNAME`・`DOCKERHUB_TOKEN`、GHCR は `GITHUB_TOKEN`（`packages: write`）で push する。手動実行（workflow_dispatch）もできる。
 
+**リリースの告知**（`ci.yml` の `announce`、`.github/scripts/announce.sh`）: `image-publish` がイメージを push したら、その版を seiran のサーバーへ公開投稿する。告知先はシークレット `ANNOUNCE_TARGETS` に「サーバーの URL とトークン」を空白区切りで1行1組書き（空行・`#` の行は無視）、告知先を増やすときは行を足す。投稿は Mastodon 互換 API（`POST /api/v1/statuses`）で、トークンは告知用アカウントの設定「アプリトークン」で発行する（パスワード変更で失効するので、そのときは発行し直す）。本文は版、前の版のタグとの差分リンク、イメージ名。1つの告知先で失敗しても残りには投稿し、失敗があればジョブを失敗にする（イメージは出た後なのでリリースは取り消さない）。
+
 **依存の脆弱性修正の自動リリース**: 勧告が出た依存の修正は、人を介さずに公開イメージまで進む。全面的な依存更新はサプライチェーン攻撃の入口を広げるので行わず、勧告が示す修正版への更新だけを対象にする。
 - 修正 PR は Dependabot security updates（リポジトリ設定で有効化。version updates は使わない）が作る。勧告ごとに、脆弱性が直る最小の版へ上げる。
 - `.github/workflows/dependabot-auto-merge.yml` が、勧告（GHSA）に紐づきメジャー更新でない PR に auto-merge を設定する。PR の作成者とイベントを起こした者の両方が Dependabot であることを求め、人がコミットを足した PR は自動でマージしない。人が立てた PR には何もしない（フォークからの PR にはシークレットも渡らない）。main のルールセットが CI の通過を必須にしているので、マージは CI 成功後になる。それ以外の Dependabot PR は人が判断する。
 - `.github/workflows/security-release.yml` が、Dependabot のマージコミットで main の CI が通ったらリビジョン桁を上げて main へ push する（`.github/scripts/security-bump.sh`）。その push の CI が公開イメージを出す。版上げを PR に含めずマージ後に直列で行うのは、複数の修正 PR が同時に来ても版の行で衝突させないため。イメージの中身が変わらない修正（Cargo.lock とフロントの本番依存が変わらない、開発用依存・E2E の依存だけの修正）、main の版がまだリリース前（タグ `v<版>` が無く、その版のリリースに修正が含まれる）、リリース済みの版が既に修正を含む、のいずれかなら版を上げない。
 - auto-merge の設定と版上げの push は GitHub App（シークレット `RELEASE_APP_CLIENT_ID`・`RELEASE_APP_PRIVATE_KEY`。Dependabot が起こすワークフローは Dependabot シークレットしか読めないので両方に登録する）のトークンで行う。`GITHUB_TOKEN` によるマージや push では後続のワークフローが起動しないため。App は main のルールセットの例外にする。
-- `.github/workflows/audit.yml` が毎日、Rust（RustSec）とフロントの本番依存を検査する。勧告はコードを変えなくても後から出るため。修正版が無い・Dependabot が直せない勧告はここで落ち続け、人が対応する（Rust は勧告ごとに Issue が立つ）。
+- `.github/workflows/audit.yml` が8時間ごとに、Rust（RustSec）とフロントの本番依存を検査する。勧告はコードを変えなくても後から出るため。修正版が無い・Dependabot が直せない勧告はここで落ち続け、人が対応する（Rust は勧告ごとに Issue が立つ）。
 - CI の `npm audit` はフロントの本番依存だけを検査する（`--omit=dev`）。開発用依存（vite・vitest・eslint 等）はビルド・テスト時にしか動かず外部入力も渡らないので、その勧告で CI を止めない。
 
 ## 4. 認証
@@ -351,7 +353,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 ## 9. テストとCI
 
 **CI**（GitHub Actions）:
-- `Changes` job が変更されたファイルから走らせる検査を決め（`.github/scripts/ci-changes.sh`）、関係しない job は `if` でスキップする。`Rust` は `crates/`・`Cargo.toml`・`Cargo.lock`・`.cargo/`、`Frontend` は `frontend/` が変わったときだけ。`E2E` はシステム全体を確かめる検査で何を変えたら壊れるかを列挙できない（DB のイメージ、マイグレーション、ビルド設定等）ので逆に、変更が動作に関係しないと分かっているもの（`docs/`、ルート直下の Markdown、`LICENSE`）だけのときに限ってスキップする。`.github/` が変わったとき、比較元が分からないとき（手動実行・新しいブランチ等）は全部走らせる。`gitleaks` は毎回。ワークフロー単位の `paths` で絞らないのは、必須チェックの job が報告されないと未着扱いでマージ（auto-merge を含む）が止まるため。`if` でスキップした job は skipped を報告し、必須チェックを満たす。`Changes` 自体が失敗すると検査 job がすべてスキップされ必須チェックを満たしてしまうので、`Changes` も必須チェックに入れる。
+- `Changes` job が変更されたファイルから走らせる検査を決め（`.github/scripts/ci-changes.sh`）、関係しない job は `if` でスキップする。`Rust` は `crates/`・`Cargo.toml`・`Cargo.lock`・`.cargo/`、`Frontend` は `frontend/` が変わったときだけ。`E2E` はシステム全体を確かめる検査で何を変えたら壊れるかを列挙できない（DB のイメージ、マイグレーション、ビルド設定等）ので逆に、変更が動作に関係しないと分かっているもの（`docs/`、ルート直下の Markdown、`LICENSE`）だけのときに限ってスキップする。検査の定義（`ci.yml`・`ci-changes.sh`）が変わったとき、比較元が分からないとき（手動実行・新しいブランチ等）は全部走らせる。それ以外の `.github/` 配下（他のワークフロー、リリース・告知の手順）は検査対象の動作に関わらないので、ドキュメントと同じく E2E の除外に入れる。`gitleaks` は毎回。ワークフロー単位の `paths` で絞らないのは、必須チェックの job が報告されないと未着扱いでマージ（auto-merge を含む）が止まるため。`if` でスキップした job は skipped を報告し、必須チェックを満たす。`Changes` 自体が失敗すると検査 job がすべてスキップされ必須チェックを満たしてしまうので、`Changes` も必須チェックに入れる。
 - `Rust` job: `cargo fmt --all -- --check` と `clippy -- -D warnings`。
 - `Frontend` job: 型チェック・lint（警告も失敗）・Vitest。
 - `E2E` job（Node.js 26・Chromium・E2E 専用 PostgreSQL）: まず DB 結合テスト（`crates/seiran-api/tests/*_integration.rs`、`#[ignore]` 付き。`cargo test -p seiran-api --tests -- --ignored`）を同じ専用DBで実行し、`docker compose down -v` で DB を捨ててから全 Playwright テストを実行する（E2E は空のDBから始める前提）。結合テストのハーネス（`tests/support/mod.rs`）がマイグレーションとテストユーザー（`seiran1` 等、パスワード `seiranda`）を用意する。失敗時は `playwright-report`/`test-results` を7日間保存する。rust-cache は `Rust` job と `shared-key` で共有（E2E 側は読み取りのみ）、Postgres イメージは Buildx の GHA キャッシュ、Playwright のブラウザは `actions/cache`。

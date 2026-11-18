@@ -266,6 +266,9 @@ jobs:
     permissions:
       contents: write # git タグ v<版> の push
       packages: write # GHCR への push
+    outputs:
+      published: ${{ steps.targets.outputs.build }}
+      version: ${{ steps.targets.outputs.version }}
     steps:
       - uses: actions/checkout@v7
       - uses: docker/login-action@v4
@@ -317,3 +320,23 @@ jobs:
           git tag -a "$tag" -m "seiran $VERSION" "$REVISION"
           git push -q origin "refs/tags/$tag"
           echo "版 $VERSION を push しました" >> "$GITHUB_STEP_SUMMARY"
+
+  # ─── 告知: イメージを push した版を seiran のサーバーへ投稿する ───────────
+  # 告知先はシークレット ANNOUNCE_TARGETS に「URL トークン」を1行1組で書く
+  # （.github/scripts/announce.sh）。イメージは出た後なので、ここが失敗してもリリースは
+  # 取り消さない（失敗はこのジョブの赤で分かる）。
+  announce:
+    name: Announce
+    needs: image-publish
+    if: needs.image-publish.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # 前の版のタグとの差分を変更点として示すため
+          fetch-tags: true
+      - name: Post announcement
+        env:
+          ANNOUNCE_TARGETS: ${{ secrets.ANNOUNCE_TARGETS }}
+          VERSION: ${{ needs.image-publish.outputs.version }}
+        run: .github/scripts/announce.sh "$VERSION"
