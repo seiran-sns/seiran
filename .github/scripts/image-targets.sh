@@ -3,7 +3,8 @@
 #
 #   version   Cargo.toml の version + version_suffix（frontend/package.json と一致を確かめる）
 #   revision  HEAD のコミット
-#   tags      まだレジストリに無い <イメージ>:<版>（と、接尾辞が無ければ <イメージ>:latest）。
+#   tags      まだレジストリに無い <イメージ>:<版>（と、接尾辞が無ければ浮動タグ <メジャー>・
+#             <メジャー>.<マイナー>・latest）。
 #             改行区切り。片方のレジストリにだけある場合は無い方だけを返し、ある方は上書きしない。
 #   build     tags が空でなければ true
 #
@@ -24,6 +25,13 @@ if [ "$version" != "$frontend_version" ]; then
     exit 1
 fi
 
+# 浮動タグ: その系列の最新版を指す。<メジャー>・<メジャー>.<マイナー>・latest を毎回上書きする
+# （版の完全なタグ <x.y.z> だけを不変にする。管理者は系列のタグで追従したり、メジャー版の
+# 最終版を経由して更新したりする。docs/architecture.md 3.1節）。main からしかリリースしない
+# ので、push する版は常にその系列の最新になる。
+base="$(workspace_value version)"
+floating_tags=("${base%%.*}" "${base%.*}" latest)
+
 tags=""
 for image in "${images[@]}"; do
     if err="$(docker buildx imagetools inspect "$image:$version" 2>&1 > /dev/null)"; then
@@ -36,8 +44,10 @@ for image in "${images[@]}"; do
         exit 1
     fi
     tags+="$image:$version"$'\n'
-    # 接尾辞付き（フォーク・試験版）は latest にしない
-    [ -n "$suffix" ] || tags+="$image:latest"$'\n'
+    # 接尾辞付き（フォーク・試験版）は浮動タグにしない
+    [ -n "$suffix" ] || for floating in "${floating_tags[@]}"; do
+        tags+="$image:$floating"$'\n'
+    done
 done
 
 {

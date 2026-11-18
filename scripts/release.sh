@@ -35,12 +35,14 @@ if tagged="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
     [ "$tagged" = "$revision" ] || die "タグ $tag は別のコミット（$tagged）に付いています"
 fi
 
+# 浮動タグ <メジャー>・<メジャー>.<マイナー>・latest はその系列の最新版を指す（毎回上書き）。
+# 接尾辞付き（フォーク・試験版）には付けない。.github/scripts/image-targets.sh と同じ。
+base="$(workspace_value version)"
 tags=()
 for image in "${images[@]}"; do
     tags+=(-t "$image:$version")
-    # 接尾辞付き（フォーク・試験版）は latest にしない
     if [ -z "$(workspace_value version_suffix)" ]; then
-        tags+=(-t "$image:latest")
+        tags+=(-t "$image:${base%%.*}" -t "$image:${base%.*}" -t "$image:latest")
     fi
 done
 
