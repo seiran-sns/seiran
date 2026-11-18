@@ -5,7 +5,7 @@ name: Dependency audit
 # security-release.yml がリリースまで進める。ここでは、自動では直せなかったもの（修正版が
 # 無い、最小限の更新では届かない、人の判断待ちの PR、Dependabot が扱えない勧告）を集めて
 # seiran の DM で知らせる（.github/scripts/audit-notify.sh）。そうしたものが残っている間、
-# このワークフローは失敗になる。
+# このワークフローは失敗になる（通知の成否と分けるため、最後の Check findings ステップで失敗させる）。
 #
 # 必要な設定: シークレット ANNOUNCE_TARGETS（最初の行のアカウントから DM を送る）、
 # リポジトリ変数 NOTIFY_DM_TO（DM の宛先。例: @yuba@seiran-beta.org）、
@@ -77,14 +77,17 @@ jobs:
           (cd frontend && npm audit --omit=dev --json > "$out/npm.json") || true
           for f in alerts prs cargo npm; do jq -e . "$out/$f.json" > /dev/null; done
 
-      # 前回 DM した一覧のハッシュ。同じ内容を毎回送らないため（audit-notify.sh）
+      # 前回 DM した一覧のハッシュ。同じ内容を毎回送らないため（audit-notify.sh）。キャッシュは
+      # 同じキーへ上書きできないので、キーに試行回数を含める（含めないと再実行で保存できず、
+      # 次の実行で同じ DM をまた送る）
       - name: Restore notified state
         uses: actions/cache/restore@v6
         with:
           path: ${{ runner.temp }}/audit-notified
-          key: audit-notified-${{ github.run_id }}
+          key: audit-notified-${{ github.run_id }}-${{ github.run_attempt }}
           restore-keys: audit-notified-
       - name: Notify
+        id: notify
         env:
           ANNOUNCE_TARGETS: ${{ secrets.ANNOUNCE_TARGETS }}
           NOTIFY_DM_TO: ${{ vars.NOTIFY_DM_TO }}
@@ -99,4 +102,9 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: ${{ runner.temp }}/audit-notified
-          key: audit-notified-${{ github.run_id }}
+          key: audit-notified-${{ github.run_id }}-${{ github.run_attempt }}
+      - name: Check findings
+        if: steps.notify.outputs.pending == 'true'
+        run: |
+          echo "::error::自動では直せなかった依存の勧告等が残っています（一覧は Notify ステップのログと Summary）"
+          exit 1
