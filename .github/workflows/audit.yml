@@ -1,9 +1,15 @@
 name: Dependency audit
 
 # 依存の勧告はコードを変えなくても後から出るので、push 時の CI とは別に8時間ごとに検査する。
-# Rust は RustSec、フロントは本番依存だけ（ci.yml と同じ基準）。修正版のある勧告は
-# Dependabot のセキュリティ更新が PR にし、dependabot-auto-merge.yml・security-release.yml が
-# リリースまで進める。ここで落ちたまま残るのは、修正版が無いか Dependabot が直せないもの。
+# 修正版のある勧告は Dependabot のセキュリティ更新が PR にし、dependabot-auto-merge.yml・
+# security-release.yml がリリースまで進める。ここでは、自動では直せなかったもの（修正版が
+# 無い、最小限の更新では届かない、人の判断待ちの PR、Dependabot が扱えない勧告）を集めて
+# seiran の DM で知らせる（.github/scripts/audit-notify.sh）。そうしたものが残っている間、
+# このワークフローは失敗になる。
+#
+# 必要な設定: シークレット ANNOUNCE_TARGETS（最初の行のアカウントから DM を送る）、
+# リポジトリ変数 NOTIFY_DM_TO（DM の宛先。例: @yuba@seiran-beta.org）、
+# GitHub App（RELEASE_APP_*。Dependabot のアラートと PR を読む）。
 on:
   schedule:
     - cron: "17 */8 * * *" # 8時間ごと（JST 1:17・9:17・17:17）
@@ -12,30 +18,73 @@ on:
 permissions:
   contents: read
 
-jobs:
-  rust:
-    name: Rust audit
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      checks: write
-      issues: write # schedule で起動したときは、勧告ごとに Issue を立てる
-    steps:
-      - uses: actions/checkout@v7
-      - uses: rustsec/audit-check@v2.0.0
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+concurrency:
+  group: dependency-audit
+  cancel-in-progress: false
 
-  frontend:
-    name: Frontend audit
+env:
+  CARGO_AUDIT_VERSION: "0.23.0"
+
+jobs:
+  audit:
+    name: Audit and notify
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with:
           node-version: 26
-      - name: Audit dependencies
-        run: npm audit --omit=dev --audit-level=high
+      - name: Cache cargo-audit
+        id: cargo-audit-cache
+        uses: actions/cache@v6
+        with:
+          path: ~/.cargo/bin/cargo-audit
+          key: cargo-audit-${{ runner.os }}-${{ env.CARGO_AUDIT_VERSION }}
+      - name: Install cargo-audit
+        if: steps.cargo-audit-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-audit --version "$CARGO_AUDIT_VERSION" --locked
+      - uses: actions/create-github-app-token@v3
+        id: app
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+
+      # 監査ツールは勧告があると非0で終わるので、ここでは結果の JSON を集めるだけにする
+      - name: Collect findings
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          REPO: ${{ github.repository }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/audit"
+          out="$RUNNER_TEMP/audit"
+          gh api --paginate "repos/$REPO/dependabot/alerts?state=open&per_page=100" --jq '.[]' \
+              | jq -s . > "$out/alerts.json"
+          gh pr list --repo "$REPO" --author "app/dependabot" --state open --limit 100 \
+              --json number,title,url,autoMergeRequest > "$out/prs.json"
+          cargo audit --json > "$out/cargo.json" || true
+          (cd frontend && npm audit --omit=dev --json > "$out/npm.json") || true
+          for f in alerts prs cargo npm; do jq -e . "$out/$f.json" > /dev/null; done
+
+      # 前回 DM した一覧のハッシュ。同じ内容を毎回送らないため（audit-notify.sh）
+      - name: Restore notified state
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ runner.temp }}/audit-notified
+          key: audit-notified-${{ github.run_id }}
+          restore-keys: audit-notified-
+      - name: Notify
+        env:
+          ANNOUNCE_TARGETS: ${{ secrets.ANNOUNCE_TARGETS }}
+          NOTIFY_DM_TO: ${{ vars.NOTIFY_DM_TO }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          NOTIFIED_FILE: ${{ runner.temp }}/audit-notified
+        run: |
+          out="$RUNNER_TEMP/audit"
+          .github/scripts/audit-notify.sh \
+              "$out/alerts.json" "$out/prs.json" "$out/cargo.json" "$out/npm.json"
+      - name: Save notified state
+        if: always()
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ runner.temp }}/audit-notified
+          key: audit-notified-${{ github.run_id }}
