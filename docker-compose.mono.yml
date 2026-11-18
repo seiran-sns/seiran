@@ -128,7 +128,7 @@ services:
   # nginx に SIGHUP を送って Docker DNS を再解決させる。
   # `docker compose up --scale seiran-server=N` でバックエンドを増減できる。
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.31.9-alpine
     restart: always
     volumes:
       - ./docker/nginx.mono.conf:/etc/nginx/conf.d/default.conf:ro

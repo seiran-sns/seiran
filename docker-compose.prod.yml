@@ -94,7 +94,7 @@ services:
   # 書き換えるので、ファイル単体ではなくディレクトリごとマウントする（ファイル単体だと
   # コンテナからは置き換え前のファイルが見え続ける）。
   lb:
-    image: nginx:1.27-alpine
+    image: nginx:1.31.9-alpine
     restart: always
     volumes:
       - ./docker/lb/nginx.conf:/etc/nginx/conf.d/default.conf:ro

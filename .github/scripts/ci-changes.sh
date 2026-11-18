@@ -12,8 +12,11 @@
 # 指紋の対象（どれも CI の検査の定義 ci.yml・このスクリプトを含む）:
 #   rust      crates/・Cargo.toml・Cargo.lock・.cargo/
 #   frontend  frontend/
-#   e2e       動作に関係しないと分かっているファイル（docs/、ルート直下の Markdown、LICENSE、
-#             検査の定義以外の .github/）を除くリポジトリ全体
+#   e2e       E2E の動作に関係しないと分かっているファイルを除くリポジトリ全体。除くのは
+#             docs/、ルート直下の Markdown、LICENSE、検査の定義以外の .github/、そして E2E が
+#             使わない運用のためのファイル（ルートの docker-compose*.yml、docker/（E2E の DB を
+#             作る docker/Dockerfile.postgres は除かない）、scripts/、.env.example）。E2E は
+#             e2e/docker-compose.yml の DB とネイティブの seiran-server・フロントで動く
 # E2E はシステム全体を組み立てて確かめる検査で、何を変えたら壊れるかを列挙できない
 # （DB のイメージ、マイグレーション、ビルド設定、.env の扱い等）。そのため「含めるパス」では
 # なく「除くパス」を列挙する。除外は迷ったら入れない。
@@ -63,8 +66,10 @@ fingerprint() {
 files_rust() { git ls-files -s -- crates Cargo.toml Cargo.lock .cargo "${ci_defs[@]}"; }
 files_frontend() { git ls-files -s -- frontend "${ci_defs[@]}"; }
 files_e2e() {
-    git ls-files -s -- . ':(exclude)docs/' ':(exclude,glob)*.md' ':(exclude)LICENSE' ':(exclude).github/'
-    git ls-files -s -- "${ci_defs[@]}"
+    git ls-files -s -- . ':(exclude)docs/' ':(exclude,glob)*.md' ':(exclude)LICENSE' ':(exclude).github/' \
+        ':(exclude,glob)docker-compose*.yml' ':(exclude)docker/' ':(exclude)scripts/' ':(exclude).env.example'
+    # E2E の DB（e2e/docker-compose.yml）はこれをビルドする
+    git ls-files -s -- docker/Dockerfile.postgres "${ci_defs[@]}"
 }
 
 # 同じ指紋で通った記録があるか（期限切れでなく、このリポジトリ自身のブランチの実行が残したもの）
