@@ -351,6 +351,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 ## 9. テストとCI
 
 **CI**（GitHub Actions）:
+- `Changes` job が変更されたファイルから走らせる検査を決め（`.github/scripts/ci-changes.sh`）、関係しない job は `if` でスキップする。`Rust` は `crates/`・`Cargo.toml`・`Cargo.lock`・`.cargo/`、`Frontend` は `frontend/` が変わったときだけ。`E2E` はシステム全体を確かめる検査で何を変えたら壊れるかを列挙できない（DB のイメージ、マイグレーション、ビルド設定等）ので逆に、変更が動作に関係しないと分かっているもの（`docs/`、ルート直下の Markdown、`LICENSE`）だけのときに限ってスキップする。`.github/` が変わったとき、比較元が分からないとき（手動実行・新しいブランチ等）は全部走らせる。`gitleaks` は毎回。ワークフロー単位の `paths` で絞らないのは、必須チェックの job が報告されないと未着扱いでマージ（auto-merge を含む）が止まるため。`if` でスキップした job は skipped を報告し、必須チェックを満たす。`Changes` 自体が失敗すると検査 job がすべてスキップされ必須チェックを満たしてしまうので、`Changes` も必須チェックに入れる。
 - `Rust` job: `cargo fmt --all -- --check` と `clippy -- -D warnings`。
 - `Frontend` job: 型チェック・lint（警告も失敗）・Vitest。
 - `E2E` job（Node.js 26・Chromium・E2E 専用 PostgreSQL）: まず DB 結合テスト（`crates/seiran-api/tests/*_integration.rs`、`#[ignore]` 付き。`cargo test -p seiran-api --tests -- --ignored`）を同じ専用DBで実行し、`docker compose down -v` で DB を捨ててから全 Playwright テストを実行する（E2E は空のDBから始める前提）。結合テストのハーネス（`tests/support/mod.rs`）がマイグレーションとテストユーザー（`seiran1` 等、パスワード `seiranda`）を用意する。失敗時は `playwright-report`/`test-results` を7日間保存する。rust-cache は `Rust` job と `shared-key` で共有（E2E 側は読み取りのみ）、Postgres イメージは Buildx の GHA キャッシュ、Playwright のブラウザは `actions/cache`。

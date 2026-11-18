@@ -8,6 +8,28 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ─── 変更範囲の判定 ──────────────────────────────────────────────────────
+  # 変更に関係しない検査ジョブはスキップする（判定は .github/scripts/ci-changes.sh）。
+  # ワークフローごと paths で絞らないのは、必須チェックに指定したジョブが報告されないと
+  # 「未着」として扱われ、マージ（auto-merge を含む）が止まるため。ジョブの if でスキップ
+  # した場合は skipped が報告され、必須チェックを満たす。
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.changes.outputs.rust }}
+      frontend: ${{ steps.changes.outputs.frontend }}
+      e2e: ${{ steps.changes.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Detect changes
+        id: changes
+        env:
+          BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: .github/scripts/ci-changes.sh "$BASE"
+
   # ─── シークレット検出 ────────────────────────────────────────────────────
   gitleaks:
     name: Secret scan (gitleaks)
@@ -32,6 +54,8 @@ jobs:
   # ─── Rust: 型チェック / Clippy / テスト ─────────────────────────────────
   rust:
     name: Rust
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -69,6 +93,8 @@ jobs:
   # ─── フロントエンド: 型チェック / ESLint ────────────────────────────────
   frontend:
     name: Frontend
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -96,6 +122,8 @@ jobs:
   # ─── ブラウザE2E: 実API + 隔離DB + 外部サービスstub ────────────────────
   e2e:
     name: E2E
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -222,8 +250,14 @@ jobs:
 
   image-publish:
     name: Image publish
-    needs: [gitleaks, rust, frontend, e2e, image-build]
-    if: needs.image-build.outputs.build == 'true'
+    needs: [changes, gitleaks, rust, frontend, e2e, image-build]
+    # 検査ジョブは変更範囲によってスキップされる。既定では needs のどれかが skipped だと
+    # このジョブもスキップされてしまうので、失敗・キャンセルが無いことを条件にする。
+    if: >-
+      always() &&
+      needs.image-build.outputs.build == 'true' &&
+      !contains(needs.*.result, 'failure') &&
+      !contains(needs.*.result, 'cancelled')
     runs-on: ubuntu-latest
     # 同じ版を2つのコミットが同時に push しないよう直列にする（後発は下で既存と判定される）
     concurrency:
