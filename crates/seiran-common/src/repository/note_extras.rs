@@ -105,6 +105,12 @@ pub struct ReactionCountRow {
 /// `reactions` を投稿×絵文字で集計する（件数の多い順）。`viewer_actor_id` がミュート・
 /// ブロックしている相手のリアクションは数えない（Misskey 互換クライアントにも出さないため、
 /// API の時点で除く）。
+///
+/// ブリッジ関係にある投稿（`bridge_group_post_ids`）のリアクションも合算する。どちらに
+/// リアクションするかは閲覧者のプロトコルで決まるだけで、同じ投稿への反応だから。同じ人が
+/// 両方に同じリアクションを付けている場合（Fedi ユーザーがブリッジポストに付けた反応を、
+/// Bridgy Fed がブリッジユーザー名義で元ポストにも付ける等）は、ブリッジユーザーを
+/// `bridge_real_actor_id` で実ユーザーに寄せて1件と数える。
 pub async fn reaction_counts_for_posts(
     pool: &PgPool,
     post_ids: &[i64],
@@ -114,12 +120,16 @@ pub async fn reaction_counts_for_posts(
         return Ok(Vec::new());
     }
     sqlx::query_as(
-        "SELECT post_id, content, COUNT(*) AS cnt, MAX(emoji_url) AS emoji_url
-         FROM reactions
-         WHERE post_id = ANY($1)
-           AND ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, actor_id))
-         GROUP BY post_id, content
-         ORDER BY post_id, cnt DESC",
+        "SELECT t.post_id, r.content,
+                COUNT(DISTINCT COALESCE(a.bridge_real_actor_id, r.actor_id)) AS cnt,
+                MAX(r.emoji_url) AS emoji_url
+         FROM unnest($1::bigint[]) AS t(post_id)
+         CROSS JOIN LATERAL unnest(bridge_group_post_ids(t.post_id)) AS g(member_id)
+         JOIN reactions r ON r.post_id = g.member_id
+         JOIN actors a ON a.id = r.actor_id
+         WHERE ($2::bigint IS NULL OR NOT actor_is_hidden_for_viewer($2, r.actor_id))
+         GROUP BY t.post_id, r.content
+         ORDER BY t.post_id, cnt DESC",
     )
     .bind(post_ids)
     .bind(viewer_actor_id)
@@ -127,7 +137,9 @@ pub async fn reaction_counts_for_posts(
     .await
 }
 
-/// `actor_id` が付けているリアクション `(post_id, content)`。
+/// `actor_id` が付けているリアクション `(post_id, content)`。件数と違いブリッジ関係の投稿へは
+/// 広げない（`reactedByMe` のチップを押すと表示中の投稿のリアクションを取り消すので、別の投稿に
+/// 付けたものまで含めると取り消せないチップになる）。
 pub async fn own_reactions_for_posts(
     pool: &PgPool,
     actor_id: i64,
