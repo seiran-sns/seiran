@@ -104,7 +104,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 **公開イメージ**（`docker/seiran/Dockerfile`、Docker Hub `seiranorg/seiran` と `ghcr.io/seiran-sns/seiran`、linux/amd64）: seiran-server のリリースビルド、ビルド済みのフロントエンド（`/usr/share/seiran/frontend`）、ffmpeg を1つにまとめる。フロントとサーバーは同じコミットからビルドされるので版が常に一致する。コンテナの中で動くのは seiran-server の1プロセスだけで（PID 1 は tini。シグナルの中継と ffmpeg 等の子プロセスの刈り取り）、Web サーバーは入れない。役割は `SEIRAN_ROLE` で選ぶ（`docker/seiran/entrypoint.sh`。root で設定ボリュームの所有権を揃えてから seiran ユーザーで exec する）。
 - `all`（既定）・`api`: `PORT`（既定 3000）で API を受け、フロントエンドも配る（`SEIRAN_FRONTEND_DIR`、下記）。`all` は federation も同じポートで受け、worker・firehose も動かす。
 - `federation` / `worker` / `firehose`: seiran-server をその役割だけで動かす。split-role 構成では、前段のロードバランサーが連合のパス（`/inbox`・`/users/`・WebFinger・NodeInfo）を `federation` へ、それ以外を `api` へ振り分ける。
-- **フロントエンドの配信**（`seiran-api::handlers::frontend`、`SEIRAN_FRONTEND_DIR` が設定されているとき）: どのルートにも当たらない GET/HEAD に、そのディレクトリの静的ファイルを返し、無ければ SPA の index.html を返す。`/assets/`（ファイル名にハッシュが入る）は `Cache-Control: public, max-age=31536000, immutable` で、無ければ 404（消えた古いビルドの JS に HTML を返すとブラウザが壊れるため）。それ以外は `no-cache`（更新後すぐ新しい版を読ませる）。バックエンドのパス（`/api/`・`/xrpc/`・`/.well-known/` 等）で当たらなかったものは 404（API クライアントに HTML の 200 を返さない）。`/xrpc/` は従来どおり `atproto-proxy` の透過転送へ回す。OGP の元になる index.html もこのディレクトリから直接読む（`FRONTEND_ORIGIN` から取りに行かない）。開発時はフロントエンドを Vite が配るので設定しない。
+- **フロントエンドの配信**（`seiran-api::handlers::frontend`、`SEIRAN_FRONTEND_DIR` が設定されているとき）: どのルートにも当たらない GET/HEAD に、そのディレクトリの静的ファイルを返し、無ければ SPA の index.html を返す。`/assets/`（ファイル名にハッシュが入る）は `Cache-Control: public, max-age=31536000, immutable` で、無ければ 404（消えた古いビルドの JS に HTML を返すとブラウザが壊れるため）。それ以外は `no-cache`（更新後すぐ新しい版を読ませる）。バックエンドのパス（`/api/`・`/xrpc/`・`/.well-known/` 等）で当たらなかったものは 404（API クライアントに HTML の 200 を返さない）。`/xrpc/` は従来どおり `atproto-proxy` の透過転送へ回す。OGP の元になる index.html もこのディレクトリから直接読む（`FRONTEND_ORIGIN` から取りに行かない）。ローカル開発でも `frontend/dist` を指して使う（8節）。HMR 付きの Vite dev サーバーで確認するときだけ設定しない。
 - **アクセスログ**（`seiran-api::middleware::access_log`、`SEIRAN_ACCESS_LOG_DIR`）: 動作ログ（標準エラー、`docker logs` で見る）とは分けて、指定したディレクトリに `access.log.YYYY-MM-DD` で日ごとに書き出し、`SEIRAN_ACCESS_LOG_KEEP_DAYS` 日分（既定 14）残す。未設定なら書かない。形式は nginx の combined に処理時間（秒）を足したもので、nginx 向けの解析ツールでそのまま読める。接続元はクライアントIP（4節。信頼するプロキシが追記した X-Forwarded-For だけをたどるので偽装されない）。パスと Referer にはクエリ文字列を書かない（トークンを含むことがある）。送信バイト数は本文の長さ（前もって分からないストリーミング等は 0）、処理時間はレスポンスヘッダーまで（WebSocket は 101 まで）。書き込みは別スレッドで、詰まったら行を捨ててリクエストを待たせない。1行を1回で追記するので、無停止更新で新旧が同じファイルに書いても行は混ざらない。
 
 **本番・単騎運用**（`docker-compose.prod.yml`）: `db` / `redis`（追記ログで永続化）/ `lb` / `seiran-blue` / `seiran-green` / `cron` / `tunnel`（公開ホスト名の向き先は `http://lb:80`）。`lb` は色の `:3000` へ転送する。アクセスログはホストの `./logs` に書き出す。`seiran-blue`・`seiran-green` は同じ定義（`all`）で、プロファイルに入れてあるので `docker compose up -d` だけでは起動しない。版は `.env` の `SEIRAN_VERSION`。
@@ -323,10 +323,10 @@ React 19 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<Brow
 
 3ペインのレイアウト仕様は `docs/ui_spec.md`。
 
-**ローカル開発サーバーの標準運用**: agentic coding が主体なので、HMR 付きの dev サーバー（`npm run dev`、5173。StrictMode の effect 二重実行など開発ビルド固有の挙動がある）ではなく、`npm run build:watch`（変更のたびに本番相当のビルド）と `npm run preview`（`dist/` を配信、既定4174、`PREVIEW_PORT` で変更可）の2プロセスを常駐させ、常に本番相当のコードで確認する。バックエンドの `FRONTEND_ORIGIN`（OGP 注入・転送先）も既定でこの preview を指す。人手で UI を細かく調整するときは `FRONTEND_ORIGIN` を `http://localhost:5173` にして `npm run dev` を使ってよい。
+**ローカル開発サーバーの標準運用**: agentic coding が主体なので、HMR 付きの dev サーバー（`npm run dev`、5173。StrictMode の effect 二重実行など開発ビルド固有の挙動がある）ではなく、`npm run build:watch`（変更のたびに本番相当のビルド）を常駐させ、その出力先 `frontend/dist` をバックエンドが `SEIRAN_FRONTEND_DIR` で配る（3000番がフロントエンドも API も受ける）。公開イメージと同じ配信経路・同じキャッシュヘッダーで、常に本番相当のコードを確認できる。`scripts/dev-up.sh` は `.env` に指定が無ければ `SEIRAN_FRONTEND_DIR` を `frontend/dist` の絶対パスにして起動する。人手で UI を細かく調整するときは `npm run dev`（5173）を使ってよく、そのときは `FRONTEND_ORIGIN` を `http://localhost:5173` にする（CORS の許可先。OGP は `SEIRAN_FRONTEND_DIR` があればそちらを読む）。
 
 **開発サーバーの健全性確認**: プロセスが生きていても正しく動いているとは限らない。
-- `vite build --watch` は、この環境ではネイティブのファイル監視が信頼できず、変更検知だけが黙って止まることがある。`scripts/dev-up.sh` は `CHOKIDAR_USEPOLLING=true` を付けて起動する。疑わしければ `ls -la frontend/dist/assets/*.js` の更新時刻（ファイル名はコンテンツハッシュ入り）を編集時刻と比べ、古ければプロセスを止めて `CHOKIDAR_USEPOLLING=true npm run build:watch` を再実行する（preview は再起動不要）。
+- `vite build --watch` は、この環境ではネイティブのファイル監視が信頼できず、変更検知だけが黙って止まることがある。`scripts/dev-up.sh` は `CHOKIDAR_USEPOLLING=true` を付けて起動する。疑わしければ `ls -la frontend/dist/assets/*.js` の更新時刻（ファイル名はコンテンツハッシュ入り）を編集時刻と比べ、古ければプロセスを止めて `CHOKIDAR_USEPOLLING=true npm run build:watch` を再実行する（バックエンドは毎回ディレクトリから読むので再起動不要）。
 - バックエンド（`cargo run -p seiran-server`、3000）も `ps` ではなく `curl localhost:3000/` 等の実応答で確認する。
 - 「生きているのに動きがおかしい」ときは `df -h` も見る。`target/` は肥大化しやすく、逼迫すると原因不明な壊れ方をする（`cargo clean` で回収できる）。
 
@@ -336,7 +336,7 @@ React 19 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<Brow
 
 SPA の index.html には投稿・プロフィールごとの `<meta>` が無い。User-Agent で既知の bot だけを出し分けると未知のクローラーを取りこぼすので、`/notes/:id`・`/@:handle`（AP の `Accept` を除く）は常に、index.html の `<head>` に OGP を注入したものを返す。ブラウザはそのまま SPA が起動し、クローラーは `<meta>` だけを読む。
 
-- `handlers/ogp.rs` が DB から投稿/アクターを取り、`state.frontend_origin`（Docker 既定 `http://frontend:5173`、ローカルは preview、`FRONTEND_ORIGIN` で変更可）から index.html を取って `<title>`・OGP・Twitter Card を注入する。`GET /notes/:id` は `get_note_ap` が `Accept` で AP の JSON-LD と出し分け、`GET /@:handle` はプロフィール専用。
+- `handlers/ogp.rs` が DB から投稿/アクターを取り、`SEIRAN_FRONTEND_DIR` の index.html（未設定なら `state.frontend_origin`、既定 `http://frontend:5173`、`FRONTEND_ORIGIN` で変更可、から取得）に `<title>`・OGP・Twitter Card を注入する。`GET /notes/:id` は `get_note_ap` が `Accept` で AP の JSON-LD と出し分け、`GET /@:handle` はプロフィール専用。
 - 見つからない・DB エラー時は注入せず index.html をそのまま返す（404 を返すと SPA が起動できず、「見つかりません」表示やリモートアクターの取得が動かない）。
 - 可視性は通常の閲覧と同じ判定（`find_by_id_for_viewer` を viewer 無しで呼ぶ）。
 - nginx と Vite の proxy は `/notes`・`/@`・`/announces` を常にバックエンドへ転送する。

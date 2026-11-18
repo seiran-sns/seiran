@@ -22,10 +22,8 @@ export default defineConfig(({ mode }) => {
   // ポートを別値に上書きできるようにしている。未設定時は通常の開発時の既定値。
   const frontendPort = Number(env.FRONTEND_PORT ?? "5173");
   const backendTarget = `http://localhost:${env.BACKEND_PORT ?? "3000"}`;
-  // エージェント主導の開発では、HMR付きdevサーバー（StrictModeのeffect二重実行等、
-  // 開発ビルド固有の挙動が本物のバグの調査を遠回りさせることがある）より、
-  // 常時ビルド済み・本番相当のコードを配信するpreviewサーバーを標準にする
-  // （`npm run build:watch` + `npm run preview` の2プロセス常駐運用）。
+  // ローカル開発の標準運用は `npm run build:watch` の出力をバックエンドが配る形で、
+  // preview サーバーは使わない（docs/architecture.md 8節）。dist/ を単体で見たいとき用。
   const previewPort = Number(env.PREVIEW_PORT ?? "4174");
   // "frontend" は Docker Compose 上のコンテナ名。backend の OGP ハンドラ
   // （`crates/seiran-api/src/handlers/ogp.rs`）が `frontend_origin`
