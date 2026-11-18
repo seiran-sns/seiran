@@ -18,6 +18,11 @@ on:
 permissions:
   contents: read
 
+# パイプの途中のコマンドの失敗も拾う（既定の bash -e は拾わない）
+defaults:
+  run:
+    shell: bash
+
 concurrency:
   group: dependency-audit
   cancel-in-progress: false
@@ -57,8 +62,15 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/audit"
           out="$RUNNER_TEMP/audit"
-          gh api --paginate "repos/$REPO/dependabot/alerts?state=open&per_page=100" --jq '.[]' \
-              | jq -s . > "$out/alerts.json"
+          # アラートを読めない（Dependabot alerts が無効・App の権限不足等）ときは、それ自体を
+          # 対応が必要なものとして知らせる（audit-report.mjs）。cargo / npm の監査は続ける。
+          if gh api --paginate "repos/$REPO/dependabot/alerts?state=open&per_page=100" --jq '.[]' \
+              > "$out/alerts.jsonl" 2> "$out/alerts.err"; then
+              jq -s . "$out/alerts.jsonl" > "$out/alerts.json"
+          else
+              cat "$out/alerts.err"
+              jq -n --rawfile error "$out/alerts.err" '{error: $error}' > "$out/alerts.json"
+          fi
           gh pr list --repo "$REPO" --author "app/dependabot" --state open --limit 100 \
               --json number,title,url,autoMergeRequest > "$out/prs.json"
           cargo audit --json > "$out/cargo.json" || true

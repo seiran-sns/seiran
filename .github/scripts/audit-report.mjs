@@ -4,6 +4,7 @@
 //   node audit-report.mjs <dependabot-alerts.json> <dependabot-prs.json> <cargo-audit.json> <npm-audit.json>
 //
 // 対象:
+//   - Dependabot のアラートを読めないこと（Dependabot alerts が無効・権限不足等）
 //   - 開いたままの Dependabot アラート（修正版がまだ無い、最小限の更新では届かない、PR が人の
 //     判断待ち）。作られてから GRACE_HOURS 以内のものは、自動の修正（PR→CI→マージ）が
 //     進行中でありうるので除く。
@@ -21,7 +22,14 @@ const lines = [];
 const seen = new Set();
 const now = Date.now();
 
-for (const a of read(alertsPath)) {
+const alerts = read(alertsPath);
+if (!Array.isArray(alerts)) {
+  // 取得に失敗したときは audit.yml が {error} を書く
+  lines.push(
+    `・Dependabot のアラートを読めません（リポジトリ設定の Dependabot alerts が有効か確認）: ${String(alerts.error).trim()}`,
+  );
+}
+for (const a of Array.isArray(alerts) ? alerts : []) {
   if (now - Date.parse(a.created_at) < GRACE_HOURS * 3600_000) continue;
   const adv = a.security_advisory;
   const vuln = a.security_vulnerability;
