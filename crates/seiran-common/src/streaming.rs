@@ -287,10 +287,7 @@ pub async fn broadcast_reaction_update(
         reactor_emoji,
     );
 
-    let siblings = reactions
-        .bridge_siblings(post_id)
-        .await
-        .unwrap_or_default();
+    let siblings = reactions.bridge_siblings(post_id).await.unwrap_or_default();
     for (sibling_id, sibling_author_id) in siblings {
         publish_reaction_update(
             stream_hub,
