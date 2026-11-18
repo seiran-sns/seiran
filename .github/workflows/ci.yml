@@ -368,7 +368,12 @@ jobs:
   announce:
     name: Announce
     needs: image-publish
-    if: needs.image-publish.outputs.published == 'true'
+    # 検査ジョブがスキップされていても（版上げだけのコミット等）告知する。if に状態関数が
+    # 無いと、needs のさらに上流にスキップがあるだけでこのジョブもスキップされる。
+    if: >-
+      !cancelled() &&
+      needs.image-publish.result == 'success' &&
+      needs.image-publish.outputs.published == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
