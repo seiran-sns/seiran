@@ -123,7 +123,7 @@ services:
 
   # ─── Nginx (リバースプロキシ / ロール分離ルーティング) ─────────────────────
   nginx:
-    image: nginx:1.27-alpine
+    image: nginx:1.31.9-alpine
     restart: always
     volumes:
       - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
