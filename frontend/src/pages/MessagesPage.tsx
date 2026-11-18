@@ -25,9 +25,15 @@ const EmojiPickerPanel = lazy(() => import("../components/note/EmojiPickerPanel"
 const BSKY_DM_MAX = 1000;
 const FEDI_DM_MAX = 3000;
 
-function peerLabel(session: DmSession, t: (key: string) => string): string {
+function peerLabel(session: DmSession, myActorId: string | undefined, t: (key: string) => string): string {
   if (session.peers.length === 0) return t("dm:messagesPage.unknownPeer");
-  return session.peers.map((p) => p.displayName || p.username).join(", ");
+  return session.peers
+    .map((p) => {
+      const name = p.displayName || p.username;
+      // 自分宛てDMでは相手として自分自身が返る。誰宛てかを取り違えないよう明示する。
+      return p.id === myActorId ? `${name} ${t("dm:messagesPage.selfSuffix")}` : name;
+    })
+    .join(", ");
 }
 
 export default function MessagesPage() {
@@ -233,9 +239,9 @@ export default function MessagesPage() {
               to={`/messages/${s.threadRootPostId}`}
               className={`${styles.sessionItem} ${s.threadRootPostId === threadRootId ? styles.sessionItemActive : ""}`}
             >
-              <Avatar url={s.peers[0]?.avatarUrl} name={peerLabel(s, t)} size={36} />
+              <Avatar url={s.peers[0]?.avatarUrl} name={peerLabel(s, user?.actor_id, t)} size={36} />
               <span className={styles.sessionInfo}>
-                <span className={styles.sessionName}>{peerLabel(s, t)}</span>
+                <span className={styles.sessionName}>{peerLabel(s, user?.actor_id, t)}</span>
                 <span className={styles.sessionPreview}>
                   {s.lastMessage.contentWarning ? (
                     <>

@@ -70,6 +70,15 @@ pub async fn sessions(
             }
         };
 
+    // 自分以外の参加者がいないスレッド（自分宛てDM）は自分自身を相手として返す
+    // （相手欄が空だと一覧に名前・アイコンが出ず、返信時の宛先も決まらないため）。
+    let mut summaries = summaries;
+    for s in summaries.iter_mut() {
+        if s.peer_actor_ids.is_empty() {
+            s.peer_actor_ids.push(actor_id);
+        }
+    }
+
     let all_peer_ids: Vec<i64> = summaries
         .iter()
         .flat_map(|s| s.peer_actor_ids.iter().copied())
