@@ -83,7 +83,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
       - name: Audit dependencies
-        run: npm audit --audit-level=high
+        # 配布するバンドルに入る本番依存だけを検査する。開発用依存（vite・vitest・eslint 等）は
+        # ビルド・テスト時にしか動かず外部入力も渡らないので、その勧告で CI を止めない。
+        run: npm audit --omit=dev --audit-level=high
       - name: Type check
         run: npm run typecheck
       - name: Lint
