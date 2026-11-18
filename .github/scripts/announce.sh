@@ -25,10 +25,10 @@ else
     changes="$repo_url/commits/v$version"
 fi
 
-status="seiran $version を公開しました。
+status="🎉 seiran $version を公開しました 🎉
 
 変更点: $changes
-イメージ: seiranorg/seiran:$version（ghcr.io/seiran-sns/seiran:$version）"
+Dockerイメージ: seiranorg/seiran:$version（ghcr.io/seiran-sns/seiran:$version）"
 
 body="$(STATUS="$status" node -e 'console.log(JSON.stringify({ status: process.env.STATUS, visibility: "public" }))')"
 
