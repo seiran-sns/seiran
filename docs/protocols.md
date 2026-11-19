@@ -296,9 +296,10 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 - `AccountTakedown` とは別症状。`public.api.bsky.app` の `app.bsky.actor.getProfile?actor={did}` で切り分ける: `AccountTakedown` ならモデレーションによる停止、PDS にプロフィールがあるのに `Profile not found` なら `host-throttled` の疑い。複数アカウントの傾向を見ると区別しやすい。
 
 ### Jetstream 経由の取り込み（`seiran-atp-repo::firehose`）
-`wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like` に接続する。
+`wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost` に接続する。
 
-- **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合を30秒ごとに確認し、変化があれば再接続する。無関係な投稿を取り込まないための必須の絞り込み。
+- **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合を30秒ごとに確認し、変化があれば再接続する。無関係な投稿を取り込まないための必須の絞り込み。`wantedDids` を付けない Jetstream は全アカウントのイベントを流してくるので、集合が空の間は接続せずに変更の合図（`jetstream_control`）を待ち、合図が変わったらその時刻を cursor にして接続する。集合を取得できなかったときも空とはみなさず、エラーとして再試行する。
+- **受信側の判定**: 投稿とリポストは、発行者がローカルからフォローされているかリストに入っている、凍結されていないアクター（`bsky_ingest::saveable_author`）のときだけ保存する。`wantedDids` だけに頼らない。
 - **凍結アクター**: 投稿の保存対象判定に `suspended_at IS NULL` を含め、リポスト・いいねも凍結済みなら破棄する。ATP には署名アクセス拒否に相当する仕組みが無いため、取り込み抑止が実質的な enforcement。
 - **拒否サーバー**: 投稿者・リポストした人・いいねした人の PDS ホスト（`actors.pds_host`）が拒否サーバーなら、AP 受信と同じ規則で捨てる。投稿は返信先・引用元・メンション facet のローカルユーザー本人がフォローしていなければ捨て、リポストは対象投稿の著者がローカルからフォローされていなければ捨て（AppView から取得する場合も保存前に判定する）、いいねは対象投稿のローカルの著者がフォローしていなければ捨てる。フォロワー検知（`bsky_follower_poll`）は記録だけして通知せず、Bsky DM（`bsky_dm_poll`）は相手をフォローしていなければ会話を取り込まない。
 - **担当**: 複数のプロセスが動いていても1つだけが接続する（`seiran_common::leader`、advisory lock。`docs/architecture.md` 3節）。担当を降りるとき（停止・ロック接続の切断）は処理し終えたイベントまでのカーソルを保存し、引き継いだプロセスがその続きから読む。

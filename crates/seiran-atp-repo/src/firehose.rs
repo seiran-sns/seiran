@@ -114,27 +114,13 @@ struct JetstreamTimeUs {
     time_us: i64,
 }
 
-/// ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである Bsky
-/// アクターの DID 集合を取得する。`wantedDids` としてJetstreamへ渡し、サーバー側で
-/// 無関係な投稿を除外してもらう。退会済み（`withdrawn_at`設定済み）ローカル
-/// ユーザーのフォロー・所有リストは対象から除外する。
-async fn load_wanted_dids(pool: &PgPool) -> Vec<String> {
-    match bsky_ingest::wanted_dids(pool).await {
-        Ok(dids) => dids,
-        Err(e) => {
-            tracing::error!(
-                "[Jetstream] wantedDids取得失敗（無絞り込みで接続します）: {}",
-                e
-            );
-            Vec::new()
-        }
-    }
-}
-
 /// `JETSTREAM_BASE_URL` に `wantedDids` を付与した接続URLを組み立てる。
-/// 対象DIDが1件も無ければ絞り込みなし（全世界のpost/like）で接続する
-/// （初回起動直後で誰もフォローしていない等のレアケース向けフォールバック）。
-fn build_jetstream_url(cursor: Option<i64>, wanted_dids: &[String]) -> String {
+/// 対象DIDが1件も無ければ `None`。`wantedDids` を付けない Jetstream は全アカウントの
+/// イベントを流してくるので、その URL では接続させない。
+fn build_jetstream_url(cursor: Option<i64>, wanted_dids: &[String]) -> Option<String> {
+    if wanted_dids.is_empty() {
+        return None;
+    }
     let mut url = JETSTREAM_BASE_URL.to_string();
     for did in wanted_dids {
         url.push_str("&wantedDids=");
@@ -143,7 +129,38 @@ fn build_jetstream_url(cursor: Option<i64>, wanted_dids: &[String]) -> String {
     if let Some(c) = cursor {
         url.push_str(&format!("&cursor={}", c));
     }
-    url
+    Some(url)
+}
+
+/// 取り込む相手（ローカルユーザーのフォロー先・リストのメンバー）が1件も無い間は、
+/// 接続せずに `wantedDids` の変更の合図を待つ。合図が変わるか `stop` が発火したら戻り、
+/// 呼び出し元が DID 集合を取り直す。
+///
+/// 待っている間は取り込む相手がいないので、その間のイベントは要らない。合図の時刻を
+/// cursor にして、古い cursor から何日分ものイベントを読み直さないようにする。
+async fn wait_for_wanted_dids(
+    pool: &PgPool,
+    touch_at_start: Option<chrono::DateTime<chrono::Utc>>,
+    stop: &CancellationToken,
+) -> Result<(), String> {
+    tracing::info!("[Jetstream] 取り込む Bsky アカウントが無いため、接続せずに待機します。");
+    let mut poll = tokio::time::interval(WANTED_DIDS_POLL_INTERVAL);
+    poll.tick().await; // 初回tickは即座に発火するので消費しておく
+    loop {
+        tokio::select! {
+            _ = stop.cancelled() => return Ok(()),
+            _ = poll.tick() => {
+                let current = fetch_wanted_dids_touch(pool).await;
+                if current != touch_at_start {
+                    if let Some(touched_at) = current {
+                        save_jetstream_cursor(pool, touched_at.timestamp_micros()).await;
+                    }
+                    tracing::info!("[Jetstream] wantedDids変更を検知。接続を試みます。");
+                    return Ok(());
+                }
+            }
+        }
+    }
 }
 
 async fn connect_and_process(
@@ -153,10 +170,18 @@ async fn connect_and_process(
     job_queue: &Arc<dyn JobQueue>,
     stop: &CancellationToken,
 ) -> Result<(), String> {
-    let cursor = load_jetstream_cursor(pool).await;
-    let wanted_dids = load_wanted_dids(pool).await;
+    // 合図を DID 集合より先に読む。逆順だと、その間に入ったフォローを合図の変化として
+    // 検知できず、次の変更まで取り込まれない。
     let wanted_dids_touch_at_connect = fetch_wanted_dids_touch(pool).await;
-    let url = build_jetstream_url(cursor, &wanted_dids);
+    // 取得に失敗したときは空集合として扱わない（絞り込みなしで繋ぐことになる）。
+    // エラーにして、バックオフ後に取り直す。
+    let wanted_dids = bsky_ingest::wanted_dids(pool)
+        .await
+        .map_err(|e| format!("wantedDids取得失敗: {}", e))?;
+    let cursor = load_jetstream_cursor(pool).await;
+    let Some(url) = build_jetstream_url(cursor, &wanted_dids) else {
+        return wait_for_wanted_dids(pool, wanted_dids_touch_at_connect, stop).await;
+    };
     tracing::info!(
         "[Jetstream] 接続中（wantedDids {}件）: {}",
         wanted_dids.len(),
@@ -1151,6 +1176,7 @@ struct InboundSubjectRecord<'a> {
 
 /// Bskyユーザーのリポストをタイムライン投稿として保存する（Fediverseの`Announce`受信
 /// （`handle_announce`、`crates/seiran-common/src/jobs/inbound_activity_process.rs`）と対称の処理）。
+/// リポストした人が取り込み対象（`find_saveable_bsky_author`）でなければ捨てる。
 /// リポスト対象がDBに未存在（Jetstreamの`wantedDids`絞り込みで取り込んでいなかった投稿等）
 /// なら AppView から直接フェッチして保存する。対象がローカル投稿の場合は通知も作る。
 async fn handle_inbound_repost_create(
@@ -1168,20 +1194,17 @@ async fn handle_inbound_repost_create(
     } = *record;
     let post_repo = PgPostRepository::new(pool.clone());
 
-    let actor_id = match resolve_or_upsert_bsky_actor(pool, job_queue, http, did).await {
-        Ok(id) => id,
+    // 取り込むのは投稿と同じく、ローカルからフォローされているかリストに入っている、凍結されて
+    // いない相手のリポストだけ。これを `wantedDids` 任せにすると、絞り込みが効いていない
+    // 接続では、見知らぬ相手のリポストとその対象投稿（AppView から取得）まで保存してしまう。
+    let actor_id = match find_saveable_bsky_author(pool, did).await {
+        Ok(Some(author)) => author.actor_id,
+        Ok(None) => return,
         Err(e) => {
             tracing::error!("[Jetstream/Repost] reposter アクター解決失敗: {}", e);
             return;
         }
     };
-    if is_actor_suspended(pool, actor_id).await {
-        tracing::info!(
-            "[Jetstream/Repost] 凍結済みアクター (did={}) のリポストを破棄",
-            did
-        );
-        return;
-    }
     if denied_and_not_followed(pool, actor_id, did).await {
         tracing::debug!(
             "[Jetstream/Repost] 拒否サーバーのリポストを破棄 (did={})",
@@ -1608,7 +1631,15 @@ mod facet_tests {
 
     #[test]
     fn jetstream_subscription_includes_reposts() {
-        let url = build_jetstream_url(None, &[]);
+        let url = build_jetstream_url(None, &["did:plc:example".to_string()]).unwrap();
         assert!(url.contains("wantedCollections=app.bsky.feed.repost"));
+    }
+
+    #[test]
+    fn jetstream_url_requires_wanted_dids() {
+        assert_eq!(build_jetstream_url(Some(1), &[]), None);
+        let url = build_jetstream_url(Some(1), &["did:plc:a".to_string()]).unwrap();
+        assert!(url.contains("&wantedDids=did:plc:a"));
+        assert!(url.contains("&cursor=1"));
     }
 }
