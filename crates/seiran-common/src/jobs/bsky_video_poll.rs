@@ -74,8 +74,16 @@ async fn process_locked(
         return Ok(());
     };
 
-    let local_domain = std::env::var("LOCAL_DOMAIN").unwrap_or_else(|_| "localhost".to_string());
-    let own_pds_did = format!("did:web:{}", local_domain);
+    // アップロード時（`handlers::drive`）と同じく確定済みの `LocalDomain` から作る。
+    // `new_with_db` で作るワーカーは必ず `delivery` を持つ。
+    let Some(delivery) = &ctx.delivery else {
+        tracing::warn!(
+            "[BskyVideoPoll] delivery 設定が無いため自ホストドメインを決められずスキップ (media_file_id={})",
+            media_file_id
+        );
+        return Ok(());
+    };
+    let own_pds_did = format!("did:web:{}", delivery.local_domain);
 
     let jwt = sign_service_auth_jwt(&pem, &did, &own_pds_did, "app.bsky.video.getJobStatus")
         .map_err(|e| format!("JWT署名失敗: {}", e))?;

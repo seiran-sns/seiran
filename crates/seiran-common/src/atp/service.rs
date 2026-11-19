@@ -318,8 +318,13 @@ impl AtpCommitService {
         self.events.publish(event);
     }
 
+    /// ドメインは `.env` の `LOCAL_DOMAIN` ではなく確定済みの `LocalDomain` から取る
+    /// （初回セットアップの Host ヘッダーで確定したインストールは `LOCAL_DOMAIN` を持たず、
+    /// env を見ると requestCrawl が一度も送られず Relay に発見されない）。未確定（シングル
+    /// ホストモード）は連合しないので送らない。
     fn spawn_request_crawl(&self) {
-        if let Ok(local_domain) = std::env::var("LOCAL_DOMAIN") {
+        if self.local_domain.is_confirmed() {
+            let local_domain = self.local_domain.as_str().to_string();
             // ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して requestCrawl する。
             // 未設定時は本番の Bsky 公式リレーのみ（従来通りの挙動）。ローカル調査用に自前の
             // relay 実装を並行稼働させる場合は

@@ -1406,6 +1406,12 @@ async fn ensure_handle_txt_records(state: &AppState) {
 /// ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して送る
 /// （AtpCommitService::spawn_request_crawl と同じ規約）。
 async fn request_relay_crawl(state: &AppState) {
+    // 未確定（初回セットアップ前・シングルホストモード）だと `as_str()` は "localhost" で、
+    // Relay に 400 で拒否されるだけなので送らない。初回セットアップで確定した後は、
+    // 最初のコミット時に `AtpCommitService::spawn_request_crawl` が送る。
+    if !state.local_domain.is_confirmed() {
+        return;
+    }
     let relay_base_raw =
         std::env::var("ATP_RELAY_URL").unwrap_or_else(|_| "https://bsky.network".to_string());
     let relay_bases: Vec<String> = relay_base_raw
