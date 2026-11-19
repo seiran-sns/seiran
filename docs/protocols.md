@@ -199,7 +199,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 - `seiran-atp-repo::firehose` — Jetstream クライアント
 - `seiran-api::handlers::xrpc::{repo,server,sync}` — repo: `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`、server: `describeServer`/`resolveHandle`/セッション・アプリパスワード系、sync: `getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`subscribeRepos`
 
-ローカルユーザーの投稿は `AtpCommitService` がジョブキューを介さず直接コミットし、`atp_repo_events` に記録して、公式 Relay（`bsky.network`）へ `requestCrawl` を送る。
+ローカルユーザーの投稿は `AtpCommitService` がジョブキューを介さず直接コミットし、`atp_repo_events` に記録して、公式 Relay（`bsky.network`）へ `requestCrawl` を送る。`requestCrawl` の `hostname` は確定済みの自ホストドメイン（`LocalDomain`）で、`.env` の `LOCAL_DOMAIN` は見ない（初回セットアップの `Host` ヘッダーで確定したインストールは `LOCAL_DOMAIN` を持たない）。ドメインが未確定（初回セットアップ前・シングルホストモード）の間は、コミット時・起動時（`spawn_startup_tasks`）とも送らない。
 
 **CORS**: `router` の `CorsLayer` は、パスが `/xrpc/` か `/.well-known/` で始まれば全オリジンを許可する。XRPC は bsky.app 等の外部クライアントがブラウザから直接叩く公開 API だから（公式 PDS も `Access-Control-Allow-Origin: *`）。`/api/*` は `FRONTEND_ORIGIN` と自ドメインのみ。`allow_headers` は `Any`: bsky.app は `atproto-proxy`/`x-bsky-topics` 等のカスタムヘッダーをメソッドごとに送ってくるため、列挙すると増えるたびにプリフライトで弾かれる。`allow_credentials` を付けていない（Cookie 不使用）ので `Any` で安全。
 
