@@ -4,8 +4,10 @@ name: Dependabot auto-merge
 # 通過を必須にしているので、マージは CI が通ってから行われる。マージ後の版上げとリリースは
 # security-release.yml が行う（docs/architecture.md 3.1節）。
 #
-# 対象はセキュリティ勧告に紐づく更新（alert-lookup で GHSA が引けるもの）で、メジャー更新では
-# ないものに限る。それ以外の PR は人が判断するまで置いておく。
+# 対象はセキュリティ勧告に紐づく更新（alert-lookup で GHSA が引けるもの）。メジャー更新も本番用の
+# 依存も含める: 修正がメジャー版にしか無いとき、人の判断を待つ間は脆弱性が開いたままになる。
+# E2E で見えない不具合（実際の外部サーバーとの連合等）を出すおそれより、ゼロデイ攻撃を受け続ける
+# おそれのほうが重いと判断している。勧告に紐づかない PR は人が判断するまで置いておく。
 # auto-merge の設定は GitHub App のトークンで行う。GITHUB_TOKEN で設定したマージの push では
 # 後続のワークフロー（main の CI）が起動しないため。
 #
@@ -40,9 +42,7 @@ jobs:
           github-token: ${{ steps.app.outputs.token }}
           alert-lookup: true
       - name: Enable auto-merge
-        if: >-
-          steps.meta.outputs.ghsa-id != '' &&
-          steps.meta.outputs.update-type != 'version-update:semver-major'
+        if: steps.meta.outputs.ghsa-id != ''
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           PR_URL: ${{ github.event.pull_request.html_url }}
@@ -51,9 +51,7 @@ jobs:
           gh pr merge --auto --squash "$PR_URL"
           echo "$GHSA の修正として auto-merge を設定しました" >> "$GITHUB_STEP_SUMMARY"
       - name: Leave for review
-        if: >-
-          steps.meta.outputs.ghsa-id == '' ||
-          steps.meta.outputs.update-type == 'version-update:semver-major'
+        if: steps.meta.outputs.ghsa-id == ''
         env:
           UPDATE_TYPE: ${{ steps.meta.outputs.update-type }}
           GHSA: ${{ steps.meta.outputs.ghsa-id }}

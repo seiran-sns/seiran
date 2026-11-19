@@ -9,7 +9,7 @@ name: Security release
 # main の CI が起動しない。App は main のルールセットの例外にしておく）。
 #
 # auto-merge（squash。コミットの作者が Dependabot のまま）で入った修正は自動で版を上げる。
-# 人がマージした Dependabot の PR（メジャー更新等、auto-merge の対象外のもの）は、版上げの
+# 人がマージした Dependabot の PR（勧告に紐づかない更新等、auto-merge の対象外のもの）は、版上げの
 # ジョブを Environment security-release-review の承認待ちにする。飛ばしてしまうと版上げを
 # 忘れても気づけないため。承認すれば同じ手順で版を上げる（Environment に必須の承認者を設定しておく）。
 on:
