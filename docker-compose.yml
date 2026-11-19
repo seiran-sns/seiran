@@ -77,6 +77,11 @@ services:
     restart: always
     volumes:
       - redis-data:/data
+    # サービス間はコンテナ内部DNS（redis:6379）で足りるが、ホストで cargo run するバックエンド
+    # （.env の REDIS_URL=redis://localhost:6379）が繋げるようにホストの 127.0.0.1 のみへ公開する。
+    # 公開しないと、こちらの compose でコンテナを作り直したときにホストのバックエンドが起動途中で止まる。
+    ports:
+      - "127.0.0.1:6379:6379"
     networks:
       - internal
     healthcheck:
