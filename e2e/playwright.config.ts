@@ -60,6 +60,7 @@ const STORAGE_SERIAL_SPECS = [
   "**/mastodon-compat.spec.ts",
   "**/federation-delivery.spec.ts",
   "**/note-redraft.spec.ts",
+  "**/image-lightbox.spec.ts",
 ];
 // - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests
 //   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。
