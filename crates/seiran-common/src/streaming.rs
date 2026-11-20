@@ -218,34 +218,73 @@ impl StreamHub {
     }
 }
 
-fn reaction_agg_to_json(agg: Vec<(String, i64, Option<String>)>) -> Vec<serde_json::Value> {
+fn reaction_counts(agg: Vec<(String, i64, Option<String>)>) -> Vec<ReactionCount> {
     agg.into_iter()
         .filter(|(emoji, _, _)| !emoji.is_empty())
-        .map(|(emoji, count, emoji_url)| {
-            serde_json::json!({ "emoji": emoji, "count": count, "emojiUrl": emoji_url })
+        .map(|(emoji, count, emoji_url)| ReactionCount {
+            emoji,
+            count,
+            emoji_url,
         })
         .collect()
 }
+
+/// 1人のリアクションの変化（`broadcast_reaction_update`/`broadcast_dm_reaction_update`の入力）。
+#[derive(Debug, Clone, Copy)]
+pub struct ReactorChange<'a> {
+    pub actor_id: i64,
+    /// 変化の後にこの人が付けているリアクション（取り消しなら`None`）。
+    pub emoji: Option<&'a str>,
+    /// 変化の前に付けていたリアクション（新規なら`None`）。1投稿1リアクションなので、切り替え・
+    /// 取り消しで消えた絵文字がこれ。Mastodon 互換ストリーミングは絵文字ごとの件数を送るので、
+    /// 0件になった絵文字を知らせるのに使う（集計の`reactions`には0件の絵文字が載らない）。
+    pub previous_emoji: Option<&'a str>,
+}
+
+/// `noteUpdated`の本文。SPA と Misskey 互換のストリーミング、Mastodon 互換のストリーミング
+/// （`emoji_reaction`への組み直し）が読む。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteUpdatedBody {
+    pub post_id: String,
+    pub reactions: Vec<ReactionCount>,
+    pub reactor_actor_id: Option<String>,
+    pub reactor_emoji: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reactor_previous_emoji: Option<String>,
+}
+
+/// `noteUpdated`の絵文字ごとの件数。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReactionCount {
+    pub emoji: String,
+    pub count: i64,
+    pub emoji_url: Option<String>,
+}
+
+/// `noteUpdated`のイベント名。
+pub const NOTE_UPDATED_EVENT: &str = "noteUpdated";
 
 /// `broadcast_reaction_update`/`broadcast_dm_reaction_update`共通の送出部分。
 fn publish_reaction_update(
     stream_hub: &StreamHub,
     recipients: HashSet<i64>,
     post_id: i64,
-    reactions_json: Vec<serde_json::Value>,
-    reactor_actor_id: Option<i64>,
-    reactor_emoji: Option<&str>,
+    reactions: Vec<ReactionCount>,
+    reactor: Option<ReactorChange<'_>>,
 ) {
-    stream_hub.publish_event(
-        recipients,
-        "noteUpdated",
-        serde_json::json!({
-            "postId": post_id.to_string(),
-            "reactions": reactions_json,
-            "reactorActorId": reactor_actor_id.map(|id| id.to_string()),
-            "reactorEmoji": reactor_emoji,
-        }),
-    );
+    let body = NoteUpdatedBody {
+        post_id: post_id.to_string(),
+        reactions,
+        reactor_actor_id: reactor.map(|r| r.actor_id.to_string()),
+        reactor_emoji: reactor.and_then(|r| r.emoji).map(str::to_owned),
+        reactor_previous_emoji: reactor.and_then(|r| r.previous_emoji).map(str::to_owned),
+    };
+    let Ok(body) = serde_json::to_value(&body) else {
+        return;
+    };
+    stream_hub.publish_event(recipients, NOTE_UPDATED_EVENT, body);
 }
 
 /// リアクション追加/切替/取消（ローカル・AP 受信のいずれも）を `noteUpdated` イベントとして
@@ -255,7 +294,7 @@ fn publish_reaction_update(
 /// 使わないこと**（フォロワーはDMの当事者ではなく、DMの存在・リアクション内容が無関係な
 /// 第三者のWS接続に漏れる。`direct`投稿には`broadcast_dm_reaction_update`を使う）。
 ///
-/// `reactor_emoji` は今回のイベント後の「reactor 自身がこの投稿に付けているリアクション」。
+/// `reactor.emoji` は今回のイベント後の「reactor 自身がこの投稿に付けているリアクション」。
 /// 切替/追加なら `Some(新しい絵文字)`、取消（他に付け直さなかった場合）なら `None`。
 /// 受信側はこれと自分の actor_id を比較して `reactedByMe` を再計算できる（他人のリアクションは
 /// 件数のみ更新すればよい）。
@@ -269,22 +308,20 @@ pub async fn broadcast_reaction_update(
     reactions: &dyn ReactionRepository,
     post_id: i64,
     post_author_id: i64,
-    reactor_actor_id: i64,
-    reactor_emoji: Option<&str>,
+    reactor: ReactorChange<'_>,
 ) {
     let agg = reactions
         .aggregate_for_post(post_id)
         .await
         .unwrap_or_default();
-    let reactions_json = reaction_agg_to_json(agg);
+    let counts = reaction_counts(agg);
 
     publish_reaction_update(
         stream_hub,
         author_and_followers(follows, post_author_id).await,
         post_id,
-        reactions_json.clone(),
-        Some(reactor_actor_id),
-        reactor_emoji,
+        counts.clone(),
+        Some(reactor),
     );
 
     let siblings = reactions.bridge_siblings(post_id).await.unwrap_or_default();
@@ -293,8 +330,7 @@ pub async fn broadcast_reaction_update(
             stream_hub,
             author_and_followers(follows, sibling_author_id).await,
             sibling_id,
-            reactions_json.clone(),
-            None,
+            counts.clone(),
             None,
         );
     }
@@ -320,14 +356,13 @@ pub async fn broadcast_dm_reaction_update(
     reactions: &dyn ReactionRepository,
     post_id: i64,
     post_author_id: i64,
-    reactor_actor_id: i64,
-    reactor_emoji: Option<&str>,
+    reactor: ReactorChange<'_>,
 ) {
     let agg = reactions
         .aggregate_for_post(post_id)
         .await
         .unwrap_or_default();
-    let reactions_json = reaction_agg_to_json(agg);
+    let counts = reaction_counts(agg);
 
     let mut recipients: HashSet<i64> = HashSet::new();
     recipients.insert(post_author_id);
@@ -335,14 +370,7 @@ pub async fn broadcast_dm_reaction_update(
         recipients.extend(rows);
     }
 
-    publish_reaction_update(
-        stream_hub,
-        recipients,
-        post_id,
-        reactions_json,
-        Some(reactor_actor_id),
-        reactor_emoji,
-    );
+    publish_reaction_update(stream_hub, recipients, post_id, counts, Some(reactor));
 }
 
 /// アンケート投票結果の更新（ローカル投票・AP 受信のいずれも）を `pollUpdated` イベントとして

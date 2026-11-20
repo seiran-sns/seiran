@@ -15,7 +15,13 @@ pub(super) async fn handle_undo(
                 .delete_by_activity_id(activity_id)
                 .await
                 .map_err(|e| format!("reactions DELETE エラー: {}", e))?;
-            if let Some((post_id, actor_id)) = deleted {
+            if let Some(deleted) = deleted {
+                let post_id = deleted.post_id;
+                let reactor = ReactorChange {
+                    actor_id: deleted.actor_id,
+                    emoji: None,
+                    previous_emoji: Some(&deleted.content),
+                };
                 tracing::info!(
                     "[Undo/Reaction] {} を取り消し（post_id={}）",
                     activity_id,
@@ -30,8 +36,7 @@ pub(super) async fn handle_undo(
                             inbox.reaction_repo.as_ref(),
                             post_id,
                             post.actor_id,
-                            actor_id,
-                            None,
+                            reactor,
                         )
                         .await;
                     } else {
@@ -41,8 +46,7 @@ pub(super) async fn handle_undo(
                             inbox.reaction_repo.as_ref(),
                             post_id,
                             post.actor_id,
-                            actor_id,
-                            None,
+                            reactor,
                         )
                         .await;
                     }

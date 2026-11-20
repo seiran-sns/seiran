@@ -123,8 +123,8 @@ pub use post::{
     ProfileFeedFilter, ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo, TimelinePost,
 };
 pub use reaction::{
-    NewReaction, PgReactionRepository, ReactionFeedRow, ReactionRepository, ReactionUpsert,
-    ReactionUse, ReactorInfo, StoredReaction,
+    DeletedReaction, NewReaction, PgReactionRepository, PostReactionRow, ReactionFeedRow,
+    ReactionRepository, ReactionUpsert, ReactionUse, ReactorInfo, StoredReaction,
 };
 pub use relay::{PgRelayRepository, Relay, RelayError, RelayRepository, RelayStatus};
 pub use remote_emoji::{PgRemoteEmojiRepository, RemoteEmojiRepository, RemoteEmojiRow};

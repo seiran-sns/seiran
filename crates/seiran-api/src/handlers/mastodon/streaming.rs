@@ -10,6 +10,10 @@
 //! ストリーム: `user`（ホーム＋通知）・`user:notification`・`public`・`public:remote`
 //! （どちらもグローバル）・`public:local`・`hashtag`（`tag`）・`list`（`list`）。
 //! 投稿削除（`delete`）・DM（`direct`）・編集（`status.update`）のイベントは送らない。
+//!
+//! `user` には Fedibird 互換の `emoji_reaction`（投稿の絵文字ごとのリアクション件数）も送る。
+//! 元は自分宛ての `noteUpdated`（リアクションの変化。配信先は SPA と同じく投稿者と
+//! そのフォロワー、DM は当事者）で、`emoji_reactions::reaction_updates` で組み直す。
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -22,7 +26,8 @@ use axum::{
     http::HeaderMap,
     response::{IntoResponse, Response},
 };
-use seiran_common::streaming::ChannelKind;
+use seiran_common::repository::note_extras;
+use seiran_common::streaming::{ChannelKind, NoteUpdatedBody, NOTE_UPDATED_EVENT};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -31,6 +36,7 @@ use crate::middleware::extract_auth;
 use crate::AppState;
 
 use super::convert::{build_notifications, find_status};
+use super::emoji_reactions::reaction_updates;
 use super::extract::MastodonQuery;
 
 /// 自分宛てイベントを受けてから通知テーブルを読むまでの待ち時間（配信が INSERT より先に
@@ -283,6 +289,60 @@ impl Connection {
             .collect()
     }
 
+    /// 自分宛ての `noteUpdated` を `emoji_reaction` イベントにする（`user` を購読しているときだけ）。
+    async fn reaction_frames(&self, payload: &str) -> Vec<Message> {
+        #[derive(Deserialize)]
+        struct Envelope {
+            #[serde(rename = "type")]
+            kind: String,
+            body: NoteUpdatedBody,
+        }
+        let user_streams: Vec<&Vec<String>> = self
+            .streams
+            .values()
+            .filter(|s| s.name.len() == 1 && s.name[0] == "user")
+            .map(|s| &s.name)
+            .collect();
+        // 他の種類のイベントまで毎回 JSON を読まないよう、先に名前で見分ける。
+        if user_streams.is_empty() || !payload.contains(NOTE_UPDATED_EVENT) {
+            return Vec::new();
+        }
+        let Ok(envelope) = serde_json::from_str::<Envelope>(payload) else {
+            return Vec::new();
+        };
+        if envelope.kind != NOTE_UPDATED_EVENT {
+            return Vec::new();
+        }
+        let body = envelope.body;
+        let Ok(post_id) = body.post_id.parse::<i64>() else {
+            return Vec::new();
+        };
+        let me = self.actor_id.to_string();
+        let own = if body.reactor_actor_id.as_deref() == Some(me.as_str()) {
+            body.reactor_emoji.clone()
+        } else {
+            note_extras::own_reactions_for_posts(&self.state.db, self.actor_id, &[post_id])
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .next()
+                .map(|(_, content)| content)
+        };
+        reaction_updates(
+            &body,
+            self.actor_id,
+            own.as_deref(),
+            &self.state.local_domain,
+        )
+        .iter()
+        .flat_map(|u| {
+            user_streams
+                .iter()
+                .filter_map(move |name| frame(name, "emoji_reaction", u))
+        })
+        .collect()
+    }
+
     async fn apply_client_message(&mut self, text: &str) {
         let Ok(msg) = serde_json::from_str::<ClientMessage>(text) else {
             return;
@@ -341,9 +401,15 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
-                    if ev.recipients.contains(&actor_id) && !settle_armed && conn.wants_notifications() {
-                        settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
-                        settle_armed = true;
+                    if ev.recipients.contains(&actor_id) {
+                        if !settle_armed && conn.wants_notifications() {
+                            settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
+                            settle_armed = true;
+                        }
+                        let frames = conn.reaction_frames(&ev.payload).await;
+                        if !send_all(&mut socket, frames).await {
+                            break;
+                        }
                     }
                     if let Some(ch) = ev.channel {
                         let frames = conn

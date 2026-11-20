@@ -4,7 +4,7 @@
 
 use axum::{
     extract::DefaultBodyLimit,
-    routing::{delete, get, patch, post},
+    routing::{delete, get, patch, post, put},
     Router,
 };
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
@@ -861,7 +861,8 @@ fn misskey_routes() -> Router<AppState> {
 /// Mastodon の `{"error": "..."}` 形に揃える（`route_layer` なのでこのルーター内のルートだけ）。
 fn mastodon_routes() -> Router<AppState> {
     use handlers::mastodon::{
-        accounts, instance, media, notifications, oauth, search, statuses, streaming, timelines,
+        accounts, emoji_reactions, instance, media, notifications, oauth, search, statuses,
+        streaming, timelines,
     };
     let stubs = [
         "/api/v1/filters",
@@ -954,6 +955,15 @@ fn mastodon_routes() -> Router<AppState> {
         )
         .route("/api/v1/statuses/:id/context", get(statuses::context))
         .route("/api/v1/statuses/:id/favourite", post(statuses::favourite))
+        // Fedibird 互換の絵文字リアクション（`handlers::mastodon::emoji_reactions`）
+        .route(
+            "/api/v1/statuses/:id/emoji_reactions/:name",
+            put(emoji_reactions::react).delete(emoji_reactions::unreact),
+        )
+        .route(
+            "/api/v1/statuses/:id/emoji_reactioned_by",
+            get(emoji_reactions::reactioned_by),
+        )
         .route(
             "/api/v1/statuses/:id/unfavourite",
             post(statuses::unfavourite),

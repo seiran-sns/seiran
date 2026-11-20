@@ -78,6 +78,25 @@ impl StoredReaction {
     }
 }
 
+/// 受信した取り消しで消したリアクション（`delete_by_activity_id`/`delete_by_at_uri`）。
+/// ストリーミングの`noteUpdated`に、誰の何が消えたかを載せるのに使う。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct DeletedReaction {
+    pub post_id: i64,
+    pub actor_id: i64,
+    pub content: String,
+}
+
+/// 投稿に付いたリアクション1件（`ReactionRepository::list_for_post`）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct PostReactionRow {
+    /// カーソルに使う`reactions.id`。
+    pub id: i64,
+    pub actor_id: i64,
+    pub content: String,
+    pub emoji_url: Option<String>,
+}
+
 /// `ReactionRepository::upsert`の結果。
 #[derive(Debug, Clone)]
 pub struct ReactionUpsert {
@@ -100,15 +119,15 @@ pub trait ReactionRepository: Send + Sync {
     async fn upsert(&self, reaction: &NewReaction<'_>) -> Result<ReactionUpsert, sqlx::Error>;
 
     /// `ap_activity_id` で特定されるリアクションを取り消す（Undo(Like)/Undo(EmojiReact) 受信時）。
-    /// 削除できた場合は `(post_id, actor_id)` を返す（ストリーミング通知の組み立てに使う）。
+    /// 削除できた場合は消した行を返す（ストリーミング通知の組み立てに使う）。
     async fn delete_by_activity_id(
         &self,
         ap_activity_id: &str,
-    ) -> Result<Option<(i64, i64)>, sqlx::Error>;
+    ) -> Result<Option<DeletedReaction>, sqlx::Error>;
 
     /// `at_uri` で特定されるリアクションを取り消す（ATP `app.bsky.feed.like` の delete 受信時）。
-    /// 削除できた場合は `(post_id, actor_id)` を返す（ストリーミング通知の組み立てに使う）。
-    async fn delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error>;
+    /// 削除できた場合は消した行を返す（ストリーミング通知の組み立てに使う）。
+    async fn delete_by_at_uri(&self, at_uri: &str) -> Result<Option<DeletedReaction>, sqlx::Error>;
 
     /// ローカルユーザーが自分のリアクションを取り消し、削除した行を返す（該当なしなら`None`）。
     /// `content`が`Some`ならその内容のリアクションのみ、`None`なら内容を問わず取り消す
@@ -156,6 +175,18 @@ pub trait ReactionRepository: Send + Sync {
         viewer_actor_id: Option<i64>,
         limit: i64,
     ) -> Result<Vec<ReactorInfo>, sqlx::Error>;
+
+    /// 指定ポストのリアクションを、`exclude_content`（Mastodon 互換 API のお気に入りにあたる
+    /// `❤️`）を除いて新しい順に返す（Fedibird 互換の`emoji_reactioned_by`用、カーソルは
+    /// `reactions.id`）。ブリッジ関係の投稿の合算・同一人物のまとめ方、閲覧者がミュート・
+    /// ブロックしている人の除外は`actors_for_reaction`と同じ。
+    async fn list_for_post(
+        &self,
+        post_id: i64,
+        exclude_content: &str,
+        viewer_actor_id: Option<i64>,
+        page: super::Page,
+    ) -> Result<Vec<PostReactionRow>, sqlx::Error>;
 
     /// 指定アクターが行ったリアクションを、対象ポスト・その投稿者情報付きで新しい順に返す
     /// （プロフィール「投稿」タブの投稿＋リアクション混合フィード専用、`until_id`/`since_id` は
@@ -256,23 +287,22 @@ impl ReactionRepository for PgReactionRepository {
     async fn delete_by_activity_id(
         &self,
         ap_activity_id: &str,
-    ) -> Result<Option<(i64, i64)>, sqlx::Error> {
-        let row = sqlx::query(
-            "DELETE FROM reactions WHERE ap_activity_id = $1 RETURNING post_id, actor_id",
+    ) -> Result<Option<DeletedReaction>, sqlx::Error> {
+        sqlx::query_as(
+            "DELETE FROM reactions WHERE ap_activity_id = $1 RETURNING post_id, actor_id, content",
         )
         .bind(ap_activity_id)
         .fetch_optional(&self.pool)
-        .await?;
-        Ok(row.map(|r| (r.get("post_id"), r.get("actor_id"))))
+        .await
     }
 
-    async fn delete_by_at_uri(&self, at_uri: &str) -> Result<Option<(i64, i64)>, sqlx::Error> {
-        let row =
-            sqlx::query("DELETE FROM reactions WHERE at_uri = $1 RETURNING post_id, actor_id")
-                .bind(at_uri)
-                .fetch_optional(&self.pool)
-                .await?;
-        Ok(row.map(|r| (r.get("post_id"), r.get("actor_id"))))
+    async fn delete_by_at_uri(&self, at_uri: &str) -> Result<Option<DeletedReaction>, sqlx::Error> {
+        sqlx::query_as(
+            "DELETE FROM reactions WHERE at_uri = $1 RETURNING post_id, actor_id, content",
+        )
+        .bind(at_uri)
+        .fetch_optional(&self.pool)
+        .await
     }
 
     async fn delete_local(
@@ -369,6 +399,43 @@ impl ReactionRepository for PgReactionRepository {
         .bind(content)
         .bind(limit)
         .bind(viewer_actor_id)
+        .fetch_all(&self.pool)
+        .await
+    }
+
+    async fn list_for_post(
+        &self,
+        post_id: i64,
+        exclude_content: &str,
+        viewer_actor_id: Option<i64>,
+        page: super::Page,
+    ) -> Result<Vec<PostReactionRow>, sqlx::Error> {
+        sqlx::query_as::<_, PostReactionRow>(
+            "SELECT r.id, r.actor_id, r.content, r.emoji_url
+             FROM (
+                 SELECT DISTINCT ON (COALESCE(a.bridge_real_actor_id, a.id))
+                        r.id, a.id AS actor_id, r.content, r.emoji_url
+                 FROM unnest(bridge_group_post_ids($1)) AS g(member_id)
+                 JOIN reactions r ON r.post_id = g.member_id
+                 JOIN actors a ON a.id = r.actor_id
+                 WHERE r.content <> $2
+                 ORDER BY COALESCE(a.bridge_real_actor_id, a.id), (a.bridge_real_actor_id IS NOT NULL), r.created_at DESC
+             ) r
+             JOIN actors a ON a.id = r.actor_id
+             WHERE a.withdrawn_at IS NULL AND a.suspended_at IS NULL
+               AND ($3::bigint IS NULL OR NOT actor_is_hidden_for_viewer($3, a.id))
+               AND ($3::bigint IS NOT NULL OR a.actor_type = 'local')
+               AND r.id < COALESCE($4::bigint, 9223372036854775807)
+               AND r.id > COALESCE($5::bigint, 0)
+             ORDER BY r.id DESC
+             LIMIT $6",
+        )
+        .bind(post_id)
+        .bind(exclude_content)
+        .bind(viewer_actor_id)
+        .bind(page.until_id)
+        .bind(page.since_id)
+        .bind(page.limit)
         .fetch_all(&self.pool)
         .await
     }

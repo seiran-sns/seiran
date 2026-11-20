@@ -175,6 +175,9 @@ pub struct MastodonStatus {
     pub favourites_count: i64,
     pub replies_count: i64,
     pub quotes_count: i64,
+    /// Fedibird 互換の絵文字リアクション（お気に入りの `❤️` を除く、`emoji_reactions` モジュール）。
+    pub emoji_reactions: Vec<super::emoji_reactions::FedibirdReaction>,
+    pub emoji_reactions_count: i64,
     pub in_reply_to_id: Option<String>,
     pub in_reply_to_account_id: Option<String>,
     pub reblog: Option<Box<MastodonStatus>>,
@@ -196,6 +199,9 @@ pub struct MastodonStatus {
     pub bookmarked: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pinned: Option<bool>,
+    /// 閲覧者が絵文字でリアクションしているか（Fedibird の拡張）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji_reactioned: Option<bool>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -231,7 +237,11 @@ pub struct MastodonNotification {
     pub created_at: String,
     pub account: MastodonAccount,
     pub status: Option<MastodonStatus>,
-    /// `pleroma:emoji_reaction` のときのリアクション内容（Pleroma/Akkoma 互換クライアント向け）。
+    /// `emoji_reaction` のときの絵文字（Fedibird の形）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub emoji_reaction: Option<super::emoji_reactions::FedibirdReactionEmoji>,
+    /// `emoji_reaction` のときのリアクション内容（Pleroma/Akkoma 互換クライアント向けの
+    /// `pleroma:emoji_reaction` と同じ形。それを読むクライアントのために残す）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub emoji: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]

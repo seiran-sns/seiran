@@ -38,7 +38,7 @@ use seiran_common::repository::{
     PgNotificationRepository, PgPostRepository, PgReactionRepository, PostRepository,
     ReactionRepository, extract_shortcode_candidates, parse_reaction_shortcode_and_host,
 };
-use seiran_common::streaming::{ChannelScope, broadcast_reaction_update};
+use seiran_common::streaming::{ChannelScope, ReactorChange, broadcast_reaction_update};
 use seiran_common::traits::{Job, JobQueue};
 use seiran_common::{CancellationToken, StreamHub, generate_snowflake_id};
 
@@ -1470,7 +1470,7 @@ async fn handle_inbound_like_create(
 
     let reactions_repo = PgReactionRepository::new(pool.clone());
     let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
-    if let Err(e) = reactions_repo
+    let saved = match reactions_repo
         .upsert(&seiran_common::repository::NewReaction {
             id: new_reaction_id,
             post_id,
@@ -1483,9 +1483,12 @@ async fn handle_inbound_like_create(
         })
         .await
     {
-        tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
-        return;
-    }
+        Ok(saved) => saved,
+        Err(e) => {
+            tracing::error!("[Jetstream/Like] reactions INSERT 失敗: {}", e);
+            return;
+        }
+    };
 
     tracing::info!(
         "[Jetstream/Like] post {} に {} を記録（did={}）",
@@ -1537,8 +1540,11 @@ async fn handle_inbound_like_create(
         &reactions_repo,
         post_id,
         post_author_id,
-        actor_id,
-        Some(content),
+        ReactorChange {
+            actor_id,
+            emoji: Some(content),
+            previous_emoji: saved.previous.as_ref().map(|p| p.content.as_str()),
+        },
     )
     .await;
 }
@@ -1553,9 +1559,10 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
             return;
         }
     };
-    let Some((post_id, actor_id)) = deleted else {
+    let Some(deleted) = deleted else {
         return; // 元々知らないリアクションだった（重複 delete イベント等）
     };
+    let post_id = deleted.post_id;
 
     tracing::info!(
         "[Jetstream/Unlike] post {} のリアクションを取消（at_uri={}）",
@@ -1576,8 +1583,11 @@ async fn handle_inbound_like_delete(pool: &PgPool, stream_hub: &StreamHub, at_ur
         &reactions_repo,
         post_id,
         post_author_id,
-        actor_id,
-        None,
+        ReactorChange {
+            actor_id: deleted.actor_id,
+            emoji: None,
+            previous_emoji: Some(&deleted.content),
+        },
     )
     .await;
 }
