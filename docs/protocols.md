@@ -298,7 +298,7 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 ### Jetstream 経由の取り込み（`seiran-atp-repo::firehose`）
 `wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost` に接続する。
 
-- **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合を30秒ごとに確認し、変化があれば再接続する。無関係な投稿を取り込まないための必須の絞り込み。`wantedDids` を付けない Jetstream は全アカウントのイベントを流してくるので、集合が空の間は接続せずに変更の合図（`jetstream_control`）を待ち、合図が変わったらその時刻を cursor にして接続する。集合を取得できなかったときも空とはみなさず、エラーとして再試行する。
+- **wantedDids**: ローカルユーザーのフォロー先、またはいずれかのリストのメンバーである DID の集合。無関係な投稿を取り込まないための必須の絞り込み。URL には載せず（DID 1件で約44文字増え、200件弱で `414 URI Too Long` になる）、`requireHello=true` で接続してから `options_update` メッセージで送る（Jetstream は最初の `options_update` まで cursor からの再送も含めて何も流さない。上限1万件）。`options_update` は購読条件を丸ごと置き換えるので `wantedCollections` も毎回送る。変更の合図（`jetstream_control`）を30秒ごとに確認し、変わっていれば接続したまま `options_update` で送り直す。`wantedDids` が空の購読は全アカウントのイベントを流してくるので、集合が空の間は接続せずに合図を待ち、合図が変わったらその時刻を cursor にして接続する（接続中に空になったら切断する）。集合を取得できなかったときも空とはみなさず、エラーとして再試行する。
 - **受信側の判定**: 投稿とリポストは、発行者がローカルからフォローされているかリストに入っている、凍結されていないアクター（`bsky_ingest::saveable_author`）のときだけ保存する。`wantedDids` だけに頼らない。
 - **凍結アクター**: 投稿の保存対象判定に `suspended_at IS NULL` を含め、リポスト・いいねも凍結済みなら破棄する。ATP には署名アクセス拒否に相当する仕組みが無いため、取り込み抑止が実質的な enforcement。
 - **拒否サーバー**: 投稿者・リポストした人・いいねした人の PDS ホスト（`actors.pds_host`）が拒否サーバーなら、AP 受信と同じ規則で捨てる。投稿は返信先・引用元・メンション facet のローカルユーザー本人がフォローしていなければ捨て、リポストは対象投稿の著者がローカルからフォローされていなければ捨て（AppView から取得する場合も保存前に判定する）、いいねは対象投稿のローカルの著者がフォローしていなければ捨てる。フォロワー検知（`bsky_follower_poll`）は記録だけして通知せず、Bsky DM（`bsky_dm_poll`）は相手をフォローしていなければ会話を取り込まない。

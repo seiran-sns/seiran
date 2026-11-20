@@ -18,7 +18,7 @@ use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::StreamExt;
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::Value as JsonValue;
 use sqlx::PgPool;
@@ -42,12 +42,17 @@ use seiran_common::streaming::{ChannelScope, broadcast_reaction_update};
 use seiran_common::traits::{Job, JobQueue};
 use seiran_common::{CancellationToken, StreamHub, generate_snowflake_id};
 
-const JETSTREAM_BASE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe?wantedCollections=app.bsky.feed.post&wantedCollections=app.bsky.feed.like&wantedCollections=app.bsky.feed.repost";
+const JETSTREAM_SUBSCRIBE_URL: &str = "wss://jetstream1.us-east.bsky.network/subscribe";
+
+const JETSTREAM_COLLECTIONS: [&str; 3] = [
+    "app.bsky.feed.post",
+    "app.bsky.feed.like",
+    "app.bsky.feed.repost",
+];
 
 /// `wantedDids` 絞り込みリスト（フォロイー + リストメンバーの Bsky DID 集合）を
-/// 再構築すべきか、受信ループ内で定期ポーリングする間隔。フォロー変更等は
-/// リアルタイム性が必須ではなく、cursorによりこの間の取りこぼしも無いため、
-/// 短すぎない間隔で十分（DBポーリング負荷を抑える）。
+/// 送り直すべきか、受信ループ内で定期ポーリングする間隔。フォロー変更等は
+/// リアルタイム性が必須ではないので、短すぎない間隔で十分（DBポーリング負荷を抑える）。
 const WANTED_DIDS_POLL_INTERVAL: Duration = Duration::from_secs(30);
 
 /// サーバー停止中に発生したイベントを取りこぼさないよう、直近処理した Jetstream
@@ -114,22 +119,54 @@ struct JetstreamTimeUs {
     time_us: i64,
 }
 
-/// `JETSTREAM_BASE_URL` に `wantedDids` を付与した接続URLを組み立てる。
-/// 対象DIDが1件も無ければ `None`。`wantedDids` を付けない Jetstream は全アカウントの
-/// イベントを流してくるので、その URL では接続させない。
-fn build_jetstream_url(cursor: Option<i64>, wanted_dids: &[String]) -> Option<String> {
-    if wanted_dids.is_empty() {
-        return None;
-    }
-    let mut url = JETSTREAM_BASE_URL.to_string();
-    for did in wanted_dids {
-        url.push_str("&wantedDids=");
-        url.push_str(did);
+/// Jetstream の接続 URL。`wantedDids` は URL に載せず、接続後に `options_update` で送る
+/// （`build_options_update`）。DID 1件で約44文字増えるので、URL に載せると200件弱で
+/// Jetstream が `414 URI Too Long` を返して接続できなくなる。
+///
+/// `requireHello=true` にすると、Jetstream は最初の `options_update` を受け取るまで
+/// cursor からの再送も含めてイベントを流さない。これを付けないと、絞り込みを送るまでの
+/// 間に全アカウントのイベントが流れてくる。
+fn build_jetstream_url(cursor: Option<i64>) -> String {
+    let mut url = format!("{JETSTREAM_SUBSCRIBE_URL}?requireHello=true");
+    for collection in JETSTREAM_COLLECTIONS {
+        url.push_str("&wantedCollections=");
+        url.push_str(collection);
     }
     if let Some(c) = cursor {
         url.push_str(&format!("&cursor={}", c));
     }
-    Some(url)
+    url
+}
+
+/// 購読条件を丸ごと置き換える `options_update` メッセージ（Jetstream は受け取った内容で
+/// 絞り込みを差し替えるので、`wantedCollections` も毎回送る）。対象DIDが1件も無ければ
+/// `None`。`wantedDids` が空の `options_update` は「全アカウント」を意味するので送らない。
+fn build_options_update(wanted_dids: &[String]) -> Option<String> {
+    if wanted_dids.is_empty() {
+        return None;
+    }
+    let msg = serde_json::json!({
+        "type": "options_update",
+        "payload": {
+            "wantedCollections": JETSTREAM_COLLECTIONS,
+            "wantedDids": wanted_dids,
+            "maxMessageSizeBytes": 0,
+        },
+    });
+    Some(msg.to_string())
+}
+
+/// 取り込む相手の DID 集合を取り直す。合図（`jetstream_control`）を DID 集合より先に
+/// 読む。逆順だと、その間に入ったフォローを合図の変化として検知できず、次の変更まで
+/// 取り込まれない。取得に失敗したときは空集合として扱わない（絞り込みなしになる）。
+async fn load_wanted_dids(
+    pool: &PgPool,
+) -> Result<(Option<chrono::DateTime<chrono::Utc>>, Vec<String>), String> {
+    let touch = fetch_wanted_dids_touch(pool).await;
+    let dids = bsky_ingest::wanted_dids(pool)
+        .await
+        .map_err(|e| format!("wantedDids取得失敗: {}", e))?;
+    Ok((touch, dids))
 }
 
 /// 取り込む相手（ローカルユーザーのフォロー先・リストのメンバー）が1件も無い間は、
@@ -170,18 +207,12 @@ async fn connect_and_process(
     job_queue: &Arc<dyn JobQueue>,
     stop: &CancellationToken,
 ) -> Result<(), String> {
-    // 合図を DID 集合より先に読む。逆順だと、その間に入ったフォローを合図の変化として
-    // 検知できず、次の変更まで取り込まれない。
-    let wanted_dids_touch_at_connect = fetch_wanted_dids_touch(pool).await;
-    // 取得に失敗したときは空集合として扱わない（絞り込みなしで繋ぐことになる）。
-    // エラーにして、バックオフ後に取り直す。
-    let wanted_dids = bsky_ingest::wanted_dids(pool)
-        .await
-        .map_err(|e| format!("wantedDids取得失敗: {}", e))?;
-    let cursor = load_jetstream_cursor(pool).await;
-    let Some(url) = build_jetstream_url(cursor, &wanted_dids) else {
-        return wait_for_wanted_dids(pool, wanted_dids_touch_at_connect, stop).await;
+    let (mut wanted_dids_touch, wanted_dids) = load_wanted_dids(pool).await?;
+    let Some(options_update) = build_options_update(&wanted_dids) else {
+        return wait_for_wanted_dids(pool, wanted_dids_touch, stop).await;
     };
+    let cursor = load_jetstream_cursor(pool).await;
+    let url = build_jetstream_url(cursor);
     tracing::info!(
         "[Jetstream] 接続中（wantedDids {}件）: {}",
         wanted_dids.len(),
@@ -191,6 +222,10 @@ async fn connect_and_process(
     let (mut ws_stream, _) = connect_async(&url)
         .await
         .map_err(|e| format!("WebSocket 接続失敗: {}", e))?;
+    ws_stream
+        .send(Message::Text(options_update))
+        .await
+        .map_err(|e| format!("options_update 送信失敗: {}", e))?;
 
     tracing::info!("[Jetstream] 接続成功。イベント受信中...");
 
@@ -229,11 +264,25 @@ async fn connect_and_process(
                 return Ok(());
             }
             _ = wanted_dids_poll.tick() => {
-                let current_touch = fetch_wanted_dids_touch(pool).await;
-                if current_touch != wanted_dids_touch_at_connect {
-                    tracing::info!("[Jetstream] wantedDids変更を検知。再接続します。");
-                    return Ok(());
+                if fetch_wanted_dids_touch(pool).await == wanted_dids_touch {
+                    continue;
                 }
+                // 接続したまま絞り込みだけ差し替える。再接続すると cursor から読み直しになる。
+                let (touch, dids) = load_wanted_dids(pool).await?;
+                let Some(options_update) = build_options_update(&dids) else {
+                    // 取り込む相手がいなくなった。切断して、接続せずに待つ側へ回る。
+                    if let Some(time_us) = last_time_us {
+                        save_jetstream_cursor(pool, time_us).await;
+                    }
+                    let _ = ws_stream.close(None).await;
+                    return Ok(());
+                };
+                ws_stream
+                    .send(Message::Text(options_update))
+                    .await
+                    .map_err(|e| format!("options_update 送信失敗: {}", e))?;
+                wanted_dids_touch = touch;
+                tracing::info!("[Jetstream] wantedDidsを更新しました（{}件）。", dids.len());
             }
         }
     }
@@ -1630,16 +1679,21 @@ mod facet_tests {
     use super::*;
 
     #[test]
-    fn jetstream_subscription_includes_reposts() {
-        let url = build_jetstream_url(None, &["did:plc:example".to_string()]).unwrap();
+    fn jetstream_url_keeps_dids_out_and_waits_for_hello() {
+        let url = build_jetstream_url(Some(1));
+        assert!(url.contains("requireHello=true"));
         assert!(url.contains("wantedCollections=app.bsky.feed.repost"));
+        assert!(url.contains("&cursor=1"));
+        assert!(!url.contains("wantedDids"));
     }
 
     #[test]
-    fn jetstream_url_requires_wanted_dids() {
-        assert_eq!(build_jetstream_url(Some(1), &[]), None);
-        let url = build_jetstream_url(Some(1), &["did:plc:a".to_string()]).unwrap();
-        assert!(url.contains("&wantedDids=did:plc:a"));
-        assert!(url.contains("&cursor=1"));
+    fn options_update_requires_wanted_dids() {
+        assert_eq!(build_options_update(&[]), None);
+        let msg = build_options_update(&["did:plc:a".to_string()]).unwrap();
+        let v: JsonValue = serde_json::from_str(&msg).unwrap();
+        assert_eq!(v["type"], "options_update");
+        assert_eq!(v["payload"]["wantedDids"][0], "did:plc:a");
+        assert_eq!(v["payload"]["wantedCollections"][2], "app.bsky.feed.repost");
     }
 }
