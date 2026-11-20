@@ -21,10 +21,10 @@
 # （DB のイメージ、マイグレーション、ビルド設定、.env の扱い等）。そのため「含めるパス」では
 # なく「除くパス」を列挙する。除外は迷ったら入れない。
 #
-# 版の番号（Cargo.toml の [workspace.package] version、Cargo.lock の seiran の crate の版、
-# frontend/package.json と package-lock.json の version）は空にしてから指紋を取る。版上げだけの
-# コミットは直前と同じ指紋になり、直前が通っていれば検査を省ける（版の番号だけの変更は挙動に
-# 影響しない。CLAUDE.md「バージョン運用」）。
+# 版の番号（Cargo.toml の [workspace.package] version と version_suffix、Cargo.lock の seiran の
+# crate の版、frontend/package.json の version と versionSuffix、package-lock.json の version）は
+# 空にしてから指紋を取る。版上げ・接尾辞の変更だけのコミットは直前と同じ指紋になり、直前が
+# 通っていれば検査を省ける（版の番号だけの変更は挙動に影響しない。CLAUDE.md「バージョン運用」）。
 #
 # 手動実行（workflow_dispatch）では記録を見ずに全部走らせる。
 # 環境変数: GH_TOKEN（actions: read）、GITHUB_REPOSITORY、GITHUB_EVENT_NAME
@@ -36,7 +36,7 @@ ci_defs=(.github/workflows/ci.yml .github/scripts/ci-changes.sh)
 normalized() {
     case "$1" in
         Cargo.toml)
-            sed '/^\[workspace.package\]/,/^\[/{s/^version *= *".*"/version = ""/}' "$1" ;;
+            sed '/^\[workspace.package\]/,/^\[/{s/^version *= *".*"/version = ""/;s/^version_suffix *= *".*"/version_suffix = ""/}' "$1" ;;
         Cargo.lock)
             awk '/^name = "seiran-/ { ws = 1 }
                  ws && /^version = / { print "version = \"\""; ws = 0; next }
@@ -45,6 +45,7 @@ normalized() {
             node -e '
                 const p = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8"));
                 delete p.version;
+                delete p.versionSuffix;
                 if (p.packages?.[""]) delete p.packages[""].version;
                 console.log(JSON.stringify(p, null, 2));
             ' "$1" ;;
