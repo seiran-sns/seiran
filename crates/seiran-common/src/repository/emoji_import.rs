@@ -151,8 +151,10 @@ pub async fn start_running(
         "INSERT INTO emoji_import_items (request_id, file_name, shortcode, category, aliases, license)
          SELECT $1, x.file_name, x.shortcode, x.category,
                 ARRAY(SELECT jsonb_array_elements_text(x.aliases)), x.license
-         FROM jsonb_to_recordset($2::jsonb)
-              WITH ORDINALITY AS x(file_name text, shortcode text, category text, aliases jsonb, license text, ord bigint)
+         FROM ROWS FROM (
+                 jsonb_to_recordset($2::jsonb)
+                     AS (file_name text, shortcode text, category text, aliases jsonb, license text)
+              ) WITH ORDINALITY AS x(file_name, shortcode, category, aliases, license, ord)
          ORDER BY x.ord",
     )
     .bind(request_id)

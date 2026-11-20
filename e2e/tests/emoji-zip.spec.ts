@@ -123,6 +123,8 @@ test("Misskey形式ZIPの絵文字インポートはジョブで進み、エク�
     });
     expect(deniedTicket.status()).toBe(403);
   } finally {
+    // 途中で失敗したときに実行中のまま残すと、再試行が EMOJI_IMPORT_RUNNING で開始できない。
+    await request.post("/api/admin/emojis/import/cancel", { headers: auth });
     if (importedId) {
       await request.delete(`/api/admin/emojis/${importedId}`, { headers: auth });
     }
