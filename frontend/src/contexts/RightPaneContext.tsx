@@ -1,10 +1,5 @@
 import { createContext, useContext, useState } from "react";
-import type { NotificationItem } from "../api/client";
-
-interface NotificationsPanelCache {
-  items: NotificationItem[];
-  hasMore: boolean;
-}
+import type { NotificationsPanelCache } from "../components/right/NotificationsPanel";
 
 /**
  * 右ペインのサブタブ選択状態を「セッション内で維持」するためのストア（Doc5 §2.4）。

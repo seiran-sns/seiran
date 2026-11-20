@@ -97,3 +97,30 @@
   font-size: 12px;
   color: var(--text-faint, #8a94a6);
 }
+
+/* まとめた通知（NotificationStack）。カードを同じ格子に重ね、top で 8px ずつずらす。
+   高さは一番高いカード＋ずらした分（padding-bottom、件数から NotificationStack が付ける）。 */
+.stack {
+  display: grid;
+  margin: 12px 12px 0;
+}
+
+.stackCard {
+  grid-area: 1 / 1;
+  position: relative;
+  min-width: 0;
+}
+
+/* 重ねたカードは同じ高さにそろえる（短いカードの下端が隠れないように）。余白は .stack が持つ。 */
+.stackItem {
+  height: 100%;
+  margin: 0;
+  box-sizing: border-box;
+  /* ライトテーマの --card-bg は透明なので、そのままだと裏のカードの文字が透けて混ざる。
+     ページの背景色を下に敷いて不透明にする。 */
+  background: linear-gradient(var(--card-bg), var(--card-bg)), var(--bg);
+}
+
+.stackItem.clickable:hover {
+  background: linear-gradient(var(--card-bg-hover), var(--card-bg-hover)), var(--bg);
+}
