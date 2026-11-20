@@ -149,6 +149,53 @@ test("ブラウザバックで戻ると、上のポストの高さが変わっ�
   await expect.poll(topmost, { timeout: 10_000 }).toEqual(before);
 });
 
+test("通知欄の項目から詳細へ移ってブラウザバックしても、見ていたポストの位置に戻る", async ({
+  page,
+  request,
+}) => {
+  const user = await registerUserViaApi(request, "e2ehomenotif");
+  const reactor = await registerUserViaApi(request, "e2ehomenotifr");
+  let firstId = "";
+  for (let i = 0; i < 25; i++) {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text: `通知経由テスト投稿 ${i} ${Date.now()}` },
+    });
+    expect(res.ok(), `投稿作成失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
+    if (i === 0) firstId = ((await res.json()) as { id: string }).id;
+  }
+  // 通知欄に項目を出す。
+  const react = await request.post(`/api/notes/${firstId}/reactions`, {
+    headers: { Authorization: `Bearer ${reactor.token}` },
+    data: { content: "👍" },
+  });
+  expect(react.ok()).toBeTruthy();
+
+  await seedAuth(page, user.token);
+  await page.goto("/");
+  await page.getByRole("button", { name: "ホーム", exact: true }).click();
+  await expect(page.locator("[data-timeline-id]").nth(20)).toBeAttached({ timeout: 15_000 });
+  await page.evaluate(() => window.scrollTo(0, 1500));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+  const topmost = () =>
+    page.evaluate(() => {
+      const cover = document.querySelector('[class*="feedTabs"]')?.getBoundingClientRect().bottom ?? 0;
+      const el = [...document.querySelectorAll<HTMLElement>("[data-timeline-id]")].find(
+        (e) => e.getBoundingClientRect().bottom > cover,
+      );
+      return { id: el?.dataset.timelineId, top: Math.round(el?.getBoundingClientRect().top ?? 0) };
+    });
+  const before = await topmost();
+
+  // 通知の項目はリンク（a）ではなく li のクリックで移る（AppShell の onBeforeNavigate を通らない）。
+  const item = page.locator("aside li").filter({ hasText: reactor.username }).first();
+  await item.click({ position: { x: 200, y: 10 } });
+  await expect(page).toHaveURL(new RegExp(`/notes/${firstId}$`));
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect.poll(topmost, { timeout: 10_000 }).toEqual(before);
+});
+
 test("タイムラインの選択タブはリロード後も保持される", async ({ page, request }) => {
   const user = await registerUserViaApi(request, "e2ehometab");
   await seedAuth(page, user.token);

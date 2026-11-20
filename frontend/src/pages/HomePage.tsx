@@ -261,6 +261,10 @@ export default function HomePage() {
     const key = feedKey(feed);
     const onScroll = () => {
       if (navigatingAway.current || pendingScrollRestore.current) return;
+      // 離れるとき、DOM が外れてからこのリスナーが外れるまでの間にスクロールイベントが来る
+      // （次の画面の描画で高さが変わる）。一覧が無い状態で読むと「トップ」になり、覚えていた
+      // 位置を上書きする。onBeforeNavigate を通らない移動（通知欄の項目クリック等）で起きる。
+      if (!centerRef.current?.isConnected) return;
       const scroll = captureScroll();
       scrollRef.current = scroll;
       setCache(key, { scroll });
@@ -382,7 +386,7 @@ export default function HomePage() {
     const el = centerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (pendingScrollRestore.current || navigatingAway.current) return;
+      if (pendingScrollRestore.current || navigatingAway.current || !el.isConnected) return;
       const scroll = scrollRef.current;
       if (scroll.kind === "anchor") applyTimelineScroll(el, scroll);
     });
