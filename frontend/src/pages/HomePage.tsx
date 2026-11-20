@@ -157,6 +157,14 @@ export default function HomePage() {
     () => captureTimelineScroll(centerRef.current, feedTabsRef.current?.getBoundingClientRect().bottom ?? 0),
     [],
   );
+  // 位置を合わせた直後の window.scrollY。この値のままのスクロールイベントは自分で動かした
+  // ものなので、ユーザーの位置として読まない（下の onScroll）。
+  const pinnedScrollY = useRef<number | null>(null);
+  const pinScroll = useCallback((scroll: TimelineScroll) => {
+    const applied = applyTimelineScroll(centerRef.current, scroll);
+    pinnedScrollY.current = window.scrollY;
+    return applied;
+  }, []);
 
   // 利用可能なフィードタブの配列（順序定義）
   const availableFeeds = useMemo(
@@ -265,6 +273,14 @@ export default function HomePage() {
       // （次の画面の描画で高さが変わる）。一覧が無い状態で読むと「トップ」になり、覚えていた
       // 位置を上書きする。onBeforeNavigate を通らない移動（通知欄の項目クリック等）で起きる。
       if (!centerRef.current?.isConnected) return;
+      // 自分で位置を合わせたスクロールのイベントは、届くまでの間に画面より上の高さが変わって
+      // いることがある（遅れて描かれる中身等）。そこで読むと、上が伸びた分だけ別のポストを
+      // 「一番上」と覚えてしまうので、読まずに覚えているポストへ合わせ直す。
+      if (pinnedScrollY.current !== null && Math.abs(window.scrollY - pinnedScrollY.current) < 1) {
+        if (scrollRef.current.kind === "anchor") pinScroll(scrollRef.current);
+        return;
+      }
+      pinnedScrollY.current = null;
       const scroll = captureScroll();
       scrollRef.current = scroll;
       setCache(key, { scroll });
@@ -275,7 +291,7 @@ export default function HomePage() {
       window.removeEventListener("scroll", onScroll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFeedKey, setCache, captureScroll]);
+  }, [currentFeedKey, setCache, captureScroll, pinScroll]);
 
   // 復元待ちのスクロール位置（キャッシュヒット時のみセットされ、一覧の描画後に一度だけ使う）。
   const pendingScrollRestore = useRef<TimelineScroll | null>(null);
@@ -349,22 +365,22 @@ export default function HomePage() {
     if (loading || pendingScrollRestore.current === null) return;
     const scroll = pendingScrollRestore.current;
     pendingScrollRestore.current = null;
-    if (!applyTimelineScroll(centerRef.current, scroll)) {
+    if (!pinScroll(scroll)) {
       window.scrollTo(0, 0);
       scrollRef.current = TIMELINE_TOP;
       setAtTop(true);
     }
-  }, [loading, notes]);
+  }, [loading, notes, pinScroll]);
 
   // 一覧が変わったら（ポストの削除・区切りの挿入等）、一番上に見えていたポストを同じ位置へ戻す。
   // そのポストが消えていたら、今見えている位置を覚え直す。
   useLayoutEffect(() => {
     if (pendingScrollRestore.current) return;
     const scroll = scrollRef.current;
-    if (scroll.kind === "anchor" && !applyTimelineScroll(centerRef.current, scroll)) {
+    if (scroll.kind === "anchor" && !pinScroll(scroll)) {
       scrollRef.current = captureScroll();
     }
-  }, [notes, gapBeforeIds, captureScroll]);
+  }, [notes, gapBeforeIds, captureScroll, pinScroll]);
 
   // ブラウザバックで戻ったとき、ブラウザ標準のスクロール復元が離れたときの画素位置を再現して、
   // 上の位置合わせを上書きする（画面より上の高さが前回と違うとポストがずれる）。この画面の
@@ -388,11 +404,11 @@ export default function HomePage() {
     const observer = new ResizeObserver(() => {
       if (pendingScrollRestore.current || navigatingAway.current || !el.isConnected) return;
       const scroll = scrollRef.current;
-      if (scroll.kind === "anchor") applyTimelineScroll(el, scroll);
+      if (scroll.kind === "anchor") pinScroll(scroll);
     });
     observer.observe(el);
     return () => observer.disconnect();
-  }, []);
+  }, [pinScroll]);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 

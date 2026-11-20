@@ -484,6 +484,7 @@ export default function NotificationsPanel({
       <Tag
         key={n.id}
         className={className}
+        data-notification-id={n.id}
         onClick={
           clickNoteId
             ? () => {

@@ -74,7 +74,10 @@ test("リアクション通知の2行目に、対象ポストの本文（CW が�
 
   await seedAuth(page, author.token);
   await page.goto("/notifications");
-  const items = page.locator("main li").filter({ hasText: `${reactor.username} がリアクションしました` });
+  // 同じ人からの2件は1つに重ねて出るので、li ではなく通知カード1枚ずつを数える。
+  const items = page
+    .locator("main [data-notification-id]")
+    .filter({ hasText: `${reactor.username} がリアクションしました` });
   await expect(items).toHaveCount(2, { timeout: 15_000 });
   // 改行は半角スペースでつなぐ。
   await expect(items.filter({ hasText: `対象本文1行目 ${stamp} 2行目` })).toHaveCount(1);
