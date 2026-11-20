@@ -142,6 +142,18 @@
     "passwordSetPlaceholder": "Set (enter a new value to change it)",
     "passwordUnsetPlaceholder": "Not set",
     "fromAddressLabel": "From address",
+    "smtpTestConnectionButton": "Test connection",
+    "smtpTestRecipientLabel": "Test email recipient",
+    "smtpSendTestEmailButton": "Send test email",
+    "smtpTesting": "Testing...",
+    "smtpConnectionOk": "Connected and authenticated to the SMTP server",
+    "smtpTestEmailSent": "Test email sent. Check the inbox (or the spam folder if it does not arrive)",
+    "smtpTestHint": "Tests use the values currently entered, before saving. If the password field is empty, the saved password is used.",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "A required field is empty",
+      "SMTP_INVALID_ADDRESS": "Invalid email address",
+      "SMTP_FAILED": "Communication with the SMTP server failed"
+    },
     "requireVerifyLabel": "Require email verification on sign-up",
     "requireVerifyHint": "SMTP must be configured before requiring email verification.",
     "authRateLimitSectionTitle": "Auth rate limiting",

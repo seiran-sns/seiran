@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "설정(변경하려면 새 값을 입력하세요.)",
     "passwordUnsetPlaceholder": "설정되지 않음",
     "fromAddressLabel": "발신지 주소",
+    "smtpTestConnectionButton": "연결 확인",
+    "smtpTestRecipientLabel": "테스트 메일 수신 주소",
+    "smtpSendTestEmailButton": "테스트 메일 보내기",
+    "smtpTesting": "확인 중...",
+    "smtpConnectionOk": "SMTP 서버에 연결하고 인증했습니다",
+    "smtpTestEmailSent": "테스트 메일을 보냈습니다. 받은편지함(도착하지 않으면 스팸함)을 확인하세요",
+    "smtpTestHint": "저장 전 입력한 값으로 확인합니다. 비밀번호 칸이 비어 있으면 저장된 비밀번호를 사용합니다.",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "입력되지 않은 항목이 있습니다",
+      "SMTP_INVALID_ADDRESS": "이메일 주소 형식이 올바르지 않습니다",
+      "SMTP_FAILED": "SMTP 서버와의 통신에 실패했습니다"
+    },
     "requireVerifyLabel": "가입 시 이메일 확인 필요",
     "requireVerifyHint": "이메일 확인을 요구하기 전에 SMTP를 구성해야 합니다.",
     "authRateLimitSectionTitle": "인증 속도 제한",

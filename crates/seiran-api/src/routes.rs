@@ -104,6 +104,14 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
                 .patch(handlers::admin::site_settings::update_site_settings),
         )
         .route(
+            "/api/admin/site-settings/smtp-test",
+            post(handlers::admin::site_settings::test_smtp_connection),
+        )
+        .route(
+            "/api/admin/site-settings/smtp-test-email",
+            post(handlers::admin::site_settings::send_smtp_test_email),
+        )
+        .route(
             "/api/admin/relays",
             get(handlers::admin::relays::list_relays).post(handlers::admin::relays::create_relay),
         )

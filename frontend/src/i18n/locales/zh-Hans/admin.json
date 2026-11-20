@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "已设置（输入新值进行更改）",
     "passwordUnsetPlaceholder": "未设置",
     "fromAddressLabel": "发件人地址",
+    "smtpTestConnectionButton": "测试连接",
+    "smtpTestRecipientLabel": "测试邮件收件地址",
+    "smtpSendTestEmailButton": "发送测试邮件",
+    "smtpTesting": "测试中...",
+    "smtpConnectionOk": "已成功连接并通过 SMTP 服务器认证",
+    "smtpTestEmailSent": "已发送测试邮件。请检查收件箱（如未收到请检查垃圾邮件文件夹）",
+    "smtpTestHint": "使用保存前当前输入的值进行测试。密码栏为空时使用已保存的密码。",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "有未填写的项目",
+      "SMTP_INVALID_ADDRESS": "邮箱地址格式不正确",
+      "SMTP_FAILED": "与 SMTP 服务器通信失败"
+    },
     "requireVerifyLabel": "注册时需要验证电子邮件",
     "requireVerifyHint": "在要求电子邮件验证之前必须配置 SMTP。",
     "authRateLimitSectionTitle": "认证速率限制",

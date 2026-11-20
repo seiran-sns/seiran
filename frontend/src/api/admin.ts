@@ -149,6 +149,14 @@ export const admin = {
   ) {
     return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
   },
+  /** 入力中の SMTP 設定で接続・認証まで試す（省略・空のパスワードは保存済みの値を使う）。 */
+  testSmtpConnection(body: SmtpTestRequest) {
+    return request<SmtpTestResult>("POST", "/admin/site-settings/smtp-test", body);
+  },
+  /** 入力中の SMTP 設定で `to` へテストメールを送る。 */
+  sendSmtpTestEmail(body: SmtpTestRequest & { to: string }) {
+    return request<SmtpTestResult>("POST", "/admin/site-settings/smtp-test-email", body);
+  },
 
   getDeniedHosts() {
     return request<DeniedHostsResponse>("GET", "/admin/denied-hosts");
@@ -257,3 +265,18 @@ export const admin = {
     return request<void>("DELETE", `/admin/relays/${encodeURIComponent(id)}`);
   },
 };
+
+export interface SmtpTestRequest {
+  smtp_host?: string;
+  smtp_port?: string;
+  smtp_username?: string;
+  smtp_password?: string;
+  smtp_from?: string;
+}
+
+/** 失敗も 200 で返る。`code` は画面で翻訳する種別、`detail` は SMTP サーバー・lettre のエラー文。 */
+export interface SmtpTestResult {
+  ok: boolean;
+  code?: "SMTP_NOT_CONFIGURED" | "SMTP_INVALID_ADDRESS" | "SMTP_FAILED";
+  detail?: string;
+}

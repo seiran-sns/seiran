@@ -7,6 +7,7 @@ use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::collections::HashMap;
+use std::time::Duration;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MailError {
@@ -18,7 +19,13 @@ pub enum MailError {
     Send(#[from] lettre::transport::smtp::Error),
     #[error("アドレス解析失敗: {0}")]
     Address(#[from] lettre::address::AddressError),
+    #[error("SMTP サーバーが NOOP に応答しません")]
+    NotConnected,
 }
+
+/// 管理画面の接続確認・テスト送信の待ち時間。lettre の既定（60秒）のままだと、
+/// ホスト名やポートを間違えたときに結果が出るまで管理画面が1分待たされる。
+const TEST_TIMEOUT: Duration = Duration::from_secs(15);
 
 /// SMTPが設定済みかどうかを判定する（`build_transport`と同じ判定基準）。
 /// ATPセッション2FA（`com.atproto.server.createSession`のauthFactorToken）は、
@@ -32,6 +39,14 @@ pub fn is_smtp_configured(settings: &HashMap<String, String>) -> bool {
 /// `smtp_host` が存在しない場合は `MailError::Config` を返す。
 fn build_transport(
     settings: &HashMap<String, String>,
+) -> Result<(AsyncSmtpTransport<Tokio1Executor>, String), MailError> {
+    build_transport_with_timeout(settings, None)
+}
+
+/// `timeout` が `None` なら lettre の既定の待ち時間を使う。
+fn build_transport_with_timeout(
+    settings: &HashMap<String, String>,
+    timeout: Option<Duration>,
 ) -> Result<(AsyncSmtpTransport<Tokio1Executor>, String), MailError> {
     let host = settings
         .get("smtp_host")
@@ -64,18 +79,47 @@ fn build_transport(
 
     let creds = Credentials::new(username, password);
 
-    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
-        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
-        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?
-            .port(port)
-            .credentials(creds)
-            .build(),
+    let builder = match tls_mode.as_str() {
+        "tls" => AsyncSmtpTransport::<Tokio1Executor>::relay(&host)?,
+        _ => AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host)?,
+    }
+    .port(port)
+    .credentials(creds);
+    let builder = match timeout {
+        Some(t) => builder.timeout(Some(t)),
+        None => builder,
     };
+    let transport = builder.build();
 
     Ok((transport, from))
+}
+
+/// 管理画面の接続確認。接続・STARTTLS（または TLS）・認証まで行い、NOOP の応答を見る。
+pub async fn test_smtp_connection(settings: &HashMap<String, String>) -> Result<(), MailError> {
+    let (transport, _) = build_transport_with_timeout(settings, Some(TEST_TIMEOUT))?;
+    if transport.test_connection().await? {
+        Ok(())
+    } else {
+        Err(MailError::NotConnected)
+    }
+}
+
+/// 管理画面のテスト送信。設定どおりの差出人から `to` へ短い本文を送る。
+pub async fn send_test_email(
+    settings: &HashMap<String, String>,
+    to: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport_with_timeout(settings, Some(TEST_TIMEOUT))?;
+
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.trim().parse()?)
+        .subject("seiran — テストメール")
+        .header(ContentType::TEXT_PLAIN)
+        .body("seiran の管理画面から送信したテストメールです。このメールが届いていれば、SMTP 設定でメールを送信できます。".to_string())?;
+
+    transport.send(email).await?;
+    Ok(())
 }
 
 pub async fn send_verification_email(

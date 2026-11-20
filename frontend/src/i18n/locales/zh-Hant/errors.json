@@ -71,6 +71,7 @@
   "SERVER_UNAVAILABLE": "伺服器沒有回應。請稍候後重試",
   "SHORTCODE_TAKEN": "此簡碼已被使用",
   "SMTP_NOT_CONFIGURED": "尚未設定電子郵件發送功能。請聯絡管理員",
+  "SMTP_TEST_RECIPIENT_REQUIRED": "請輸入測試郵件的收件地址",
   "SOURCE_AUTH_FAILED": "登入來源帳號失敗，請檢查代號與密碼",
   "SOURCE_EMAIL_REQUIRED": "無法從來源帳號取得電子郵件地址，請輸入您自己的電子郵件地址",
   "SOURCE_HANDLE_UNRESOLVABLE": "無法解析來源代號",
