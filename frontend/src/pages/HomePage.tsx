@@ -362,6 +362,18 @@ export default function HomePage() {
     }
   }, [notes, gapBeforeIds, captureScroll]);
 
+  // ブラウザバックで戻ったとき、ブラウザ標準のスクロール復元が離れたときの画素位置を再現して、
+  // 上の位置合わせを上書きする（画面より上の高さが前回と違うとポストがずれる）。この画面の
+  // 履歴項目だけ標準の復元を止める（scrollRestoration は表示中の履歴項目に対して効くので、
+  // 離れた後のクリーンアップで次の画面の項目を auto に戻す）。
+  useEffect(() => {
+    if (!("scrollRestoration" in history)) return;
+    history.scrollRestoration = "manual";
+    return () => {
+      history.scrollRestoration = "auto";
+    };
+  }, []);
+
   // 一覧の外での高さの変化（リアクションが付いた・画像が読み込まれた・投稿欄の開閉等）にも
   // 合わせる。ResizeObserver は描画の前に呼ばれるので、ずれた瞬間は画面に出ない。
   // ブラウザ標準のスクロールアンカー（overflow-anchor）は二重に補正するので、

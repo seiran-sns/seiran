@@ -98,6 +98,57 @@ test("トップにいない間の新しいポストは一覧に入れず件数�
   await expect(pill).toHaveCount(0);
 });
 
+test("ブラウザバックで戻ると、上のポストの高さが変わっていても同じポストが同じ位置に戻る", async ({
+  page,
+  request,
+}) => {
+  const user = await registerUserViaApi(request, "e2ehomeback");
+  for (let i = 0; i < 25; i++) {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text: `戻る位置テスト投稿 ${i} ${Date.now()}` },
+    });
+    expect(res.ok(), `投稿作成失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
+  }
+
+  await seedAuth(page, user.token);
+  await page.goto("/");
+  await page.getByRole("button", { name: "ホーム", exact: true }).click();
+  await expect(page.locator("[data-timeline-id]").nth(20)).toBeAttached({ timeout: 15_000 });
+  await page.evaluate(() => window.scrollTo(0, 1500));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(1000);
+
+  // 一番上に見えているポストと、その上端の位置。
+  const topmost = () =>
+    page.evaluate(() => {
+      const cover = document.querySelector('[class*="feedTabs"]')?.getBoundingClientRect().bottom ?? 0;
+      const el = [...document.querySelectorAll<HTMLElement>("[data-timeline-id]")].find(
+        (e) => e.getBoundingClientRect().bottom > cover,
+      );
+      return { id: el?.dataset.timelineId, top: Math.round(el?.getBoundingClientRect().top ?? 0) };
+    });
+  // 画面内に上端があるポストの詳細へ（クリックでスクロールさせない）。
+  const targetId = await page.evaluate(() => {
+    const el = [...document.querySelectorAll<HTMLElement>("[data-timeline-id]")].find((e) => {
+      const r = e.getBoundingClientRect();
+      return r.top > 120 && r.top < window.innerHeight - 200;
+    });
+    return el?.dataset.timelineId;
+  });
+  const before = await topmost();
+  await page.locator(`[data-timeline-id="${targetId}"] a[href^="/notes/"]`).first().click();
+  await expect(page).toHaveURL(/\/notes\//);
+
+  // 戻ったときに先頭のポストだけ高くなるようにする（画像の読み込み等で上の高さが変わった状況）。
+  // ブラウザ標準のスクロール復元は画素位置を再現するので、これが効いているとずれる。
+  await page.addStyleTag({
+    content: "div:has(> [data-timeline-id]):first-child > [data-timeline-id] { padding-top: 600px !important; }",
+  });
+  await page.goBack();
+  await expect(page).toHaveURL(/\/$/);
+  await expect.poll(topmost, { timeout: 10_000 }).toEqual(before);
+});
+
 test("タイムラインの選択タブはリロード後も保持される", async ({ page, request }) => {
   const user = await registerUserViaApi(request, "e2ehometab");
   await seedAuth(page, user.token);
