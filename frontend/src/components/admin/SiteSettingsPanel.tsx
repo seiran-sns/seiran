@@ -27,6 +27,7 @@ export default function SiteSettingsPanel() {
   const [siteIconMediaFileId, setSiteIconMediaFileId] = useState("");
   const [mediaProxyUrl, setMediaProxyUrl] = useState("");
   const [uploadingIcon, setUploadingIcon] = useState(false);
+  const [iconError, setIconError] = useState("");
   const iconRef = useRef<HTMLInputElement>(null);
 
   // ログイン画面デザイン（#243）
@@ -36,6 +37,7 @@ export default function SiteSettingsPanel() {
   const [loginBgType, setLoginBgType] = useState("");
   const [loginBgMediaFileId, setLoginBgMediaFileId] = useState("");
   const [uploadingBg, setUploadingBg] = useState(false);
+  const [bgError, setBgError] = useState("");
   const bgRef = useRef<HTMLInputElement>(null);
 
   // 認証系レート制限（#223）
@@ -55,6 +57,11 @@ export default function SiteSettingsPanel() {
   const [accountCreationIpMax, setAccountCreationIpMax] = useState("");
   const [maxUserAccounts, setMaxUserAccounts] = useState("");
   const [registrationClosed, setRegistrationClosed] = useState(false);
+
+  // 有効なストレージプロバイダーが無いとアップロードは必ず失敗する（503
+  // STORAGE_NOT_CONFIGURED）ので、アイコン・背景の選択ボタンを押せなくして理由を示す。
+  // 取得できなかったときは押せるままにし、失敗はアップロード時のエラー表示に任せる。
+  const [storageConfigured, setStorageConfigured] = useState(true);
 
   // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン
   const [oembedAllowedDomains, setOembedAllowedDomains] = useState("");
@@ -98,6 +105,10 @@ export default function SiteSettingsPanel() {
       })
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
+    api.admin
+      .listStorageProviders()
+      .then((providers) => setStorageConfigured(providers.some((p) => p.is_active)))
+      .catch(() => {});
   }, []);
 
   async function onIcon(e: ChangeEvent<HTMLInputElement>) {
@@ -105,14 +116,14 @@ export default function SiteSettingsPanel() {
     if (!file) return;
     e.target.value = "";
     setUploadingIcon(true);
-    setError("");
+    setIconError("");
     try {
       const f = await api.media.upload(file, "avatar");
       setSiteIconUrl(f.url);
       setSiteIconSha256(f.sha256);
       setSiteIconMediaFileId(f.id);
     } catch (err) {
-      setError(getErrorMessage(err));
+      setIconError(getErrorMessage(err));
     } finally {
       setUploadingIcon(false);
     }
@@ -123,7 +134,7 @@ export default function SiteSettingsPanel() {
     if (!file) return;
     e.target.value = "";
     setUploadingBg(true);
-    setError("");
+    setBgError("");
     try {
       // ログイン画面背景はどの投稿にも属さないので、Bsky動画配信パイプラインへは提出しない。
       const f = await api.media.upload(file, "login_background", false);
@@ -131,7 +142,7 @@ export default function SiteSettingsPanel() {
       setLoginBgType(f.mimeType.startsWith("video/") ? "video" : "image");
       setLoginBgMediaFileId(f.id);
     } catch (err) {
-      setError(getErrorMessage(err));
+      setBgError(getErrorMessage(err));
     } finally {
       setUploadingBg(false);
     }
@@ -237,7 +248,13 @@ export default function SiteSettingsPanel() {
               {loginBgUrl && loginBgType !== "video" && (
                 <img src={loginBgUrl} alt="" style={{ width: 80, height: 45, borderRadius: 8, objectFit: "cover" }} />
               )}
-              <button type="button" className={styles.btnGhost} onClick={() => bgRef.current?.click()} disabled={uploadingBg}>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                onClick={() => bgRef.current?.click()}
+                disabled={uploadingBg || !storageConfigured}
+                title={storageConfigured ? undefined : t("admin:siteSettingsPanel.storageNotConfigured")}
+              >
                 {uploadingBg
                   ? t("admin:siteSettingsPanel.uploading")
                   : loginBgUrl
@@ -259,6 +276,7 @@ export default function SiteSettingsPanel() {
               )}
             </span>
           </label>
+          {bgError && <p className={styles.error}>{bgError}</p>}
           <p className={styles.hint}>{t("admin:siteSettingsPanel.loginBackgroundHint")}</p>
           <label className={styles.label} style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
             {t("admin:siteSettingsPanel.siteColorLabel")}
@@ -270,7 +288,13 @@ export default function SiteSettingsPanel() {
             <span className={styles.actions} style={{ marginTop: 4 }}>
               <input ref={iconRef} type="file" accept="image/*" style={{ display: "none" }} onChange={onIcon} />
               {siteIconUrl && <img src={siteIconUrl} alt="" style={{ width: 40, height: 40, borderRadius: 8 }} />}
-              <button type="button" className={styles.btnGhost} onClick={() => iconRef.current?.click()} disabled={uploadingIcon}>
+              <button
+                type="button"
+                className={styles.btnGhost}
+                onClick={() => iconRef.current?.click()}
+                disabled={uploadingIcon || !storageConfigured}
+                title={storageConfigured ? undefined : t("admin:siteSettingsPanel.storageNotConfigured")}
+              >
                 {uploadingIcon
                   ? t("admin:siteSettingsPanel.uploading")
                   : siteIconUrl
@@ -292,6 +316,7 @@ export default function SiteSettingsPanel() {
               )}
             </span>
           </label>
+          {iconError && <p className={styles.error}>{iconError}</p>}
         </div>
 
         <div style={{ fontWeight: 700, fontSize: "0.9rem", margin: "4px 0 8px" }}>{t("admin:siteSettingsPanel.mediaProxyTitle")}</div>

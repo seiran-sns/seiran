@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb（留空使用預設顏色）",
     "siteIconLabel": "網站圖示",
     "uploading": "正在上傳...",
+    "storageNotConfigured": "未設定儲存空間，無法上傳。請在儲存設定中新增",
     "changeIconButton": "更換圖示",
     "selectIconButton": "選擇圖示",
     "mediaProxyTitle": "媒體代理",

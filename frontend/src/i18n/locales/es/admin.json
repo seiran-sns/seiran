@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb (dejar en blanco para el color predeterminado)",
     "siteIconLabel": "Icono del sitio",
     "uploading": "Subiendo...",
+    "storageNotConfigured": "No se puede subir porque no hay ningún almacenamiento configurado. Añade uno en los ajustes de almacenamiento",
     "changeIconButton": "Cambiar icono",
     "selectIconButton": "Seleccionar icono",
     "mediaProxyTitle": "proxy de medios",

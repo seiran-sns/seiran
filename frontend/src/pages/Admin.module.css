@@ -148,9 +148,14 @@
   transition: border-color 0.15s, color 0.15s;
 }
 
-.btnGhost:hover {
+.btnGhost:hover:not(:disabled) {
   border-color: var(--accent-strong);
   color: var(--text);
+}
+
+.btnGhost:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .btnDanger {

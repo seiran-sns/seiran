@@ -78,6 +78,7 @@
   "SOURCE_PDS_UNREACHABLE": "無法連線至來源伺服器",
   "STORAGE_PROVIDER_NOT_FOUND": "找不到該儲存供應商",
   "STORAGE_QUOTA_EXCEEDED": "已超出儲存容量",
+  "STORAGE_NOT_CONFIGURED": "未設定儲存空間，無法上傳檔案。請在管理介面的儲存設定中新增",
   "TEXT_TOO_LONG": "文字超出長度限制（展開@使用者名稱後可能會發生這種情況）",
   "TOO_MANY_LINK_CARD_URLS": "URL連結卡最多10個",
   "TOS_AGREEMENT_REQUIRED": "必須同意服務條款",

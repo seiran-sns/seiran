@@ -109,6 +109,7 @@
     "siteColorPlaceholder": "#2563eb（空欄で既定色）",
     "siteIconLabel": "サイトアイコン",
     "uploading": "アップロード中...",
+    "storageNotConfigured": "ストレージが設定されていないため登録できません。ストレージ設定から登録してください",
     "changeIconButton": "アイコンを変更",
     "selectIconButton": "アイコンを選択",
     "mediaProxyTitle": "メディアプロキシ",

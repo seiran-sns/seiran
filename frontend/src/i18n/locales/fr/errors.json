@@ -78,6 +78,7 @@
   "SOURCE_PDS_UNREACHABLE": "Impossible de se connecter au serveur source",
   "STORAGE_PROVIDER_NOT_FOUND": "Fournisseur de stockage introuvable",
   "STORAGE_QUOTA_EXCEEDED": "La capacité de stockage a été dépassée",
+  "STORAGE_NOT_CONFIGURED": "Impossible de téléverser des fichiers, car aucun stockage n’est configuré. Ajoutez-en un dans les paramètres de stockage de l’administration",
   "TEXT_TOO_LONG": "Le texte dépasse la limite de longueur (cela peut se produire après avoir développé @usernames)",
   "TOO_MANY_LINK_CARD_URLS": "Les cartes de lien URL sont limitées à 10.",
   "TOS_AGREEMENT_REQUIRED": "Vous devez accepter les conditions d'utilisation",

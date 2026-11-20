@@ -775,7 +775,7 @@ pub(crate) fn default_file_name(id: i64, mime_type: &str) -> String {
 pub(crate) fn map_selector_error(e: SelectorError) -> ApiError {
     match e {
         SelectorError::NoAvailableProvider => {
-            ApiError::ServiceUnavailable("ストレージプロバイダーが設定されていません")
+            ApiError::ServiceUnavailable("STORAGE_NOT_CONFIGURED")
         }
         SelectorError::QuotaExceeded => ApiError::InsufficientStorage,
         SelectorError::Db(db_e) => ApiError::Internal(db_e.to_string()),

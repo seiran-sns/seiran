@@ -78,6 +78,7 @@
   "SOURCE_PDS_UNREACHABLE": "No se pudo conectar con el servidor de origen",
   "STORAGE_PROVIDER_NOT_FOUND": "Proveedor de almacenamiento no encontrado",
   "STORAGE_QUOTA_EXCEEDED": "Se ha excedido la capacidad de almacenamiento",
+  "STORAGE_NOT_CONFIGURED": "No se pueden subir archivos porque no hay ningún almacenamiento configurado. Añade uno en los ajustes de almacenamiento de la administración",
   "TEXT_TOO_LONG": "El texto excede el límite de longitud (esto puede suceder después de expandir @usernames)",
   "TOO_MANY_LINK_CARD_URLS": "Las tarjetas de enlace URL están limitadas a 10.",
   "TOS_AGREEMENT_REQUIRED": "Debes aceptar los términos del servicio",
