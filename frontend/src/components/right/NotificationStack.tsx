@@ -24,7 +24,8 @@ function useNoHover(): boolean {
  *
  * 前面に出すカード: マウス環境はマウスが乗っているカード、タッチ環境は画面の上から
  * `TOUCH_FOCUS_LINE` の線にかかっているカード（まとまりの高さを件数で等分し、線の位置に
- * 当たるカード）。どちらも無ければ一番新しいカード。
+ * 当たるカード）で、まとまり全体が線より上にあれば一番古いカード。どちらでもなければ
+ * 一番新しいカード。
  *
  * 上下関係は前面のカードに近いほど上にする（1〜5 で 3 が前面なら 3 > 2 = 4 > 1 = 5）。前面より
  * 上のカードは上端の帯、下のカードは下端の帯が見えるので、全部のカードの帯が見える。
@@ -54,8 +55,14 @@ export default function NotificationStack({
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const line = window.innerHeight * TOUCH_FOCUS_LINE;
-      if (line < rect.top || line >= rect.bottom || rect.height <= 0) {
+      if (line < rect.top || rect.height <= 0) {
         setTouchFocused(null);
+        return;
+      }
+      // 線より上へ通り過ぎたまとまりは一番古いカードを前面にする。線を下から上へ通る間に
+      // 新しい順から古い順へ前面が移っていくので、通り過ぎた後もその続きの状態にしておく。
+      if (line >= rect.bottom) {
+        setTouchFocused(count - 1);
         return;
       }
       setTouchFocused(Math.min(count - 1, Math.floor(((line - rect.top) / rect.height) * count)));
