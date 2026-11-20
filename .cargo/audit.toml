@@ -4,12 +4,4 @@
 # 脆弱性はここに無いものだけがCIを落とすため、監視自体は機能する。無視した項目は
 # 定期的に見直すこと。
 [advisories]
-ignore = [
-    # libsqlite3-sys: 同梱の C SQLite の脆弱性（修正版は0.39.0以上）。sqlx が
-    # SQLite対応（sqlx-sqlite）を任意依存として Cargo.lock に載せるため検出されるが、
-    # seiran は postgres 機能しか有効にしておらず、どのターゲットでもビルドに含まれない
-    # （`cargo tree -i libsqlite3-sys --target all` が空）。sqlx 0.9.0 の sqlx-sqlite は
-    # libsqlite3-sys を `<0.38.0` に制限しているため修正版を選べない。上流の main では
-    # `<0.40.0` に緩和済みなので、それを含む sqlx が出たら更新してこの行を消す。
-    "RUSTSEC-2026-0459",
-]
+ignore = []
