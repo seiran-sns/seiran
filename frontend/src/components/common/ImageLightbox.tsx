@@ -202,16 +202,22 @@ export default function ImageLightbox({
     }
   }, [src]);
 
+  // リスナーは付けっぱなしにし、最新の onClose は ref から呼ぶ。onClose が変わるたびに付け直すと、
+  // popstate の配信中に React Router が同期的に描き直して親が新しい onClose を渡した場合
+  // （ポスト詳細・プロフィール）、配信中に外したリスナーも付けたリスナーもそのイベントでは呼ばれず、
+  // 閉じないまま残る。その後のクリックごとに history.back() して前の画面へ戻ってしまう。
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     function onPopState() {
       if (historyPushedRef.current) {
         historyPushedRef.current = false;
-        onClose();
+        onCloseRef.current();
       }
     }
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
-  }, [onClose]);
+  }, []);
 
   /** Escや閉じるボタン等、UI操作からの終了。積んだhistoryエントリを消費させて閉じる。 */
   function requestClose() {
