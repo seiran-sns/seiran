@@ -12,6 +12,8 @@ pub enum S3Error {
     Put(String),
     #[error("削除失敗: {0}")]
     Delete(String),
+    #[error("取得失敗: {0}")]
+    Get(String),
 }
 
 pub struct S3StorageClient {
@@ -61,6 +63,25 @@ impl S3StorageClient {
             .map_err(|e| S3Error::Put(e.to_string()))?;
 
         Ok(format!("{}/{}", self.public_url, key))
+    }
+
+    /// オブジェクトの中身を取得する。公開URL経由ではなく S3 API で読むので、公開URLが
+    /// CDN 越しで届かない構成でも読める。
+    pub async fn get(&self, key: &str) -> Result<Vec<u8>, S3Error> {
+        let out = self
+            .client
+            .get_object()
+            .bucket(&self.bucket)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| S3Error::Get(e.to_string()))?;
+        let body = out
+            .body
+            .collect()
+            .await
+            .map_err(|e| S3Error::Get(e.to_string()))?;
+        Ok(body.into_bytes().to_vec())
     }
 
     /// オブジェクトを削除する。オブジェクトが存在しない場合もエラーにしない。

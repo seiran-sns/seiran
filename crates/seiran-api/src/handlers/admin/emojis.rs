@@ -70,10 +70,7 @@ pub struct UpdateEmojiRequest {
 /// shortcode を検証する。`custom_emojis.shortcode` は `VARCHAR(100)` のため、文字種チェックに
 /// 加えて長さも検証する（超過分は DB 側の "value too long" エラーとなり 500 として露出してしまう）。
 pub(crate) fn validate_shortcode(shortcode: &str) -> Result<(), ApiError> {
-    if shortcode.is_empty()
-        || shortcode.chars().count() > 100
-        || !shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
-    {
+    if !seiran_common::repository::is_valid_emoji_shortcode(shortcode) {
         return Err(ApiError::BadRequest("INVALID_SHORTCODE".to_owned()));
     }
     Ok(())

@@ -38,7 +38,6 @@
   "INVALID_USER_ID": "Invalid user",
   "INVALID_VISIBILITY": "Invalid visibility setting",
   "IP_BLOCKED": "Your network is temporarily blocked due to repeated failed attempts. Please try again later.",
-  "JOB_NOT_FOUND": "Job not found",
   "LIST_LIMIT_EXCEEDED": "You have reached the maximum number of lists",
   "LIST_MEMBER_LIMIT_EXCEEDED": "You have reached the maximum number of members for this list",
   "LIST_NOT_FOUND": "List not found",
@@ -96,5 +95,8 @@
   "BIO_TOO_LONG": "The bio is too long (max 256 characters)",
   "INTERACTION_RESTRICTED": "Your account is restricted, so you can only reply to, quote, mention, or react to your followers.",
   "REPOST_COOLDOWN": "You can't repost the same post again so soon. Please wait a moment and try again",
-  "REACTION_COOLDOWN": "You can't add the same reaction again so soon. Please wait a moment and try again"
+  "REACTION_COOLDOWN": "You can't add the same reaction again so soon. Please wait a moment and try again",
+  "EMOJI_IMPORT_RUNNING": "An emoji import is already running",
+  "EMOJI_IMPORT_NOT_RUNNING": "No emoji import is running",
+  "ZIP_FILE_REQUIRED": "No ZIP file was included"
 }

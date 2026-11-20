@@ -26,8 +26,11 @@ x-seiran-backend: &seiran-backend
   environment:
     DB_HOST: db
     REDIS_URL: redis://redis:6379
+    SEIRAN_WORK_DIR: /app/work
   volumes:
     - config-data:/app/config
+    # api が受け取ったファイル（絵文字インポートのZIP等）を worker が読む共有作業ディレクトリ
+    - work-data:/app/work
   depends_on:
     db:
       condition: service_healthy
@@ -176,4 +179,5 @@ networks:
 volumes:
   db-data:
   config-data: # secrets.toml の永続化（全バックエンドサービスで共有）
+  work-data: # 共有作業ディレクトリ（SEIRAN_WORK_DIR、全バックエンドサービスで共有）
   redis-data: # ジョブキューの永続化（AOF等はredis:7-alpineのデフォルト設定に従う）

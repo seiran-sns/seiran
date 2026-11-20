@@ -148,11 +148,16 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
         .route(
             "/api/admin/emojis/import",
             post(handlers::admin::emoji_import::start_import)
-                .layer(DefaultBodyLimit::max(200 * 1024 * 1024)),
+                .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+                .merge(get(handlers::admin::emoji_import::get_import_status)),
         )
         .route(
-            "/api/admin/emojis/import/:job_id",
-            get(handlers::admin::emoji_import::get_import_status),
+            "/api/admin/emojis/import/cancel",
+            post(handlers::admin::emoji_import::cancel_import),
+        )
+        .route(
+            "/api/admin/emojis/export/ticket",
+            post(handlers::admin::emoji_export::issue_ticket),
         )
         .route(
             "/api/admin/emojis/remote",
@@ -210,10 +215,18 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             middleware::report_moderator_only,
         ));
 
+    // 絵文字エクスポートのダウンロード本体。ブラウザ標準のダウンロードで開くため Bearer
+    // トークンを載せられず、URL のチケットで認証する（ハンドラ内で権限も確かめる）。
+    let emoji_export_router = Router::new().route(
+        "/api/admin/emojis/export",
+        get(handlers::admin::emoji_export::export),
+    );
+
     Router::new()
         .merge(admin_router)
         .merge(emoji_admin_router)
         .merge(report_moderator_router)
+        .merge(emoji_export_router)
 }
 
 /// ヘルスチェック・favicon・PWA manifest・画像配信・メディアプロキシ・初回セットアップ・通報・ドライブ。

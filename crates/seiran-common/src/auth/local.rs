@@ -46,12 +46,14 @@ struct LocalClaims {
 /// （`jti`必須 vs `purpose`必須）、`extract_auth`側の`verify_token`には
 /// デコードが通らず、通常のAPI認証には使えない。
 #[derive(Debug, Serialize, Deserialize)]
-struct PendingTotpClaims {
+struct PurposeClaims {
     sub: String,
     exp: usize,
-    /// 固定文字列 "totp_pending"。他の用途のトークンと取り違えないための保険。
+    /// 用途（"totp_pending" 等）。他の用途のトークンと取り違えないための保険。
     purpose: String,
 }
+
+const TOTP_PENDING_PURPOSE: &str = "totp_pending";
 
 /// AT Protocol セッション（`com.atproto.server.createSession`等）用JWT。
 /// `LocalClaims`（`sub: "local|{user_id}"`）とは `sub` の形式が異なる（`sub` はDIDそのもの）
@@ -231,17 +233,23 @@ impl LocalAuthProvider {
         })
     }
 
-    /// TOTP（#65）: パスワード検証成功後、TOTPコード検証待ちの間だけ有効な
-    /// 短命トークン（5分）を発行する。
-    pub fn generate_pending_totp_token(&self, user_id: i64) -> Result<String, AuthError> {
+    /// 用途を限った短命トークンを発行する（`purpose` が違うトークンとして検証すると拒否される）。
+    /// ログイン用の `LocalClaims` は `email` を必須にしているので、このトークンを
+    /// ログイントークンとして使うこともできない。
+    pub fn generate_purpose_token(
+        &self,
+        user_id: i64,
+        purpose: &str,
+        ttl: chrono::Duration,
+    ) -> Result<String, AuthError> {
         let exp = chrono::Utc::now()
-            .checked_add_signed(chrono::Duration::minutes(5))
+            .checked_add_signed(ttl)
             .unwrap()
             .timestamp() as usize;
-        let claims = PendingTotpClaims {
+        let claims = PurposeClaims {
             sub: format!("local|{}", user_id),
             exp,
-            purpose: "totp_pending".to_string(),
+            purpose: purpose.to_string(),
         };
         encode(
             &Header::default(),
@@ -251,15 +259,15 @@ impl LocalAuthProvider {
         .map_err(|e| AuthError::TokenGeneration(e.to_string()))
     }
 
-    /// `generate_pending_totp_token` で発行したトークンを検証し、`user_id` を返す。
-    pub fn verify_pending_totp_token(&self, token: &str) -> Result<i64, AuthError> {
+    /// `generate_purpose_token` で発行したトークンを検証し、`user_id` を返す。
+    pub fn verify_purpose_token(&self, token: &str, purpose: &str) -> Result<i64, AuthError> {
         let key = DecodingKey::from_secret(&self.secret);
         let validation = Validation::default();
 
-        let token_data = decode::<PendingTotpClaims>(token, &key, &validation)
+        let token_data = decode::<PurposeClaims>(token, &key, &validation)
             .map_err(|_| AuthError::InvalidToken)?;
 
-        if token_data.claims.purpose != "totp_pending" {
+        if token_data.claims.purpose != purpose {
             return Err(AuthError::InvalidToken);
         }
 
@@ -269,6 +277,17 @@ impl LocalAuthProvider {
             .strip_prefix("local|")
             .and_then(|s| s.parse().ok())
             .ok_or(AuthError::MalformedToken)
+    }
+
+    /// TOTP（#65）: パスワード検証成功後、TOTPコード検証待ちの間だけ有効な
+    /// 短命トークン（5分）を発行する。
+    pub fn generate_pending_totp_token(&self, user_id: i64) -> Result<String, AuthError> {
+        self.generate_purpose_token(user_id, TOTP_PENDING_PURPOSE, chrono::Duration::minutes(5))
+    }
+
+    /// `generate_pending_totp_token` で発行したトークンを検証し、`user_id` を返す。
+    pub fn verify_pending_totp_token(&self, token: &str) -> Result<i64, AuthError> {
+        self.verify_purpose_token(token, TOTP_PENDING_PURPOSE)
     }
 
     /// `com.atproto.server.createSession`/`refreshSession` 用。accessJwt（2時間）と

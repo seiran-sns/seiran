@@ -83,6 +83,7 @@
 - [x] **Fedi投稿のHTML構造保持（#233）** — `posts.content_html`。`docs/protocols.md` 6節
 - [x] **カスタム絵文字（本文・表示名・bio・CW・リアクション・Misskey互換API）** — `docs/protocols.md`、`docs/ui_spec.md`
 - [x] **リモート絵文字のカタログ化・インポート（#73）** — `docs/ui_spec.md` 2.8節
+- [x] **カスタム絵文字の Misskey 形式 ZIP インポート（非同期ジョブ・進捗表示・中止）/エクスポート** — `docs/architecture.md` 7節、`docs/ui_spec.md`
 - [x] **Unicode絵文字の twemoji 統一表示** — `docs/ui_spec.md`
 - [x] **添付（複数ファイル・Bsky embed選択・ライトボックス）（#227, #64, #153）** — `docs/protocols.md` 3節、`docs/ui_spec.md` 2.2b節
 - [x] **URLカード（OGP・oEmbed・x.com）** — `docs/protocols.md`、`docs/ui_spec.md`

@@ -43,6 +43,7 @@ const backendEnv: Record<string, string> = {
   // E2Eのタイムアウト（15秒）内に検知されないため短縮する。
   BSKY_FOLLOWER_POLL_INTERVAL_SECS: "2",
   SEIRAN_CONFIG_DIR: path.join(e2eDir, ".tmp-config"),
+  SEIRAN_WORK_DIR: path.join(e2eDir, ".tmp-work"),
 };
 
 // 全specが同じE2E DBを共有するが、実際にグローバル状態（site_settings・
@@ -61,6 +62,7 @@ const STORAGE_SERIAL_SPECS = [
   "**/federation-delivery.spec.ts",
   "**/note-redraft.spec.ts",
   "**/image-lightbox.spec.ts",
+  "**/emoji-zip.spec.ts",
 ];
 // - site_settings（rate-limit/admin）・appviewスタブのグローバルsearchRequests
 //   （search）は他specを巻き込んで壊すため、全テスト完了後の排他テールで実行する。

@@ -38,7 +38,6 @@
   "INVALID_USER_ID": "Utilisateur invalide",
   "INVALID_VISIBILITY": "Paramètre de visibilité non valide",
   "IP_BLOCKED": "Votre réseau est temporairement bloqué en raison d'échecs répétés. Veuillez réessayer plus tard.",
-  "JOB_NOT_FOUND": "Emploi introuvable",
   "LIST_LIMIT_EXCEEDED": "Vous avez atteint le nombre maximum de listes",
   "LIST_MEMBER_LIMIT_EXCEEDED": "Vous avez atteint le nombre maximum de membres pour cette liste",
   "LIST_NOT_FOUND": "Liste introuvable",
@@ -96,5 +95,8 @@
   "BIO_TOO_LONG": "La bio est trop longue (256 caractères max.)",
   "INTERACTION_RESTRICTED": "Votre compte est restreint : vous ne pouvez répondre, citer, mentionner ou réagir qu'à vos abonnés.",
   "REPOST_COOLDOWN": "Vous ne pouvez pas republier la même publication aussi vite. Patientez un instant puis réessayez",
-  "REACTION_COOLDOWN": "Vous ne pouvez pas ajouter la même réaction aussi vite. Patientez un instant puis réessayez"
+  "REACTION_COOLDOWN": "Vous ne pouvez pas ajouter la même réaction aussi vite. Patientez un instant puis réessayez",
+  "EMOJI_IMPORT_RUNNING": "Une importation d'émojis est déjà en cours",
+  "EMOJI_IMPORT_NOT_RUNNING": "Aucune importation d'émojis en cours",
+  "ZIP_FILE_REQUIRED": "Aucun fichier ZIP fourni"
 }

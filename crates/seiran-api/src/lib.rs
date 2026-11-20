@@ -126,8 +126,6 @@ pub struct AppState {
     pub stream_hub: Arc<StreamHub>,
     /// 発火したら WebSocket 接続を閉じる（graceful shutdown で接続が終わるのを待つため）。
     pub shutdown: seiran_common::CancellationToken,
-    /// 絵文字インポートジョブの進捗状態（#50）。job_id → ImportJobStatus。
-    pub emoji_import_jobs: Arc<DashMap<String, handlers::admin::emoji_import::ImportJobStatus>>,
     /// `RemoteFollowListSync` 重複投入防止用クールダウン（#229）。
     /// (actor_id, direction) → 直近enqueue時刻。プロフィールリロードのたびに同一ジョブが
     /// 積まれ続け、低優先度ジョブキューが埋め尽くされる問題への対処。プロセス内のみで
@@ -927,7 +925,6 @@ pub async fn init_state(
         search_store: Arc::new(InMemorySearchStore::new()),
         stream_hub,
         shutdown,
-        emoji_import_jobs: Arc::new(DashMap::new()),
         remote_follow_sync_recent: Arc::new(DashMap::new()),
         interaction_cooldown: Arc::new(interaction_cooldown::InteractionCooldown::new()),
         job_queue,
@@ -954,6 +951,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
     tokio::spawn(async move {
         backfill_post_record_blobs(&state).await;
         resume_running_follow_imports(&state).await;
+        resume_running_emoji_imports(&state).await;
         resume_running_migrations(&state).await;
         resume_account_withdraw_unfollow_all(&state).await;
         resume_bsky_video_poll(&state).await;
@@ -1064,6 +1062,40 @@ async fn resume_running_follow_imports(state: &AppState) {
     );
     for request_id in request_ids {
         state.enqueue_follow_import_process(request_id).await;
+    }
+}
+
+/// 起動時リカバリ: 実行中の絵文字インポートのジョブチェーンを積み直す。
+/// `resume_running_follow_imports` と同じく、プロセス内キューのジョブは再起動で消えるので
+/// 無条件に全件積む。動いているチェーンと重なっても `jobs::emoji_import` の advisory lock で
+/// 1つしか動かない。
+async fn resume_running_emoji_imports(state: &AppState) {
+    let request_ids = match seiran_common::repository::emoji_import::active_ids(&state.db).await {
+        Ok(ids) => ids,
+        Err(e) => {
+            tracing::error!("[startup] 実行中絵文字インポートの取得失敗: {}", e);
+            return;
+        }
+    };
+    for request_id in request_ids {
+        tracing::info!(
+            "[startup] 絵文字インポート request_id={} を再開します",
+            request_id
+        );
+        if let Err(e) = state
+            .job_queue
+            .enqueue(
+                seiran_common::Job::EmojiImportProcess { request_id },
+                job_priority::LOW,
+            )
+            .await
+        {
+            tracing::error!(
+                "[job] EmojiImportProcess enqueue 失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
     }
 }
 

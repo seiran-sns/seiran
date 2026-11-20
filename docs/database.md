@@ -28,6 +28,7 @@ ID の採番は2系統:
 | `notifications` | 通知 |
 | `media_files` / `post_attachments` | メディア実体と投稿との中間テーブル |
 | `custom_emojis` / `remote_emojis` | ローカルのカスタム絵文字、AP 受信で見つけたリモート絵文字のカタログ |
+| `emoji_import_requests` / `emoji_import_items` | 絵文字インポート（Misskey 形式 ZIP）の実行単位と絵文字ごとの状態 |
 | `fediverse_relays` | 参加する Fediverse リレー |
 | `denied_hosts` | 拒否サーバー（管理画面「サーバーブロック」） |
 | `storage_providers` | S3 互換ストレージの設定 |
@@ -208,6 +209,10 @@ AP 受信（本文・表示名・リアクション）で見つけたカスタ�
 ### フォローインポート（`follow_import_requests` / `follow_import_items`）
 - `follow_import_requests`: 実行1回＝1行（`running`/`completed`/`cancelled`）。`UNIQUE (actor_id) WHERE status='running'` で実行中を1本に制限する。
 - `follow_import_items`: 対象1件＝1行（`pending`/`succeeded`/`already_following`/`failed`）。既にフォロー済みだったものを `succeeded` と分け、「成功」の件数を新規 `follows` の数と一致させる。
+
+### 絵文字インポート（`emoji_import_requests` / `emoji_import_items`）
+- `emoji_import_requests`: 実行1回＝1行（`preparing`/`running`/`completed`/`cancelled`/`failed`）。サイト全体の絵文字を扱うので、`UNIQUE ((true)) WHERE status IN ('preparing','running')` で実行中をサイト全体で1本に制限する。`total` は ZIP の meta.json を読み終えるまで（`preparing` の間）NULL。`failed` の理由は `error_reason`（コード）と `error_detail`。`user_id` は開始した管理者。
+- `emoji_import_items`: meta.json の絵文字1つ＝1行（`pending`/`imported`/`skipped`/`failed`）。ZIP 内のファイル名・ショートコード・カテゴリ・`aliases`（タグになる）・ライセンスを持つ。スキップ・失敗の理由は `reason`（`already_exists`・`invalid_shortcode`・`file_missing`・`image_error` 等のコード。文言はフロントが言語別に持つ）と `detail`。
 - 進捗の件数はリクエスト側に持たず、items を `COUNT(*) FILTER` で数える（2テーブル間の不整合を起こさない）。キャンセルはリクエストの `status` を変えるだけで、残りの `pending` はそのまま。
 
 ### `blocks` / `mutes` / `repost_mutes`

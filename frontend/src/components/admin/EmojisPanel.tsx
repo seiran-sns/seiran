@@ -1,6 +1,6 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, CustomEmoji, DriveFile, EmojiImportJob, RemoteEmoji, getErrorMessage } from "../../api/client";
+import { api, CustomEmoji, DriveFile, EmojiImportStatus, RemoteEmoji, getErrorMessage } from "../../api/client";
 import RemoteImg from "../common/RemoteImg";
 import EmojiImportDialog from "./EmojiImportDialog";
 import panel from "../common/Panel.module.css";
@@ -39,11 +39,15 @@ export default function EmojisPanel() {
   const [editTags, setEditTags] = useState("");
   const [editLicense, setEditLicense] = useState("");
 
-  // Misskey ZIP インポート（#50）
+  // Misskey 形式 ZIP のインポート（#50）・エクスポート
   const importFileRef = useRef<HTMLInputElement>(null);
-  const [importing, setImporting] = useState(false);
-  const [importJob, setImportJob] = useState<EmojiImportJob | null>(null);
+  const [uploadingZip, setUploadingZip] = useState(false);
+  const [importStatus, setImportStatus] = useState<EmojiImportStatus | null>(null);
   const [importError, setImportError] = useState("");
+  const [cancellingImport, setCancellingImport] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const importActive =
+    importStatus?.status === "preparing" || importStatus?.status === "running";
 
   /** 空白・カンマ区切りの文字列をタグ配列に変換する（重複・空要素はバックエンドでも正規化）。 */
   function parseTags(s: string): string[] {
@@ -64,6 +68,25 @@ export default function EmojisPanel() {
   }
 
   useEffect(load, []);
+
+  // インポートの進捗はサーバー側（DB）にあるので、画面を開き直しても続きから見える。
+  useEffect(() => {
+    api.admin.getEmojiImportStatus().then(setImportStatus).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!importActive) return;
+    const timer = setInterval(async () => {
+      try {
+        const status = await api.admin.getEmojiImportStatus();
+        setImportStatus(status);
+        if (status.status !== "preparing" && status.status !== "running") load();
+      } catch {
+        // 一時的な失敗は次の周期で取り直す
+      }
+    }, 1500);
+    return () => clearInterval(timer);
+  }, [importActive]);
 
   function loadRemote(kw: string) {
     setRemoteLoading(true);
@@ -133,33 +156,71 @@ export default function EmojisPanel() {
     const file = e.target.files?.[0];
     if (!file) return;
     e.target.value = "";
-    setImporting(true);
+    setUploadingZip(true);
     setImportError("");
-    setImportJob(null);
-    let job: EmojiImportJob;
     try {
-      job = await api.admin.importEmojis(file);
-      setImportJob(job);
+      await api.admin.importEmojis(file);
+      setImportStatus(await api.admin.getEmojiImportStatus());
     } catch (err) {
       setImportError(getErrorMessage(err));
-      setImporting(false);
-      return;
+    } finally {
+      setUploadingZip(false);
     }
-    // ポーリングして進捗を更新
-    const poll = setInterval(async () => {
-      try {
-        const status = await api.admin.getEmojiImportStatus(job.jobId);
-        setImportJob(status);
-        if (status.done) {
-          clearInterval(poll);
-          setImporting(false);
-          load();
-        }
-      } catch {
-        clearInterval(poll);
-        setImporting(false);
-      }
-    }, 1500);
+  }
+
+  async function cancelImport() {
+    setCancellingImport(true);
+    setImportError("");
+    try {
+      await api.admin.cancelEmojiImport();
+      setImportStatus(await api.admin.getEmojiImportStatus());
+      load();
+    } catch (err) {
+      setImportError(getErrorMessage(err));
+    } finally {
+      setCancellingImport(false);
+    }
+  }
+
+  async function exportZip() {
+    setExporting(true);
+    setImportError("");
+    try {
+      const { url } = await api.admin.issueEmojiExportUrl();
+      // ブラウザ標準のダウンロードで開き、ZIP をメモリに溜めずにディスクへ書かせる。
+      const a = document.createElement("a");
+      a.href = url;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      setImportError(getErrorMessage(err));
+    } finally {
+      setExporting(false);
+    }
+  }
+
+  function reasonText(reason: string | undefined): string {
+    const key = `admin:emojisPanel.importReasons.${reason ?? "unknown"}`;
+    return t(key, { defaultValue: t("admin:emojisPanel.importReasons.unknown") });
+  }
+
+  function importHeadline(st: EmojiImportStatus): string {
+    switch (st.status) {
+      case "preparing":
+        return t("admin:emojisPanel.importPreparing");
+      case "running":
+        return t("admin:emojisPanel.importRunning", { processed: st.processed, total: st.total ?? 0 });
+      case "completed":
+        return t("admin:emojisPanel.importDone");
+      case "cancelled":
+        return t("admin:emojisPanel.importCancelled");
+      case "failed":
+        return t("admin:emojisPanel.importFailed", { reason: reasonText(st.errorReason) });
+      default:
+        return "";
+    }
   }
 
   function startEdit(em: CustomEmoji) {
@@ -224,7 +285,7 @@ export default function EmojisPanel() {
         <>
           {error && <p className={styles.error}>{error}</p>}
 
-          {/* Misskey ZIP インポート（#50） */}
+          {/* Misskey 形式 ZIP のインポート（#50）・エクスポート */}
           <div className={styles.card}>
             <div style={{ fontWeight: 600, marginBottom: 8 }}>{t("admin:emojisPanel.importTitle")}</div>
             <input
@@ -239,28 +300,61 @@ export default function EmojisPanel() {
                 type="button"
                 className={styles.btnGhost}
                 onClick={() => importFileRef.current?.click()}
-                disabled={importing}
+                disabled={uploadingZip || importActive}
               >
-                {importing ? t("admin:emojisPanel.importing") : t("admin:emojisPanel.selectZipButton")}
+                {uploadingZip ? t("admin:emojisPanel.importUploading") : t("admin:emojisPanel.selectZipButton")}
+              </button>
+              {importActive && (
+                <button
+                  type="button"
+                  className={styles.btnGhost}
+                  onClick={cancelImport}
+                  disabled={cancellingImport}
+                >
+                  {t("admin:emojisPanel.importCancelButton")}
+                </button>
+              )}
+              <button type="button" className={styles.btnGhost} onClick={exportZip} disabled={exporting}>
+                {t("admin:emojisPanel.exportButton")}
               </button>
             </div>
             {importError && <p className={styles.error} style={{ marginTop: 8 }}>{importError}</p>}
-            {importJob && (
+            {importStatus && importStatus.status !== "idle" && (
               <div style={{ marginTop: 8, fontSize: 13, color: "var(--color-text-sub, #666)" }}>
-                {importJob.done ? t("admin:emojisPanel.importDone") : t("admin:emojisPanel.importProcessing")} —{" "}
-                {t("admin:emojisPanel.importStats", {
-                  processed: importJob.processed,
-                  skipped: importJob.skipped,
-                  failed: importJob.failed,
-                  total: importJob.total,
-                })}
-                {importJob.errors.length > 0 && (
+                <div>{importHeadline(importStatus)}</div>
+                {importStatus.status === "running" && importStatus.total != null && importStatus.total > 0 && (
+                  <progress
+                    value={importStatus.processed}
+                    max={importStatus.total}
+                    style={{ width: "100%", marginTop: 4 }}
+                  />
+                )}
+                {importStatus.status === "failed" && importStatus.errorDetail && (
+                  <div>{importStatus.errorDetail}</div>
+                )}
+                {importStatus.total != null && (
+                  <div>
+                    {t("admin:emojisPanel.importStats", {
+                      imported: importStatus.imported,
+                      skipped: importStatus.skipped,
+                      failed: importStatus.failed,
+                      total: importStatus.total,
+                    })}
+                  </div>
+                )}
+                {importStatus.problems.length > 0 && (
                   <ul style={{ margin: "4px 0 0", paddingLeft: 16 }}>
-                    {importJob.errors.slice(0, 10).map((err, i) => (
-                      <li key={i} style={{ color: "var(--color-danger, #c00)" }}>{err}</li>
+                    {importStatus.problems.slice(0, 10).map((pr, i) => (
+                      <li
+                        key={i}
+                        style={pr.status === "failed" ? { color: "var(--color-danger, #c00)" } : undefined}
+                      >
+                        :{pr.shortcode}: {reasonText(pr.reason)}
+                        {pr.detail ? ` (${pr.detail})` : ""}
+                      </li>
                     ))}
-                    {importJob.errors.length > 10 && (
-                      <li>{t("admin:emojisPanel.importMoreErrors", { count: importJob.errors.length - 10 })}</li>
+                    {importStatus.problems.length > 10 && (
+                      <li>{t("admin:emojisPanel.importMoreErrors", { count: importStatus.problems.length - 10 })}</li>
                     )}
                   </ul>
                 )}
