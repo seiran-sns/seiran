@@ -79,6 +79,22 @@ pub async fn local_actor_ids_without_avatar(pool: &PgPool) -> Result<Vec<i64>, s
     .await
 }
 
+/// このサーバーがリポジトリを持ち、Relay に載っているべきローカルアクター
+/// `(id, username, at_did)`。退会・凍結・DID 転出済みは除く。
+pub async fn local_actors_hosted_on_relay(
+    pool: &PgPool,
+) -> Result<Vec<(i64, String, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, username, at_did
+         FROM actors
+         WHERE actor_type = 'local' AND at_did IS NOT NULL AND at_signing_key_pem IS NOT NULL
+           AND withdrawn_at IS NULL AND suspended_at IS NULL AND did_moved_out_at IS NULL
+         ORDER BY id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// `#identity` を一度も送っていないローカルアクター `(id, username, at_did)`。
 pub async fn local_actors_without_identity_event(
     pool: &PgPool,
