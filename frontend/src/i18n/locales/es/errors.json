@@ -71,6 +71,7 @@
   "SERVER_UNAVAILABLE": "El servidor no responde. Por favor espera y vuelve a intentarlo.",
   "SHORTCODE_TAKEN": "Este shortcode ya está en uso",
   "SMTP_NOT_CONFIGURED": "El envío de correo electrónico no está configurado. Por favor contacte a un administrador",
+  "SMTP_TEST_RECIPIENT_REQUIRED": "Introduzca un destinatario para el correo de prueba",
   "SOURCE_AUTH_FAILED": "No se pudo iniciar sesión en la cuenta de origen. Compruebe el identificador y la contraseña",
   "SOURCE_EMAIL_REQUIRED": "No se pudo obtener una dirección de correo electrónico de la cuenta de origen. Introduzca su propia dirección de correo electrónico",
   "SOURCE_HANDLE_UNRESOLVABLE": "No se pudo resolver el identificador de origen",

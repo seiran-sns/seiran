@@ -570,3 +570,148 @@ pub async fn update_site_settings(
 
     Ok(Json(build_response(&settings)))
 }
+
+// ─── SMTP の接続確認・テスト送信 ───────────────────────────────────────────
+
+/// 管理画面のフォームに入っている（保存前の）SMTP 設定。保存してからでないと試せないと、
+/// 誤った設定を一度保存してメール確認・パスワードリセットを壊してしまうため、
+/// 入力中の値で試せるようにする。省略した項目と空のパスワードは保存済みの値を使う。
+#[derive(Deserialize, Default)]
+pub struct SmtpTestRequest {
+    pub smtp_host: Option<String>,
+    pub smtp_port: Option<String>,
+    pub smtp_username: Option<String>,
+    pub smtp_password: Option<String>,
+    pub smtp_from: Option<String>,
+    /// テスト送信の宛先。接続確認では使わない。
+    pub to: Option<String>,
+}
+
+/// SMTP サーバーの応答はそのまま管理者に見せたいので、失敗も 200 で返し、
+/// `code`（画面で翻訳する種別）と `detail`（lettre のエラー文・未設定の項目名）を載せる。
+#[derive(Serialize)]
+pub struct SmtpTestResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+impl SmtpTestResponse {
+    fn from_result(result: Result<(), crate::mailer::MailError>) -> Self {
+        use crate::mailer::MailError;
+        match result {
+            Ok(()) => Self {
+                ok: true,
+                code: None,
+                detail: None,
+            },
+            Err(e) => {
+                let (code, detail) = match e {
+                    MailError::Config(field) => ("SMTP_NOT_CONFIGURED", field.to_string()),
+                    MailError::Address(e) => ("SMTP_INVALID_ADDRESS", e.to_string()),
+                    other
+                    @ (MailError::Build(_) | MailError::Send(_) | MailError::NotConnected) => {
+                        ("SMTP_FAILED", other.to_string())
+                    }
+                };
+                Self {
+                    ok: false,
+                    code: Some(code),
+                    detail: Some(detail),
+                }
+            }
+        }
+    }
+}
+
+/// 保存済みの設定に、リクエストで渡された SMTP 項目を重ねる。
+fn merge_smtp_overrides(
+    mut settings: HashMap<String, String>,
+    req: &SmtpTestRequest,
+) -> HashMap<String, String> {
+    let password = req.smtp_password.as_ref().filter(|v| !v.is_empty());
+    for (key, value) in [
+        ("smtp_host", req.smtp_host.as_ref()),
+        ("smtp_port", req.smtp_port.as_ref()),
+        ("smtp_username", req.smtp_username.as_ref()),
+        ("smtp_password", password),
+        ("smtp_from", req.smtp_from.as_ref()),
+    ] {
+        if let Some(v) = value {
+            settings.insert(key.to_string(), v.trim().to_string());
+        }
+    }
+    settings
+}
+
+async fn smtp_settings_for_test(
+    state: &AppState,
+    req: &SmtpTestRequest,
+) -> Result<HashMap<String, String>, ApiError> {
+    let saved = state
+        .site_settings
+        .get_all()
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(merge_smtp_overrides(saved, req))
+}
+
+/// POST /api/admin/site-settings/smtp-test
+pub async fn test_smtp_connection(
+    State(state): State<AppState>,
+    Json(req): Json<SmtpTestRequest>,
+) -> Result<Json<SmtpTestResponse>, ApiError> {
+    let settings = smtp_settings_for_test(&state, &req).await?;
+    let result = crate::mailer::test_smtp_connection(&settings).await;
+    Ok(Json(SmtpTestResponse::from_result(result)))
+}
+
+/// POST /api/admin/site-settings/smtp-test-email
+pub async fn send_smtp_test_email(
+    State(state): State<AppState>,
+    Json(req): Json<SmtpTestRequest>,
+) -> Result<Json<SmtpTestResponse>, ApiError> {
+    let to = req
+        .to
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| ApiError::BadRequest("SMTP_TEST_RECIPIENT_REQUIRED".to_string()))?
+        .to_string();
+    let settings = smtp_settings_for_test(&state, &req).await?;
+    let result = crate::mailer::send_test_email(&settings, &to).await;
+    Ok(Json(SmtpTestResponse::from_result(result)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn overrides_replace_saved_values_but_empty_password_keeps_saved() {
+        let saved = HashMap::from([
+            ("smtp_host".to_string(), "old.example".to_string()),
+            ("smtp_password".to_string(), "saved-secret".to_string()),
+            ("smtp_from".to_string(), "a@example.com".to_string()),
+        ]);
+        let req = SmtpTestRequest {
+            smtp_host: Some(" new.example ".to_string()),
+            smtp_password: Some(String::new()),
+            ..Default::default()
+        };
+        let merged = merge_smtp_overrides(saved, &req);
+        assert_eq!(merged["smtp_host"], "new.example");
+        assert_eq!(merged["smtp_password"], "saved-secret");
+        assert_eq!(merged["smtp_from"], "a@example.com");
+    }
+
+    #[test]
+    fn missing_host_reports_not_configured() {
+        let res = SmtpTestResponse::from_result(Err(crate::mailer::MailError::Config("smtp_host")));
+        assert!(!res.ok);
+        assert_eq!(res.code, Some("SMTP_NOT_CONFIGURED"));
+        assert_eq!(res.detail.as_deref(), Some("smtp_host"));
+    }
+}

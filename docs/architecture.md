@@ -399,7 +399,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 | DBバックアップ | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_DEFAULT_REGION`/`S3_ENDPOINT`（R2 の API トークン）、`BACKUP_OBJECT_S3URL`（`s3://<bucket>/<prefix>`）。`cron` サービスと `scripts/backup-db.sh` が `.env` から読む |
 | 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel。ハンドル検証 TXT 用の Cloudflare DNS トークン/Zone ID は環境変数ではなく管理画面設定 `site_settings`）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |
 | 開発・一回限り | `WEBAUTHN_ORIGIN`（ローカル/E2E のパスキー origin）、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE`、`BSKY_FOLLOWER_POLL_INTERVAL_SECS` |
-| SMTP | 環境変数ではなく `site_settings`（管理 API）で設定する |
+| SMTP | 環境変数ではなく `site_settings`（管理 API）で設定する。管理 API の `POST /api/admin/site-settings/smtp-test`（接続・認証の確認）と `/smtp-test-email`（テスト送信）は、保存済みの値にリクエストの値を重ねて試す |
 
 ## 11. 横断機能の構成メモ
 

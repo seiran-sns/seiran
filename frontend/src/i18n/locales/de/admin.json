@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "Festlegen (geben Sie einen neuen Wert ein, um ihn zu ändern)",
     "passwordUnsetPlaceholder": "Nicht festgelegt",
     "fromAddressLabel": "Absenderadresse",
+    "smtpTestConnectionButton": "Verbindung testen",
+    "smtpTestRecipientLabel": "Empfänger der Test-E-Mail",
+    "smtpSendTestEmailButton": "Test-E-Mail senden",
+    "smtpTesting": "Wird getestet...",
+    "smtpConnectionOk": "Verbindung und Anmeldung beim SMTP-Server erfolgreich",
+    "smtpTestEmailSent": "Test-E-Mail gesendet. Prüfen Sie den Posteingang (oder den Spam-Ordner, falls sie nicht ankommt)",
+    "smtpTestHint": "Getestet werden die aktuell eingegebenen, noch nicht gespeicherten Werte. Ist das Passwortfeld leer, wird das gespeicherte Passwort verwendet.",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "Ein Pflichtfeld ist leer",
+      "SMTP_INVALID_ADDRESS": "Ungültige E-Mail-Adresse",
+      "SMTP_FAILED": "Die Kommunikation mit dem SMTP-Server ist fehlgeschlagen"
+    },
     "requireVerifyLabel": "Bei der Anmeldung ist eine E-Mail-Bestätigung erforderlich",
     "requireVerifyHint": "SMTP muss konfiguriert werden, bevor eine E-Mail-Verifizierung erforderlich ist.",
     "authRateLimitSectionTitle": "Auth-Rate-Limiting",

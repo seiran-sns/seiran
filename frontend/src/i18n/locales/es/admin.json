@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "Establecer (ingrese un nuevo valor para cambiarlo)",
     "passwordUnsetPlaceholder": "No establecido",
     "fromAddressLabel": "De la dirección",
+    "smtpTestConnectionButton": "Probar conexión",
+    "smtpTestRecipientLabel": "Destinatario del correo de prueba",
+    "smtpSendTestEmailButton": "Enviar correo de prueba",
+    "smtpTesting": "Probando...",
+    "smtpConnectionOk": "Conexión y autenticación con el servidor SMTP correctas",
+    "smtpTestEmailSent": "Correo de prueba enviado. Revise la bandeja de entrada (o la carpeta de spam si no llega)",
+    "smtpTestHint": "Se prueban los valores introducidos actualmente, antes de guardar. Si el campo de contraseña está vacío, se usa la contraseña guardada.",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "Hay un campo obligatorio vacío",
+      "SMTP_INVALID_ADDRESS": "Dirección de correo no válida",
+      "SMTP_FAILED": "Falló la comunicación con el servidor SMTP"
+    },
     "requireVerifyLabel": "Requerir verificación por correo electrónico al registrarse",
     "requireVerifyHint": "Se debe configurar SMTP antes de requerir verificación de correo electrónico.",
     "authRateLimitSectionTitle": "Límite de tasa de autenticación",

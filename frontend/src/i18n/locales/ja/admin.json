@@ -142,6 +142,18 @@
     "passwordSetPlaceholder": "設定済み（変更する場合のみ入力）",
     "passwordUnsetPlaceholder": "未設定",
     "fromAddressLabel": "差出人アドレス（From）",
+    "smtpTestConnectionButton": "接続確認",
+    "smtpTestRecipientLabel": "テストメールの送信先",
+    "smtpSendTestEmailButton": "テストメールを送信",
+    "smtpTesting": "確認中...",
+    "smtpConnectionOk": "SMTP サーバーに接続・認証できました",
+    "smtpTestEmailSent": "テストメールを送信しました。受信箱（届かない場合は迷惑メールフォルダ）を確認してください",
+    "smtpTestHint": "保存前の入力内容で試します。パスワード欄が空なら保存済みのパスワードを使います。",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "未入力の項目があります",
+      "SMTP_INVALID_ADDRESS": "メールアドレスの形式が正しくありません",
+      "SMTP_FAILED": "SMTP サーバーとのやり取りに失敗しました"
+    },
     "requireVerifyLabel": "新規登録時にメール確認を必須にする",
     "requireVerifyHint": "メール確認を必須にする場合は SMTP 設定が完了している必要があります。",
     "authRateLimitSectionTitle": "認証レート制限",

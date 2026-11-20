@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "Définir (entrez une nouvelle valeur pour la modifier)",
     "passwordUnsetPlaceholder": "Non défini",
     "fromAddressLabel": "De l'adresse",
+    "smtpTestConnectionButton": "Tester la connexion",
+    "smtpTestRecipientLabel": "Destinataire de l'email de test",
+    "smtpSendTestEmailButton": "Envoyer un email de test",
+    "smtpTesting": "Test en cours...",
+    "smtpConnectionOk": "Connexion et authentification au serveur SMTP réussies",
+    "smtpTestEmailSent": "Email de test envoyé. Vérifiez la boîte de réception (ou le dossier spam s'il n'arrive pas)",
+    "smtpTestHint": "Le test utilise les valeurs saisies, avant enregistrement. Si le champ mot de passe est vide, le mot de passe enregistré est utilisé.",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "Un champ obligatoire est vide",
+      "SMTP_INVALID_ADDRESS": "Adresse email invalide",
+      "SMTP_FAILED": "La communication avec le serveur SMTP a échoué"
+    },
     "requireVerifyLabel": "Exiger une vérification par e-mail lors de l'inscription",
     "requireVerifyHint": "SMTP doit être configuré avant d'exiger la vérification du courrier électronique.",
     "authRateLimitSectionTitle": "Limitation du taux d'authentification",

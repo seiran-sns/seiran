@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
+import type { SmtpTestResult } from "../../api/admin";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
@@ -18,6 +19,9 @@ export default function SiteSettingsPanel() {
   const [password, setPassword] = useState("");
   const [from, setFrom] = useState("");
   const [requireVerify, setRequireVerify] = useState(false);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [smtpTesting, setSmtpTesting] = useState<"" | "connection" | "email">("");
+  const [smtpTestMessage, setSmtpTestMessage] = useState<{ ok: boolean; text: string } | null>(null);
 
   // サイト外観（#30）
   const [siteName, setSiteName] = useState("");
@@ -145,6 +149,40 @@ export default function SiteSettingsPanel() {
       setBgError(getErrorMessage(err));
     } finally {
       setUploadingBg(false);
+    }
+  }
+
+  function smtpTestMessageText(kind: "connection" | "email", r: SmtpTestResult): string {
+    if (r.ok) {
+      return kind === "connection"
+        ? t("admin:siteSettingsPanel.smtpConnectionOk")
+        : t("admin:siteSettingsPanel.smtpTestEmailSent");
+    }
+    const reason = t(`admin:siteSettingsPanel.smtpTestFailure.${r.code ?? "SMTP_FAILED"}`);
+    return r.detail ? `${reason}: ${r.detail}` : reason;
+  }
+
+  // 保存前のフォームの値で試す。パスワード欄が空なら保存済みのパスワードを使う。
+  async function runSmtpTest(kind: "connection" | "email") {
+    setSmtpTesting(kind);
+    setSmtpTestMessage(null);
+    const body = {
+      smtp_host: host,
+      smtp_port: port,
+      smtp_username: username,
+      smtp_from: from,
+      ...(password ? { smtp_password: password } : {}),
+    };
+    try {
+      const r =
+        kind === "connection"
+          ? await api.admin.testSmtpConnection(body)
+          : await api.admin.sendSmtpTestEmail({ ...body, to: testRecipient });
+      setSmtpTestMessage({ ok: r.ok, text: smtpTestMessageText(kind, r) });
+    } catch (err) {
+      setSmtpTestMessage({ ok: false, text: getErrorMessage(err) });
+    } finally {
+      setSmtpTesting("");
     }
   }
 
@@ -356,6 +394,46 @@ export default function SiteSettingsPanel() {
           {t("admin:siteSettingsPanel.fromAddressLabel")}
           <input className={styles.input} value={from} onChange={(e) => setFrom(e.target.value)} placeholder="info@seiran.org" />
         </label>
+        <div className={styles.actions} style={{ marginBottom: 8 }}>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => runSmtpTest("connection")}
+            disabled={smtpTesting !== ""}
+          >
+            {smtpTesting === "connection"
+              ? t("admin:siteSettingsPanel.smtpTesting")
+              : t("admin:siteSettingsPanel.smtpTestConnectionButton")}
+          </button>
+        </div>
+        <label className={styles.label}>
+          {t("admin:siteSettingsPanel.smtpTestRecipientLabel")}
+          <input
+            className={styles.input}
+            type="email"
+            value={testRecipient}
+            onChange={(e) => setTestRecipient(e.target.value)}
+            placeholder="admin@example.com"
+          />
+        </label>
+        <div className={styles.actions}>
+          <button
+            type="button"
+            className={styles.btnGhost}
+            onClick={() => runSmtpTest("email")}
+            disabled={smtpTesting !== "" || testRecipient.trim() === ""}
+          >
+            {smtpTesting === "email"
+              ? t("admin:siteSettingsPanel.smtpTesting")
+              : t("admin:siteSettingsPanel.smtpSendTestEmailButton")}
+          </button>
+        </div>
+        {smtpTestMessage && (
+          <p className={smtpTestMessage.ok ? styles.success : styles.error} role="status">
+            {smtpTestMessage.text}
+          </p>
+        )}
+        <p className={styles.hint}>{t("admin:siteSettingsPanel.smtpTestHint")}</p>
         <label className={`${styles.label}`} style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <input type="checkbox" checked={requireVerify} onChange={(e) => setRequireVerify(e.target.checked)} />
           {t("admin:siteSettingsPanel.requireVerifyLabel")}

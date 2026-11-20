@@ -71,6 +71,7 @@
   "SERVER_UNAVAILABLE": "The server is not responding. Please wait and try again",
   "SHORTCODE_TAKEN": "This shortcode is already in use",
   "SMTP_NOT_CONFIGURED": "Email sending is not configured. Please contact an administrator",
+  "SMTP_TEST_RECIPIENT_REQUIRED": "Enter a recipient for the test email",
   "SOURCE_AUTH_FAILED": "Failed to log in to the source account. Please check the handle and password",
   "SOURCE_EMAIL_REQUIRED": "Could not retrieve an email address from the source account. Please enter your own email address",
   "SOURCE_HANDLE_UNRESOLVABLE": "Could not resolve the source handle",

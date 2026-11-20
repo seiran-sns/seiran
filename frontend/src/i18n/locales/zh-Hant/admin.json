@@ -125,6 +125,18 @@
     "passwordSetPlaceholder": "已設定（輸入新值以變更）",
     "passwordUnsetPlaceholder": "尚未設定",
     "fromAddressLabel": "寄件人地址",
+    "smtpTestConnectionButton": "測試連線",
+    "smtpTestRecipientLabel": "測試郵件收件地址",
+    "smtpSendTestEmailButton": "傳送測試郵件",
+    "smtpTesting": "測試中...",
+    "smtpConnectionOk": "已成功連線並通過 SMTP 伺服器驗證",
+    "smtpTestEmailSent": "已傳送測試郵件。請檢查收件匣（若未收到請檢查垃圾郵件資料夾）",
+    "smtpTestHint": "使用儲存前目前輸入的值進行測試。密碼欄為空時使用已儲存的密碼。",
+    "smtpTestFailure": {
+      "SMTP_NOT_CONFIGURED": "有未填寫的項目",
+      "SMTP_INVALID_ADDRESS": "電子郵件地址格式不正確",
+      "SMTP_FAILED": "與 SMTP 伺服器通訊失敗"
+    },
     "requireVerifyLabel": "註冊時需要驗證電子郵件",
     "requireVerifyHint": "要求電子郵件驗證前必須先設定 SMTP。",
     "authRateLimitSectionTitle": "驗證速率限制",
