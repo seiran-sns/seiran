@@ -378,7 +378,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 
 | カテゴリ | 変数 |
 |---|---|
-| ドメイン | 自ホストドメインは `instance_domain` テーブル（一度確定したら不変、`LocalDomain`/`InstanceDomainRepository`）から起動時に読む。未確定なら `LOCAL_DOMAIN` の値で確定させる。どちらも無い新規インストールでは、初回セットアップ（`POST /api/setup`）でリクエストの生の `Host` ヘッダーから確定する（`GET /api/setup/status` が候補 `domain_candidate` を返し、フロントが確認後そのまま送り返し、サーバーは送信時の `Host` と一致するか検証する。不一致は `DOMAIN_MISMATCH`）。`Host` が無い・`localhost`・IP 直打ちなら「シングルホストモード」（連合なし、DID を持たないローカルユーザー、`actors.domain='localhost'`） |
+| ドメイン | 自ホストドメインは `instance_domain` テーブル（一度確定したら不変、`LocalDomain`/`InstanceDomainRepository`）から起動時に読む。未確定なら `LOCAL_DOMAIN` の値で確定させる。どちらも無い新規インストールでは、初回セットアップ（`POST /api/setup`）でリクエストの生の `Host` ヘッダーから確定する（`GET /api/setup/status` が候補 `domain_candidate` を返し、フロントが確認後そのまま送り返し、サーバーは送信時の `Host` と一致するか検証する。不一致は `DOMAIN_MISMATCH`）。セットアップで確定させるのはリクエストを受けたプロセスだけなので、未確定で起動したプロセスは確定するまで5秒ごとに `instance_domain` を読み直して反映する（`watch_until_confirmed`。api・federation・firehose・worker を分けた構成で、他のプロセスが再起動まで `localhost` のまま動かないようにするため）。`Host` が無い・`localhost`・IP 直打ちなら「シングルホストモード」（連合なし、DID を持たないローカルユーザー、`actors.domain='localhost'`） |
 | 起動ポート | `PORT`（既定3000）、`FEDERATION_INBOX_PORT`（既定3001） |
 | データベース | `POSTGRES_USER`/`POSTGRES_PASSWORD`/`POSTGRES_DB`、`DB_HOST`/`DB_PORT`（既定 `localhost`/5432。Docker では `DB_HOST=db`）、`DB_MAX_CONNECTIONS`（未設定ならロールごとに算出、3節）。完成済みの `DATABASE_URL` は使わない（`db::get_db_pool`） |
 | プロセス間の共有 | `REDIS_URL`（ジョブキュー・リアルタイム配信・subscribeRepos。複数のプロセスが同時に動く構成で必須。`all` を1つだけ動かすなら不要。3節） |

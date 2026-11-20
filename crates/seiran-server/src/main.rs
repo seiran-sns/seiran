@@ -28,8 +28,8 @@ use seiran_common::repository::{
 };
 use seiran_common::{
     ap::ApClient, db::recommended_max_connections, get_db_pool, resolve_local_domain,
-    run_migrations, CancellationToken, DeliveryConfig, FollowExecConfig, InboxContext, JobQueue,
-    LocalDomain, Messaging, Secrets, SecretsFile, StreamHub, WorkerConfig,
+    run_migrations, watch_until_confirmed, CancellationToken, DeliveryConfig, FollowExecConfig,
+    InboxContext, JobQueue, LocalDomain, Messaging, Secrets, SecretsFile, StreamHub, WorkerConfig,
     DEFAULT_MAX_CONCURRENT_JOBS,
 };
 use sqlx::PgPool;
@@ -86,11 +86,21 @@ fn build_inbox_context(
 
 /// `instance_domain` テーブルから自ホストドメインを解決する。`.env`の`LOCAL_DOMAIN`が
 /// 設定されていれば、DBが未確定の場合の後方互換パス（自動移行）に使う。
-async fn resolve_local_domain_from_env(pool: &PgPool) -> LocalDomain {
+/// 未確定なら、他のプロセスが初回セットアップで確定させるのを待って反映し続ける
+/// （`seiran_common::local_domain::watch_until_confirmed`）。
+async fn resolve_local_domain_from_env(pool: &PgPool, shutdown: &CancellationToken) -> LocalDomain {
     let instance_domain: Arc<dyn InstanceDomainRepository> =
         Arc::new(PgInstanceDomainRepository::new(pool.clone()));
     let legacy_env_domain = std::env::var("LOCAL_DOMAIN").ok();
-    resolve_local_domain(instance_domain.as_ref(), legacy_env_domain).await
+    let domain = resolve_local_domain(instance_domain.as_ref(), legacy_env_domain).await;
+    if !domain.is_confirmed() {
+        tokio::spawn(watch_until_confirmed(
+            domain.clone(),
+            instance_domain,
+            shutdown.clone(),
+        ));
+    }
+    domain
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -288,7 +298,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     };
     let pool = connect_db(worker_extra).await?;
     let http_client = build_http_client()?;
-    let local_domain = resolve_local_domain_from_env(&pool).await;
+    let local_domain = resolve_local_domain_from_env(&pool, &shutdown).await;
     let messaging = Messaging::connect(redis_url.as_deref(), shutdown.clone()).await?;
 
     let shared = SharedResources {
@@ -390,7 +400,7 @@ async fn run_standalone_worker(
     // standalone worker はHTTPを持たず、WorkerEngineの同時実行数分だけDBを使う。
     let pool = connect_db(DEFAULT_MAX_CONCURRENT_JOBS as u32).await?;
     let http_client = build_http_client()?;
-    let worker_local_domain = resolve_local_domain_from_env(&pool).await;
+    let worker_local_domain = resolve_local_domain_from_env(&pool, &shutdown).await;
     let delivery = delivery_config(&worker_local_domain, &secrets);
     // REDIS_URL があれば api/federation プロセスとキューを共有し、ここで起きたイベント
     // （受信した投稿・コミット）も api プロセスの WebSocket 接続へ届く。

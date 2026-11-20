@@ -50,7 +50,9 @@ pub use lang::{
     is_supported_display_language, is_supported_language, SUPPORTED_DISPLAY_LANGUAGES,
     SUPPORTED_LANGUAGES,
 };
-pub use local_domain::{domain_candidate_from_host, resolve_local_domain, LocalDomain};
+pub use local_domain::{
+    domain_candidate_from_host, resolve_local_domain, watch_until_confirmed, LocalDomain,
+};
 pub use messaging::Messaging;
 pub use system_actor::{
     ensure_relay_agent_actor, ensure_system_proxy_actor, resolve_relay_agent_actor_id,
