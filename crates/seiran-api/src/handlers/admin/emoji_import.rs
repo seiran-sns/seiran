@@ -1,330 +1,226 @@
-//! 絵文字インポート（Misskey ZIP エクスポート形式）ハンドラ（#50）
+//! 絵文字インポート（Misskey形式ZIP）ハンドラ。
+//!
+//! 受け取ったZIPは共有作業ディレクトリ（`seiran_common::work_dir`）へ書き出し、取り込みは
+//! ジョブ（`Job::EmojiImportProcess`、`seiran_common::jobs::emoji_import`）に任せる。
+//! 進捗はDBに持つので、どのプロセスに問い合わせても、再起動をまたいでも見える。
 //!
 //! ## API
-//! - `POST /api/admin/emojis/import`  — ZIP を受け取り、非同期ジョブを開始して job_id を返す
-//! - `GET  /api/admin/emojis/import/:job_id` — ジョブの進捗を返す
-
-use std::io::{Cursor, Read};
-use std::sync::Arc;
+//! - `POST /api/admin/emojis/import`        — ZIP を受け取り、インポートを開始する
+//! - `GET  /api/admin/emojis/import`        — 直近のインポートの進捗を返す
+//! - `POST /api/admin/emojis/import/cancel` — 実行中のインポートを止める
 
 use axum::{
-    extract::{Multipart, Path, State},
-    Json,
+    extract::{Multipart, State},
+    Extension, Json,
 };
 use chrono::Utc;
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use serde::Serialize;
+use tokio::io::AsyncWriteExt;
 
-use seiran_common::{generate_snowflake_id, prepare_image, MediaKind};
+use seiran_common::{
+    generate_snowflake_id, queue::worker::priority, repository::emoji_import, work_dir, Job,
+};
 
 use crate::error::ApiError;
-use crate::handlers::admin::emojis::validate_shortcode;
-use crate::handlers::media_store;
+use crate::middleware::auth::AuthUser;
 use crate::AppState;
-
-// ─── ジョブ状態 ─────────────────────────────────────────────────────────
-
-#[derive(Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct ImportJobStatus {
-    pub job_id: String,
-    pub total: usize,
-    pub processed: usize,
-    pub skipped: usize,
-    pub failed: usize,
-    pub done: bool,
-    pub errors: Vec<String>,
-}
-
-// ─── Misskey meta.json 構造 ──────────────────────────────────────────────
-
-#[derive(Deserialize)]
-struct MetaJson {
-    emojis: Vec<MetaEntry>,
-}
-
-#[derive(Deserialize)]
-struct MetaEntry {
-    #[serde(rename = "fileName")]
-    file_name: String,
-    emoji: EmojiMeta,
-}
-
-#[derive(Deserialize)]
-struct EmojiMeta {
-    name: String,
-    category: Option<String>,
-    #[serde(default)]
-    aliases: Vec<String>,
-    license: Option<String>,
-}
-
-// ─── レスポンス ──────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ImportStartResponse {
-    pub job_id: String,
-    pub total: usize,
+    pub request_id: String,
 }
 
-// ─── ハンドラ ────────────────────────────────────────────────────────────
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportProblem {
+    pub shortcode: String,
+    /// `skipped` / `failed`
+    pub status: String,
+    pub reason: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportStatusResponse {
+    /// `idle` / `preparing` / `running` / `completed` / `cancelled` / `failed`
+    pub status: String,
+    /// `preparing` の間（ZIPの中身を数え終わるまで）は `null`。
+    pub total: Option<i32>,
+    pub processed: i64,
+    pub imported: i64,
+    pub skipped: i64,
+    pub failed: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_reason: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub error_detail: Option<String>,
+    pub problems: Vec<ImportProblem>,
+}
+
+const IMPORT_RUNNING: &str = "EMOJI_IMPORT_RUNNING";
 
 /// `POST /api/admin/emojis/import`
 pub async fn start_import(
+    Extension(admin): Extension<AuthUser>,
     State(state): State<AppState>,
     mut multipart: Multipart,
 ) -> Result<Json<ImportStartResponse>, ApiError> {
-    // ZIP バイト列を取得
-    let mut zip_bytes: Option<Vec<u8>> = None;
-    while let Some(field) = multipart
+    // アップロードを受け切る前に断れるよう、先に確かめる（確定は create_request の一意制約）。
+    if emoji_import::find_active(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some()
+    {
+        return Err(ApiError::Conflict(IMPORT_RUNNING));
+    }
+
+    let request_id = generate_snowflake_id(Utc::now());
+    let zip_path = work_dir::emoji_import_zip_path(request_id);
+    let part_path = zip_path.with_extension("zip.part");
+
+    let received = receive_zip(&mut multipart, &part_path).await;
+    match received {
+        Ok(true) => {}
+        Ok(false) => {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            return Err(ApiError::BadRequest("ZIP_FILE_REQUIRED".to_owned()));
+        }
+        Err(e) => {
+            let _ = tokio::fs::remove_file(&part_path).await;
+            return Err(e);
+        }
+    }
+    tokio::fs::rename(&part_path, &zip_path)
+        .await
+        .map_err(|e| ApiError::Internal(format!("ZIPの配置に失敗: {}", e)))?;
+
+    let created = emoji_import::create_request(&state.db, request_id, admin.user_id, Utc::now())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !created {
+        let _ = tokio::fs::remove_file(&zip_path).await;
+        return Err(ApiError::Conflict(IMPORT_RUNNING));
+    }
+
+    enqueue(&state, request_id).await;
+
+    Ok(Json(ImportStartResponse {
+        request_id: request_id.to_string(),
+    }))
+}
+
+/// multipart の `file` を `path` へ書き出す。`file` が無ければ `Ok(false)`。
+/// ZIP 全体をメモリに持たないよう、届いた分から書いていく。
+async fn receive_zip(multipart: &mut Multipart, path: &std::path::Path) -> Result<bool, ApiError> {
+    if let Some(dir) = path.parent() {
+        tokio::fs::create_dir_all(dir)
+            .await
+            .map_err(|e| ApiError::Internal(format!("作業ディレクトリを作れません: {}", e)))?;
+    }
+    while let Some(mut field) = multipart
         .next_field()
         .await
         .map_err(|e| ApiError::BadRequest(e.to_string()))?
     {
-        if field.name() == Some("file") {
-            zip_bytes = Some(
-                field
-                    .bytes()
-                    .await
-                    .map_err(|e| ApiError::BadRequest(e.to_string()))?
-                    .to_vec(),
-            );
+        if field.name() != Some("file") {
+            continue;
         }
+        let mut file = tokio::fs::File::create(path)
+            .await
+            .map_err(|e| ApiError::Internal(format!("一時ファイルを作れません: {}", e)))?;
+        while let Some(chunk) = field
+            .chunk()
+            .await
+            .map_err(|e| ApiError::BadRequest(e.to_string()))?
+        {
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| ApiError::Internal(format!("一時ファイルへの書き込み失敗: {}", e)))?;
+        }
+        file.flush()
+            .await
+            .map_err(|e| ApiError::Internal(format!("一時ファイルへの書き込み失敗: {}", e)))?;
+        return Ok(true);
     }
-    let zip_bytes = zip_bytes
-        .ok_or_else(|| ApiError::BadRequest("ZIPファイルが含まれていません".to_owned()))?;
-
-    // meta.json を解析して総件数を確認（blocking I/O）
-    let zip_clone = zip_bytes.clone();
-    let meta: MetaJson = tokio::task::spawn_blocking(move || {
-        let cursor = Cursor::new(zip_clone);
-        let mut archive =
-            zip::ZipArchive::new(cursor).map_err(|e| format!("ZIP 解析エラー: {}", e))?;
-        let mut meta_file = archive
-            .by_name("meta.json")
-            .map_err(|_| "meta.json が見つかりません".to_owned())?;
-        let mut buf = String::new();
-        meta_file
-            .read_to_string(&mut buf)
-            .map_err(|e| format!("meta.json 読み込みエラー: {}", e))?;
-        serde_json::from_str::<MetaJson>(&buf).map_err(|e| format!("meta.json 解析エラー: {}", e))
-    })
-    .await
-    .map_err(|_| ApiError::Internal("タスク実行エラー".to_owned()))?
-    .map_err(ApiError::BadRequest)?;
-
-    let total = meta.emojis.len();
-    let job_id = Uuid::new_v4().to_string();
-
-    state.emoji_import_jobs.insert(
-        job_id.clone(),
-        ImportJobStatus {
-            job_id: job_id.clone(),
-            total,
-            processed: 0,
-            skipped: 0,
-            failed: 0,
-            done: false,
-            errors: Vec::new(),
-        },
-    );
-
-    // バックグラウンドジョブを起動
-    let state_clone = state.clone();
-    let job_id_clone = job_id.clone();
-    tokio::spawn(async move {
-        run_import(state_clone, job_id_clone, zip_bytes, meta).await;
-    });
-
-    Ok(Json(ImportStartResponse { job_id, total }))
+    Ok(false)
 }
 
-/// `GET /api/admin/emojis/import/:job_id`
+/// `GET /api/admin/emojis/import`
 pub async fn get_import_status(
     State(state): State<AppState>,
-    Path(job_id): Path<String>,
-) -> Result<Json<ImportJobStatus>, ApiError> {
-    let status = state
-        .emoji_import_jobs
-        .get(&job_id)
-        .map(|s| s.clone())
-        .ok_or(ApiError::NotFound("JOB_NOT_FOUND"))?;
-
-    Ok(Json(status))
-}
-
-// ─── インポート処理本体 ──────────────────────────────────────────────────
-
-async fn run_import(state: AppState, job_id: String, zip_bytes: Vec<u8>, meta: MetaJson) {
-    let zip_arc = Arc::new(zip_bytes);
-
-    for entry in &meta.emojis {
-        let shortcode = entry.emoji.name.trim().to_owned();
-        if shortcode.is_empty() {
-            update_job(&state, &job_id, |s| {
-                s.skipped += 1;
-                s.errors.push("空のショートコードをスキップ".to_owned());
-            });
-            continue;
-        }
-        // 手動登録APIと同じ文字種（英数字・アンダースコアのみ）を要求する。ここを緩めると、
-        // 本文中の `:shortcode:` 抽出（英数字・アンダースコアのみを許可）と一致しない
-        // ショートコードが登録され、絶対に投稿本文から解決できない絵文字になってしまう（#126）。
-        if validate_shortcode(&shortcode).is_err() {
-            update_job(&state, &job_id, |s| {
-                s.skipped += 1;
-                s.errors.push(format!(
-                    ":{}: 使用できない文字を含むショートコードのためスキップ",
-                    shortcode
-                ));
-            });
-            continue;
-        }
-
-        // 既存ショートコードのスキップ
-        let exists: bool = state
-            .emojis
-            .exists_by_shortcode(&shortcode)
-            .await
-            .unwrap_or(false);
-
-        if exists {
-            update_job(&state, &job_id, |s| {
-                s.skipped += 1;
-            });
-            continue;
-        }
-
-        // ZIP から画像バイト列を取得（blocking）
-        let file_name = entry.file_name.clone();
-        let zip_arc2 = Arc::clone(&zip_arc);
-        let image_bytes = match tokio::task::spawn_blocking(move || {
-            let cursor = Cursor::new(zip_arc2.as_slice());
-            let mut archive = zip::ZipArchive::new(cursor)?;
-            let mut file = archive.by_name(&file_name)?;
-            let mut buf = Vec::new();
-            file.read_to_end(&mut buf)?;
-            Ok::<Vec<u8>, zip::result::ZipError>(buf)
-        })
+) -> Result<Json<ImportStatusResponse>, ApiError> {
+    let progress = emoji_import::find_latest_progress(&state.db)
         .await
-        {
-            Ok(Ok(b)) => b,
-            Ok(Err(e)) => {
-                update_job(&state, &job_id, |s| {
-                    s.failed += 1;
-                    s.errors
-                        .push(format!(":{}:  ZIP 取得エラー: {}", shortcode, e));
-                });
-                continue;
-            }
-            Err(_) => {
-                update_job(&state, &job_id, |s| {
-                    s.failed += 1;
-                    s.errors.push(format!(":{}:  タスクパニック", shortcode));
-                });
-                continue;
-            }
-        };
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-        // 画像処理（Exif整理・Orientation補正・WebP変換）
-        let pipeline = match prepare_image(&image_bytes, MediaKind::Emoji) {
-            Ok(p) => p,
-            Err(e) => {
-                update_job(&state, &job_id, |s| {
-                    s.failed += 1;
-                    s.errors
-                        .push(format!(":{}:  画像処理エラー: {}", shortcode, e));
-                });
-                continue;
-            }
-        };
-
-        // 重複排除チェック → S3 アップロード → DB 記録
-        let media_file_id = match media_store::store_image(&state, pipeline, None).await {
-            Ok(outcome) => outcome.record.id,
-            Err(e) => {
-                update_job(&state, &job_id, |s| {
-                    s.failed += 1;
-                    s.errors.push(format!(":{}:  {}", shortcode, e));
-                });
-                continue;
-            }
-        };
-
-        // タグ: aliases を正規化
-        let tags: Vec<String> = entry
-            .emoji
-            .aliases
-            .iter()
-            .map(|a| a.trim().to_owned())
-            .filter(|a| !a.is_empty() && !a.chars().any(char::is_whitespace))
-            .collect();
-
-        let category = entry.emoji.category.clone().filter(|c| !c.is_empty());
-        let license = entry.emoji.license.clone().filter(|l| !l.is_empty());
-
-        let emoji_id = generate_snowflake_id(Utc::now());
-        let result = state
-            .emojis
-            .insert_if_absent(
-                emoji_id,
-                &shortcode,
-                media_file_id,
-                category.as_deref(),
-                &tags,
-                license.as_deref(),
-            )
-            .await;
-
-        match result {
-            Ok(false) => {
-                update_job(&state, &job_id, |s| {
-                    s.skipped += 1;
-                });
-            }
-            Ok(true) => {
-                update_job(&state, &job_id, |s| {
-                    s.processed += 1;
-                });
-            }
-            Err(e) => {
-                update_job(&state, &job_id, |s| {
-                    s.failed += 1;
-                    s.errors
-                        .push(format!(":{}:  絵文字登録エラー: {}", shortcode, e));
-                });
-            }
-        }
-    }
-
-    // ジョブ完了
-    update_job(&state, &job_id, |s| {
-        s.done = true;
-    });
-    tracing::info!(
-        "[emoji-import] job_id={} 完了: processed={} skipped={} failed={}",
-        job_id,
-        state
-            .emoji_import_jobs
-            .get(&job_id)
-            .map(|s| s.processed)
-            .unwrap_or(0),
-        state
-            .emoji_import_jobs
-            .get(&job_id)
-            .map(|s| s.skipped)
-            .unwrap_or(0),
-        state
-            .emoji_import_jobs
-            .get(&job_id)
-            .map(|s| s.failed)
-            .unwrap_or(0),
-    );
+    let resp = match progress {
+        Some(p) => ImportStatusResponse {
+            status: p.status,
+            total: p.total,
+            processed: p.imported + p.skipped + p.failed,
+            imported: p.imported,
+            skipped: p.skipped,
+            failed: p.failed,
+            error_reason: p.error_reason,
+            error_detail: p.error_detail,
+            problems: p
+                .problems
+                .into_iter()
+                .map(|pr| ImportProblem {
+                    shortcode: pr.shortcode,
+                    status: pr.status,
+                    reason: pr.reason,
+                    detail: pr.detail,
+                })
+                .collect(),
+        },
+        None => ImportStatusResponse {
+            status: "idle".to_owned(),
+            total: None,
+            processed: 0,
+            imported: 0,
+            skipped: 0,
+            failed: 0,
+            error_reason: None,
+            error_detail: None,
+            problems: Vec::new(),
+        },
+    };
+    Ok(Json(resp))
 }
 
-fn update_job<F: FnOnce(&mut ImportJobStatus)>(state: &AppState, job_id: &str, f: F) {
-    if let Some(mut s) = state.emoji_import_jobs.get_mut(job_id) {
-        f(&mut s);
+/// `POST /api/admin/emojis/import/cancel`
+///
+/// 状態を `cancelled` にするだけで、ZIP の後片付けは次に動くジョブが行う
+/// （取り込み中のジョブが読んでいるファイルをここで消さないため）。
+pub async fn cancel_import(
+    State(state): State<AppState>,
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let cancelled = emoji_import::cancel_active(&state.db, Utc::now())
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let Some(request_id) = cancelled else {
+        return Err(ApiError::NotFound("EMOJI_IMPORT_NOT_RUNNING"));
+    };
+    // ジョブがもう積まれていない（準備中に止まっていた等）場合にも ZIP が片付くよう、
+    // 一度積んでおく。重なってもジョブ側の advisory lock で1つしか動かない。
+    enqueue(&state, request_id).await;
+    Ok(Json(serde_json::json!({"status": "cancelled"})))
+}
+
+async fn enqueue(state: &AppState, request_id: i64) {
+    if let Err(e) = state
+        .job_queue
+        .enqueue(Job::EmojiImportProcess { request_id }, priority::LOW)
+        .await
+    {
+        tracing::error!(
+            "[job] EmojiImportProcess enqueue 失敗 (request_id={}): {}",
+            request_id,
+            e
+        );
     }
 }

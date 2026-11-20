@@ -5,6 +5,11 @@
 # 旧・非rootユーザー導入前にrootで書き込まれたsecrets.toml）で中身が入っている
 # 既存ボリュームをマウントした場合はDockerの自動コピーが働かないため、
 # 起動のたびにこのchownで吸収する（seiran-serverプロセス自体は必ずseiranで動く）。
+# 共有作業ディレクトリ（SEIRAN_WORK_DIR、絵文字インポートのZIP等）も同じ理由で揃える。
 set -e
 chown -R seiran:seiran /app/config
+if [ -n "$SEIRAN_WORK_DIR" ]; then
+  mkdir -p "$SEIRAN_WORK_DIR"
+  chown -R seiran:seiran "$SEIRAN_WORK_DIR"
+fi
 exec gosu seiran "$@"

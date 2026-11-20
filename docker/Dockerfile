@@ -25,7 +25,7 @@ RUN apt-get update \
 WORKDIR /app
 COPY --from=builder /seiran-server /usr/local/bin/seiran-server
 COPY docker/entrypoint.sh /usr/local/bin/entrypoint.sh
-RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /app/config && chown -R seiran:seiran /app
+RUN chmod +x /usr/local/bin/entrypoint.sh && mkdir -p /app/config /app/work && chown -R seiran:seiran /app
 
 # api / all は 3000、federation は 3001（説明用。実際の待受は環境変数で制御）
 EXPOSE 3000 3001

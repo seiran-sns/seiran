@@ -29,8 +29,12 @@ x-seiran: &seiran
     # アクセスログ（nginx の combined 形式）。ホストの ./logs に access.log.YYYY-MM-DD で
     # 日ごとに書き出し、14日分残す。blue と green は同じファイルに追記する。
     SEIRAN_ACCESS_LOG_DIR: /var/log/seiran
+    # API が受け取ったファイル（絵文字インポートのZIP等）を、ジョブが後から読む置き場所。
+    # 切り替えをまたいで処理が続くので、blue と green で共有する。
+    SEIRAN_WORK_DIR: /app/work
   volumes:
     - config-data:/app/config
+    - work-data:/app/work
     - ./logs:/var/log/seiran
   # 停止の合図から、実行中のジョブ（最長60秒）と常駐処理の片付けを待つ
   stop_grace_period: 120s
@@ -145,3 +149,4 @@ volumes:
   db-data:
   redis-data:
   config-data:
+  work-data:

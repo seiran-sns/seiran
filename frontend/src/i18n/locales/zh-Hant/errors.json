@@ -38,7 +38,6 @@
   "INVALID_USER_ID": "使用者無效",
   "INVALID_VISIBILITY": "可見度設定無效",
   "IP_BLOCKED": "由於連續驗證失敗，您的網路已被暫時封鎖，請稍後再試。",
-  "JOB_NOT_FOUND": "找不到該工作",
   "LIST_LIMIT_EXCEEDED": "您已達到列表數量上限",
   "LIST_MEMBER_LIMIT_EXCEEDED": "您已達到此列表的成員數量上限",
   "LIST_NOT_FOUND": "找不到該列表",
@@ -96,5 +95,8 @@
   "BIO_TOO_LONG": "簡介過長（最多 256 個字元）",
   "INTERACTION_RESTRICTED": "您的帳號受到限制，只能回覆、引用、提及或回應您的追蹤者。",
   "REPOST_COOLDOWN": "不能連續轉發同一則貼文。請稍候再試",
-  "REACTION_COOLDOWN": "不能連續新增同一個回應。請稍候再試"
+  "REACTION_COOLDOWN": "不能連續新增同一個回應。請稍候再試",
+  "EMOJI_IMPORT_RUNNING": "已有正在進行的表情符號匯入",
+  "EMOJI_IMPORT_NOT_RUNNING": "沒有正在進行的表情符號匯入",
+  "ZIP_FILE_REQUIRED": "未包含 ZIP 檔案"
 }

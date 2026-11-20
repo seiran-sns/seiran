@@ -92,12 +92,12 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 同じイメージを `--role` 違いで複数コンテナに分けるか、1コンテナで `all` にするかは運用の選択で、コード上の分岐は `main.rs` の配線だけ。
 
 - `docker-compose.prod.yml`（本番・単騎運用）: 3.1節。
-- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を共有する。`db` はコンテナ内DNSで足りるが、SSH トンネル経由の psql 用に `127.0.0.1:5432`（ループバックのみ）で公開する。`redis` も、ホストで `cargo run` するバックエンドが繋げるよう `127.0.0.1:6379`（ループバックのみ）で公開する（`docker-compose.mono.yml` と同じ）。
+- `docker-compose.yml`（split-role）: `db` / `redis`（ジョブキュー共有に必須）/ `api` / `federation-inbox` / `worker` / `atp-repo` / `frontend` / `nginx`（`docker/nginx.conf`）/ `tunnel`。`config-data` ボリュームで `secrets.toml` を、`work-data` ボリュームで共有作業ディレクトリ（7節）を共有する。`db` はコンテナ内DNSで足りるが、SSH トンネル経由の psql 用に `127.0.0.1:5432`（ループバックのみ）で公開する。`redis` も、ホストで `cargo run` するバックエンドが繋げるよう `127.0.0.1:6379`（ループバックのみ）で公開する（`docker-compose.mono.yml` と同じ）。
 - `docker-compose.mono.yml`（単一コンテナ）: `db` / `seiran-server`（role=all）/ `frontend` / `nginx`（`docker/nginx.mono.conf`）/ `docker-gen`（`--scale seiran-server=N` を nginx に反映）/ `redis` / `tunnel`。`scripts/dev-up.sh` は `db` と `redis` だけをこれで起動し、backend はホストで `cargo run` して `127.0.0.1:5432`・`127.0.0.1:6379`（`.env` の `REDIS_URL`）に繋ぐ。
 - `cron`（両 compose 共通）: `docker/cron/`（busybox crond）が `docker/cron/crontab` に従い `scripts/backup-db.sh` を毎時48分に実行する。Docker ソケット経由で `db` コンテナの `pg_dump -F custom` を実行し、aws-cli コンテナ（`docker run`）で R2 の `${BACKUP_OBJECT_S3URL}_latest` へ流し込む（引数 `SUFFIX` を渡すと `_latest` を `_${SUFFIX}` にもコピーする）。復元は `scripts/restore-db.sh [SUFFIX]`。同一ホストの他システムのバックアップと負荷が重ならないよう時刻をずらしてある。compose ファイルは `db` を解決できれば足りるので、スクリプトは split-role 構成でも `docker-compose.mono.yml` を参照する。
 - `db` は両方とも `docker/Dockerfile.postgres`（`postgres:16-bookworm` に pg_bigm をソースビルド）で、`shared_preload_libraries=pg_bigm,pg_stat_statements` を渡す。`shared_preload_libraries` の変更は postmaster の再起動が要るので、コンテナ再作成までは `pg_stat_statements` ビューが使えない。 プランナ・JIT の設定（`random_page_cost`・`jit` 等）は既定値のまま使い、クエリ側で既定値のまま良いプランになる形にする（`database.md`「タイムラインの候補抽出」）。
 - `GET /health`（Api/All のみ、認証不要）: DB に `SELECT 1` できるかで 200/503 を返す外形監視用。マイグレーションと `Messaging` の接続が済んでから待ち受けを始めるので、200 なら新しい版のプロセスがリクエストを受けられる（`deploy.sh` の切り替えの条件）。
-- `docker/Dockerfile`（seiran-server）は実プロセスを非 root（`seiran`、uid:gid 10001）で動かすが、イメージの `USER` は root のまま。`config-data`（`/app/config`）には root で書かれた既存ボリュームがマウントされうるが、Dockerfile の `chown` はイメージのレイヤーにしか効かず、空でないボリュームにはイメージの内容がコピーされないため。`docker/entrypoint.sh` が起動のたびに root で `/app/config` を `chown -R seiran:seiran` し、`gosu seiran` で降格して exec する（postgres 公式イメージと同じ構成）。他の書き込み先は `/tmp`（ffmpeg の一時ファイル）だけ。`docker/Dockerfile.frontend` は `node` ユーザーで、書き込みが無いので `USER` を固定している。`db`・`redis`・`nginx`・`cloudflared` は各イメージが自前で降格する。
+- `docker/Dockerfile`（seiran-server）は実プロセスを非 root（`seiran`、uid:gid 10001）で動かすが、イメージの `USER` は root のまま。`config-data`（`/app/config`）には root で書かれた既存ボリュームがマウントされうるが、Dockerfile の `chown` はイメージのレイヤーにしか効かず、空でないボリュームにはイメージの内容がコピーされないため。`docker/entrypoint.sh` が起動のたびに root で `/app/config` と `SEIRAN_WORK_DIR`（共有作業ディレクトリ、7節）を `chown -R seiran:seiran` し、`gosu seiran` で降格して exec する（postgres 公式イメージと同じ構成）。他の書き込み先は `/tmp`（ffmpeg の一時ファイル）だけ。`docker/Dockerfile.frontend` は `node` ユーザーで、書き込みが無いので `USER` を固定している。`db`・`redis`・`nginx`・`cloudflared` は各イメージが自前で降格する。
 
 ## 3.1 公開イメージと本番・単騎運用
 
@@ -202,12 +202,14 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 | `BskyListMembershipResolve{list_uri}` | リモート Bsky リストのメンバーを24時間キャッシュ（threadgate `#listRule`） | 低 |
 | `FetchBridgeOriginal{bridge_post_id, target_uri, protocol}` | ブリッジポストの元ポストを取りに行く | 中 |
 | `FollowImportProcess{request_id}` | フォローインポート（自己再 enqueue 型） | 低 |
+| `EmojiImportProcess{request_id}` | 絵文字インポート（Misskey 形式 ZIP、自己再 enqueue 型。7節） | 低 |
 | `MigrationFetchRepo` / `MigrationRequestPlcSignature` | DID 転入: リポジトリ取得・ステージング、確認コード送付の要求 | 中 |
 | `MigrationImportProcess` / `MigrationImportFollows` | DID 転入: ステージング済みデータの実体化、フォロー関係の反映（自己再 enqueue 型） | 低 |
 | `MigrationDeactivateSource` | DID 転入: 移行元アカウントの無効化（ベストエフォート） | 低 |
 
 **自己再 enqueue 型**: 大量の対象を1件ずつ処理し、進捗を DB に反映しつつキャンセル可能にするパターン。対象を DB テーブル（状態列つき）に置き、ジョブは「未処理を1件処理して自分を再度積む」を繰り返し、対象が尽きるかリクエストが `running` でなくなったら止まる。レート制限等で一時的に進めないときは、エラーで WorkerEngine のバックオフに任せず、`enqueue_retry` で一定時間後に自分を積み直す（バックオフは DB 接続エラー等の本当の失敗用。`FollowImportProcess` は5分間隔）。
 - `FollowImportProcess`: `follow_import_items` の `pending` を処理する。各行はカンマ区切りの1列目を識別子として読む（Misskey のフォローエクスポート `id,withReplies` 対応）。
+- `EmojiImportProcess`: `preparing` なら ZIP の meta.json を `emoji_import_items` に展開して `running` に進め、`running` なら `pending` を15秒ぶん取り込んでから積み直す（1件ずつ積み直すと、取り込みのたびに ZIP の目次を読み直すことになるため）。1件ごとの失敗（画像が壊れている等）は行の結果として記録して先へ進み、ジョブのエラーにはしない。
 - `MigrationImportProcess`: 未取り込みのレコード → blob の順に実体化し、尽きたら `deactivating_source` に進めて `MigrationDeactivateSource` と `MigrationImportFollows` を積む。
 - `MigrationImportFollows`: `status` を見ず、未反映の `app.bsky.graph.follow` 行の有無だけで続けるか決める（転入完了を待たない結果整合処理。レート制限も適用しない）。
 
@@ -218,6 +220,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 | ジョブ | 未完了の条件 | 関数 |
 |---|---|---|
 | `FollowImportProcess` | `follow_import_requests.status='running'` | `resume_running_follow_imports` |
+| `EmojiImportProcess` | `emoji_import_requests.status IN ('preparing','running')` | `resume_running_emoji_imports` |
 | `AccountWithdrawUnfollowAll` | `actors.withdrawn_at IS NOT NULL` かつ `follows` に残存行 | `resume_account_withdraw_unfollow_all` |
 | `BskyVideoPoll` | `media_files.bsky_video_status = 'pending'` | `resume_bsky_video_poll` |
 | `BskyPostCommitDeferred` | `posts.pending_bsky_media_file_id IS NOT NULL AND at_uri IS NULL` | `resume_bsky_post_commit_deferred` |
@@ -271,11 +274,11 @@ pub struct SearchSession {
 
 **secrets.toml**（`seiran-common::secrets`）: `SEIRAN_CONFIG_DIR`（既定 `./config`）の `secrets.toml` を読み、無ければ生成して 0600 で保存する。中身は `jwt_secret`（256bit hex）、AT Protocol 用 P-256 鍵ペア、AP HTTP Signatures 用 RSA-2048 鍵ペア、`encryption_key`（AES-256-GCM）。`storage_providers.secret_key` 等は `encryption_key` で暗号化して保存する（`crypto.rs`）。
 
-**S3 互換ストレージ**: `storage/selector.rs::select_provider()` が有効なプロバイダーを id 順に見て `capacity_mb` に収まる最初の1件を選ぶ。`storage/s3.rs` が PUT/DELETE、`media_probe.rs` が動画・音声のプローブ。
+**S3 互換ストレージ**: `storage/selector.rs::select_provider()` が有効なプロバイダーを id 順に見て `capacity_mb` に収まる最初の1件を選ぶ。`storage/s3.rs` が PUT/GET/DELETE（GET は公開URLではなく S3 API で読む。公開URLが CDN 越しで届かない構成でも読めるように）、`media_probe.rs` が動画・音声のプローブ。
 
 **動画の faststart 化**: `video/mp4`/`video/quicktime` は保存直前に `media_probe.rs::faststart_video()`（`ffmpeg -c copy -movflags +faststart`、再エンコードなし）を通す。`moov` アトムがファイル末尾にある mp4 は、ブラウザが `moov` を読むまで再生を始められない（Safari/iOS はほぼ再生不能）。sha256 の重複判定・ffprobe・Bsky 動画パイプラインへの提出は faststart 化前のバイト列で行う。失敗したら元のバイト列を保存する。
 
-**画像アップロード**（`storage/image.rs::prepare_image()`）: 不要に劣化させないため候補を2つ作る。(1) `storage/exif.rs`（`img-parts`）で JPEG/PNG の Exif を Orientation だけに絞った無劣化の候補（画素は再エンコードしない）、(2) Orientation を画素に適用し `MediaKind` ごとの最大サイズにリサイズして WebP ロスレスにした候補。`media_store::store_image()` が両方の sha256+blurhash で重複を確認し、未登録なら小さい方を保存する。img-parts 非対応（静止画 WebP・AVIF・単一フレーム GIF 等）は (2) だけ。アニメーション画像（GIF/APNG/WebP）は元のバイト列を保存する。
+**画像アップロード**（`storage/image.rs::prepare_image()`）: 不要に劣化させないため候補を2つ作る。(1) `storage/exif.rs`（`img-parts`）で JPEG/PNG の Exif を Orientation だけに絞った無劣化の候補（画素は再エンコードしない）、(2) Orientation を画素に適用し `MediaKind` ごとの最大サイズにリサイズして WebP ロスレスにした候補。`seiran-common::storage::media_store`（`MediaStore::store_image()`）が両方の sha256+blurhash で重複を確認し、未登録なら小さい方を保存する。API とジョブ（絵文字インポート）が共有し、API 側の `handlers::media_store` はエラーを API のエラーに変換するだけ。img-parts 非対応（静止画 WebP・AVIF・単一フレーム GIF 等）は (2) だけ。アニメーション画像（GIF/APNG/WebP）は元のバイト列を保存する。
 
 **リモートメディアプロキシ（`GET /proxy?url=...`）**: フロントは別オリジンのアバター・添付・サムネイル・絵文字について、直リンクとこのプロキシ経由URLの両方を候補にして順に試す（`mediaSources`。SNS由来は直リンク優先、OGPサムネイルはプロキシ優先）。同一オリジンと、`/api/meta` の `internalMediaOrigins`（有効なストレージの公開URL。R2 等は別サブドメインのことが多い）は直接参照する（25MiB の上限にかからないように）。
 - HTTP(S) のみ、資格情報・fragment を拒否、DNS 解決した全IPについて非公開IPを拒否。リダイレクト先も毎回検証し、5回・25MiB・20秒まで。画像・動画・音声以外は中継しない。
@@ -284,6 +287,12 @@ pub struct SearchSession {
 - 検証・取得は `handlers/media_proxy.rs::fetch_validated()` で、`/proxy` とリモート絵文字インポートが共有する。
 
 **リモート絵文字カタログ（#73）**: AP 受信（本文・表示名・リアクション）で見つけたカスタム絵文字を `remote_emojis` に `upsert_seen` する（画像は取り込まない）。管理画面「絵文字」の「リモート」タブと、NoteCard の本文・リアクションの右クリックメニュー（管理者のみ、`EmojiContextMenu.tsx`）から、`EmojiImportDialog.tsx` → `POST /api/admin/emojis/remote/import` で `custom_emojis` に取り込む（`fetch_validated` → `prepare_image` → `store_image`）。
+
+**共有作業ディレクトリ**（`seiran-common::work_dir`、`SEIRAN_WORK_DIR`、既定 `./work`）: API が受け取ったファイルを、別プロセスのワーカーが後から読む置き場所（いまは絵文字インポートの ZIP だけ）。役割を分けた構成ではすべてのバックエンドプロセスで同じディレクトリを共有することを運用の前提にする（Docker では `work-data` ボリューム。blue-green の切り替えをまたいで処理が続くので新旧の色でも共有する）。ジョブが ZIP を見つけられなければ、インポートを `failed`（`zip_missing`）にする。
+
+**絵文字インポート・エクスポート（Misskey 形式 ZIP）**: 形式は Misskey のエクスポートと同じで、ルートに `meta.json`（`metaVersion: 2`、`emojis[].fileName`・`downloaded`・`emoji.{name, category, aliases, license, ...}`）と画像を置く。seiran のタグは `aliases` に対応する。
+- インポート（`handlers/admin/emoji_import.rs`）: `POST /api/admin/emojis/import` が ZIP（上限 500MB。前段の nginx・LB もこのパスだけ同じ上限にし、他のパスは 100MB のまま）をメモリに溜めずに作業ディレクトリへ書き出し、`preparing` のリクエストを作って `EmojiImportProcess` を積む（5節）。進捗は DB の集計で返すので（`GET /api/admin/emojis/import`）、どのプロセスに問い合わせても、再起動をまたいでも見える。実行中はサイト全体で1本だけ（`EMOJI_IMPORT_RUNNING`）。中止（`POST /api/admin/emojis/import/cancel`）は状態を変えるだけで、ZIP は次に動くジョブが消す（取り込み中のジョブが読んでいるファイルを API が消さないため）。完了・中止・失敗のどれでも最後にジョブが ZIP を消す。既にあるショートコードは上書きせずスキップする。ショートコードの文字種は手動登録と同じ（`is_valid_emoji_shortcode`）。
+- エクスポート（`handlers/admin/emoji_export.rs`）: ZIP をサーバーでもブラウザでも溜めずに、作りながら送る。認証は localStorage の Bearer トークンなので、ブラウザ標準のダウンロード（ディスクへ直接書く）には載せられない。そこで `POST /api/admin/emojis/export/ticket` が用途を限った60秒のトークン（`LocalAuthProvider::generate_purpose_token`、用途 `emoji_export`）付きの URL を返し、フロントはそれを開く。`GET /api/admin/emojis/export?ticket=...` は使う時点でもロールと退会を確かめる。画像はストレージから S3 API で読み、圧縮済みなので無圧縮（Stored）で格納する（`meta.json` だけ deflate）。ZIP の書き込みは同期 API なので `spawn_blocking` のスレッドで行い、画像の取得（非同期）とはチャネルでつなぐ。読めなかった画像は `downloaded: false` で載せる（インポート側は Misskey と同じく飛ばす。seiran のインポートでは ZIP に無いファイルとして `file_missing` になる）。
 
 **未設定アバター（#211）**: アバターの無いローカル actor には、`actor_id` をシードに色相・目・口を決めた顔を `GET /api/avatars/:actor_id` で返す（生成と URL は `seiran-common::avatar`）。形式は SVG 非対応の Misskey クライアントのため PNG。内容は ID で決まるので `immutable` で長期キャッシュし、生成仕様を変えたら URL の `v` を上げる（現在 `v=5`）。フロント用 API・Misskey 互換 API とも同じ URL を返す。`/api` 配下に置くのは Cloudflare Tunnel の既存ルーティングを使うため。顔は目の間隔3段階（18/23/28）、口は原型の80%、笑顔の一種は上辺が直線のD型。ATP 側の扱いは `docs/protocols.md` 7節「代替アバターの ATP blob」。
 
@@ -386,6 +395,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 | 本番・単騎運用 | `SEIRAN_VERSION`（動かす版）、`SEIRAN_IMAGE`（既定 `seiranorg/seiran`）。3.1節 |
 | フロントエンドの配信・アクセスログ | `SEIRAN_FRONTEND_DIR`（ビルド済みフロントエンドのディレクトリ。公開イメージでは設定済み）、`SEIRAN_ACCESS_LOG_DIR`（アクセスログの書き出し先。未設定なら書かない）、`SEIRAN_ACCESS_LOG_KEEP_DAYS`（既定14）。3.1節 |
 | シークレット | `SEIRAN_CONFIG_DIR`（既定 `./config`）。JWT secret 等は `secrets.toml` で自動生成する |
+| 共有作業ディレクトリ | `SEIRAN_WORK_DIR`（既定 `./work`）。API が受け取ったファイル（絵文字インポートの ZIP）をジョブが読む。複数プロセス構成では全バックエンドで共有する。7節 |
 | DBバックアップ | `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`/`AWS_DEFAULT_REGION`/`S3_ENDPOINT`（R2 の API トークン）、`BACKUP_OBJECT_S3URL`（`s3://<bucket>/<prefix>`）。`cron` サービスと `scripts/backup-db.sh` が `.env` から読む |
 | 外部サービス | `TUNNEL_TOKEN`（Cloudflare Tunnel。ハンドル検証 TXT 用の Cloudflare DNS トークン/Zone ID は環境変数ではなく管理画面設定 `site_settings`）、`ATP_RELAY_URL`（`requestCrawl` 先、カンマ区切り、既定 `https://bsky.network`）、`PLC_DIRECTORY_BASE_URL`（既定 `https://plc.directory`）、`ATP_APPVIEW_URL`（既定 `https://api.bsky.app`）、`SEIRAN_ALLOW_PRIVATE_NETWORK`（`true` で連合用クライアントの非公開IP拒否を無効化。E2E 専用） |
 | 開発・一回限り | `WEBAUTHN_ORIGIN`（ローカル/E2E のパスキー origin）、`ATP_BACKFILL_UNSET_AVATAR_PROFILES_ONCE`、`BSKY_FOLLOWER_POLL_INTERVAL_SECS` |

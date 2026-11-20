@@ -1,5 +1,5 @@
 import { request, uploadFormData } from "./core";
-import type { AdminReport, AdminUser, AuthIpBlock, DeniedHostsResponse, CustomEmoji, EmojiImportJob, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
+import type { AdminReport, AdminUser, AuthIpBlock, DeniedHostsResponse, CustomEmoji, EmojiImportStatus, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
 
 export const admin = {
   listReports() {
@@ -217,16 +217,20 @@ export const admin = {
   deleteEmoji(id: string) {
     return request<void>("DELETE", `/admin/emojis/${encodeURIComponent(id)}`);
   },
-  importEmojis(file: File): Promise<EmojiImportJob> {
+  importEmojis(file: File): Promise<{ requestId: string }> {
     const formData = new FormData();
     formData.append("file", file);
-    return uploadFormData<EmojiImportJob>("/admin/emojis/import", formData);
+    return uploadFormData<{ requestId: string }>("/admin/emojis/import", formData);
   },
-  getEmojiImportStatus(jobId: string) {
-    return request<EmojiImportJob>(
-      "GET",
-      `/admin/emojis/import/${encodeURIComponent(jobId)}`,
-    );
+  getEmojiImportStatus() {
+    return request<EmojiImportStatus>("GET", "/admin/emojis/import");
+  },
+  cancelEmojiImport() {
+    return request<void>("POST", "/admin/emojis/import/cancel");
+  },
+  /** エクスポートZIPのダウンロードURL（短命チケット付き）を発行する。 */
+  issueEmojiExportUrl() {
+    return request<{ url: string }>("POST", "/admin/emojis/export/ticket");
   },
   listRemoteEmojis(keyword?: string) {
     const q = keyword?.trim()

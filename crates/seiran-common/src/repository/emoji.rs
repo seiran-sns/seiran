@@ -15,6 +15,16 @@ pub fn parse_custom_emoji_shortcode(s: &str) -> Option<&str> {
     Some(inner)
 }
 
+/// カスタム絵文字のショートコードとして登録できるか（英数字・アンダースコアのみ、1〜100文字）。
+/// 本文中の `:shortcode:` 抽出（`extract_shortcode_candidates`）と同じ文字種に揃える。
+/// 外れたものを登録すると、投稿本文から絶対に解決できない絵文字になる。長さは
+/// `custom_emojis.shortcode` の `VARCHAR(100)` に合わせる。
+pub fn is_valid_emoji_shortcode(shortcode: &str) -> bool {
+    !shortcode.is_empty()
+        && shortcode.chars().count() <= 100
+        && shortcode.chars().all(|c| c.is_alphanumeric() || c == '_')
+}
+
 /// `:shortcode:` または `:shortcode@host:`（本家Misskey準拠、ローカルは `@.`）を分解する。
 /// shortcode部分の文字種は `parse_custom_emoji_shortcode` と揃える。host部分はドメイン名字句
 /// （英数字・`.`・`-`、ローカルを表す単独の `.` を含む）のみ許可する。
@@ -436,6 +446,37 @@ pub async fn list_public(pool: &sqlx::PgPool) -> Result<Vec<PublicEmojiRow>, sql
         "SELECT ce.id, ce.shortcode, ce.category, ce.tags, ce.license,
                 rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
                 mf.width, mf.height, mf.blurhash
+         FROM custom_emojis ce
+         JOIN media_files mf ON mf.id = ce.media_file_id
+         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         ORDER BY ce.id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+/// エクスポート（Misskey形式ZIP）用の1行。画像の実体をストレージから読むための
+/// `storage_provider_id`/`storage_key` を含む。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct EmojiExportRow {
+    pub id: i64,
+    pub shortcode: String,
+    pub category: Option<String>,
+    pub tags: Vec<String>,
+    pub license: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub mime_type: String,
+    pub storage_provider_id: i64,
+    pub storage_key: String,
+    pub url: String,
+}
+
+/// 全カスタム絵文字をエクスポート用に ID 昇順で返す。
+pub async fn list_for_export(pool: &PgPool) -> Result<Vec<EmojiExportRow>, sqlx::Error> {
+    sqlx::query_as::<_, EmojiExportRow>(
+        "SELECT ce.id, ce.shortcode, ce.category, ce.tags, ce.license, ce.created_at,
+                mf.mime_type, mf.storage_provider_id, mf.storage_key,
+                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url
          FROM custom_emojis ce
          JOIN media_files mf ON mf.id = ce.media_file_id
          JOIN storage_providers sp ON sp.id = mf.storage_provider_id

@@ -149,15 +149,11 @@ pub async fn require_emoji_admin(
     app_tokens: &dyn AppTokenRepository,
     users: &dyn UserRepository,
 ) -> Result<AuthUser, ApiError> {
-    require_role_in(
-        headers,
-        auth,
-        app_tokens,
-        users,
-        &["admin", "moderator", "emoji-editor"],
-    )
-    .await
+    require_role_in(headers, auth, app_tokens, users, EMOJI_ADMIN_ROLES).await
 }
+
+/// 絵文字管理ができるロール。
+pub const EMOJI_ADMIN_ROLES: &[&str] = &["admin", "moderator", "emoji-editor"];
 
 /// JWT 検証 + 通報対応権限（admin / moderator）チェック（#179）。
 /// moderator は調停者として通報の閲覧・対応（凍結・投稿削除・連合転送を含む）を行える。

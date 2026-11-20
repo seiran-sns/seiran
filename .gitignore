@@ -43,3 +43,4 @@ docker/lb/active.conf
 
 # 本番構成（docker-compose.prod.yml）のアクセスログ
 /logs/
+/work/

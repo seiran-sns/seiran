@@ -577,6 +577,9 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         Job::FollowImportProcess { request_id } => jobs::follow_import::handle(request_id, ctx)
             .await
             .map_err(JobError::from),
+        Job::EmojiImportProcess { request_id } => jobs::emoji_import::handle(request_id, ctx)
+            .await
+            .map_err(JobError::from),
         Job::BskyListMembershipResolve { list_uri } => {
             jobs::bsky_list_membership_resolve::handle(list_uri, ctx)
                 .await
@@ -652,6 +655,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
         Job::FollowImportProcess { .. } => "FollowImportProcess",
+        Job::EmojiImportProcess { .. } => "EmojiImportProcess",
         Job::BskyListMembershipResolve { .. } => "BskyListMembershipResolve",
         Job::PollFetch { .. } => "PollFetch",
         Job::PostMergeCleanup { .. } => "PostMergeCleanup",
@@ -818,6 +822,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::FollowImportProcess { .. } => RetryConfig {
             // レート制限待機は `enqueue_retry` を直接呼ぶ独自経路（このリトライ設定を
             // 経由しない）。ここは真のDBエラー等、予期しない失敗時のみ使われる軽量設定。
+            max_attempts: 5,
+            base_delay_ms: 2000,
+            max_delay_ms: 60_000,
+        },
+        Job::EmojiImportProcess { .. } => RetryConfig {
+            // 1件ごとの失敗（画像が壊れている等）は項目の結果として記録して先へ進むので、
+            // ここに来るのは DB 障害等の予期しない失敗だけ。
             max_attempts: 5,
             base_delay_ms: 2000,
             max_delay_ms: 60_000,

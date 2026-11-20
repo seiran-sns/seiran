@@ -38,7 +38,6 @@
   "INVALID_USER_ID": "ユーザーの指定が正しくありません",
   "INVALID_VISIBILITY": "公開範囲の指定が正しくありません",
   "IP_BLOCKED": "連続した認証失敗により一時的にブロックされています。しばらく待ってから再試行してください",
-  "JOB_NOT_FOUND": "処理ジョブが見つかりません",
   "LIST_LIMIT_EXCEEDED": "作成できるリストの上限に達しています",
   "LIST_MEMBER_LIMIT_EXCEEDED": "リストに追加できるメンバー数の上限に達しています",
   "LIST_NOT_FOUND": "リストが見つかりません",
@@ -96,5 +95,8 @@
   "BIO_TOO_LONG": "自己紹介が長すぎます（256文字まで）",
   "INTERACTION_RESTRICTED": "このアカウントは制限されているため、フォロワー以外への返信・引用・メンション・リアクションはできません",
   "REPOST_COOLDOWN": "同じポストを続けてリポストすることはできません。少し待ってから再試行してください",
-  "REACTION_COOLDOWN": "同じリアクションを続けて付けることはできません。少し待ってから再試行してください"
+  "REACTION_COOLDOWN": "同じリアクションを続けて付けることはできません。少し待ってから再試行してください",
+  "EMOJI_IMPORT_RUNNING": "既に実行中の絵文字インポートがあります",
+  "EMOJI_IMPORT_NOT_RUNNING": "実行中の絵文字インポートはありません",
+  "ZIP_FILE_REQUIRED": "ZIPファイルが含まれていません"
 }

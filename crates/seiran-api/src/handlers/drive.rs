@@ -788,17 +788,13 @@ pub(crate) async fn check_quota(
     provider: &seiran_common::repository::StorageProvider,
     upload_size: i64,
 ) -> Result<(), ApiError> {
-    if let Some(cap_mb) = provider.capacity_mb {
-        let used_bytes = state
-            .storage_providers
-            .get_used_bytes(provider.id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        if cap_mb * 1024 * 1024 < used_bytes + upload_size {
-            return Err(ApiError::InsufficientStorage);
-        }
-    }
-    Ok(())
+    seiran_common::storage::media_store::check_quota(
+        state.storage_providers.as_ref(),
+        provider,
+        upload_size,
+    )
+    .await
+    .map_err(media_store::map_media_store_error)
 }
 
 /// 既存レコードの公開 URL を provider の public_url + storage_key で組み立てる。

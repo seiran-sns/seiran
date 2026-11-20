@@ -19,6 +19,7 @@ pub mod bsky_list_membership_resolve;
 pub mod bsky_post_commit_deferred;
 pub mod bsky_video_poll;
 pub mod dm_recipient_resolve;
+pub mod emoji_import;
 pub mod fetch_bridge_original;
 pub mod follow_import;
 pub mod follow_requests_bulk_accept;

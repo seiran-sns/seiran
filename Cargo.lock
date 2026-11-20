@@ -4008,6 +4008,7 @@ dependencies = [
  "dashmap",
  "dotenvy",
  "emojis",
+ "futures-util",
  "hex",
  "html-escape",
  "image",
@@ -4105,6 +4106,7 @@ dependencies = [
  "url",
  "urlencoding",
  "uuid",
+ "zip",
  "zstd",
 ]
 

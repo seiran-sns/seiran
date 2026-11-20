@@ -38,7 +38,6 @@
   "INVALID_USER_ID": "无效用户",
   "INVALID_VISIBILITY": "可见性设置无效",
   "IP_BLOCKED": "由于连续认证失败，您的网络已被临时封锁，请稍后再试。",
-  "JOB_NOT_FOUND": "找不到工作",
   "LIST_LIMIT_EXCEEDED": "您已达到列表数量上限",
   "LIST_MEMBER_LIMIT_EXCEEDED": "您已达到此列表的最大成员数",
   "LIST_NOT_FOUND": "未找到列表",
@@ -96,5 +95,8 @@
   "BIO_TOO_LONG": "简介过长（最多 256 个字符）",
   "INTERACTION_RESTRICTED": "您的账户受到限制，只能回复、引用、提及或回应您的关注者。",
   "REPOST_COOLDOWN": "不能连续转发同一条帖子。请稍候再试",
-  "REACTION_COOLDOWN": "不能连续添加同一个回应。请稍候再试"
+  "REACTION_COOLDOWN": "不能连续添加同一个回应。请稍候再试",
+  "EMOJI_IMPORT_RUNNING": "已有正在进行的表情导入",
+  "EMOJI_IMPORT_NOT_RUNNING": "没有正在进行的表情导入",
+  "ZIP_FILE_REQUIRED": "未包含 ZIP 文件"
 }

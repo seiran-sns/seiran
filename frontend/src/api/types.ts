@@ -220,14 +220,33 @@ export interface FediverseRelay {
   updated_at: string;
 }
 
-export interface EmojiImportJob {
-  jobId: string;
-  total: number;
+export type EmojiImportState =
+  | "idle"
+  | "preparing"
+  | "running"
+  | "completed"
+  | "cancelled"
+  | "failed";
+
+export interface EmojiImportProblem {
+  shortcode: string;
+  status: "skipped" | "failed";
+  /** 理由のコード（`admin:emojisPanel.importReasons.*` で文言に引く）。 */
+  reason: string;
+  detail?: string;
+}
+
+export interface EmojiImportStatus {
+  status: EmojiImportState;
+  /** ZIP の中身を数え終わるまで（preparing の間）は null。 */
+  total: number | null;
   processed: number;
+  imported: number;
   skipped: number;
   failed: number;
-  done: boolean;
-  errors: string[];
+  errorReason?: string;
+  errorDetail?: string;
+  problems: EmojiImportProblem[];
 }
 
 export interface AuthResponse {

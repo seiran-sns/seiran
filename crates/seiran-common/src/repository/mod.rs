@@ -32,6 +32,7 @@ pub mod email_change;
 pub mod email_short_code;
 pub mod email_verification;
 pub mod emoji;
+pub mod emoji_import;
 pub mod feed;
 pub mod follow;
 pub mod follow_import;
@@ -88,7 +89,8 @@ pub use email_short_code::{EmailShortCodeRepository, PgEmailShortCodeRepository}
 pub use email_verification::{EmailVerificationRepository, PgEmailVerificationRepository};
 pub use emoji::{
     extract_shortcode_candidates, format_local_reaction_content, format_remote_reaction_content,
-    parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host, with_poll_option_names,
+    is_valid_emoji_shortcode, parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host,
+    with_poll_option_names,
 };
 pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};

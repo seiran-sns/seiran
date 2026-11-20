@@ -338,6 +338,12 @@ pub enum Job {
     /// `running`でなくなったら（完了/キャンセル）再enqueueせず終了する。
     FollowImportProcess { request_id: i64 },
 
+    /// 絵文字インポート（Misskey形式ZIP）の自己再enqueue型ジョブ。`preparing` なら
+    /// 共有作業ディレクトリのZIPから meta.json を読んで `emoji_import_items` に展開し、
+    /// `running` なら `pending` の行を一定時間ぶん取り込んで自分を積み直す
+    /// （`jobs::emoji_import`）。
+    EmojiImportProcess { request_id: i64 },
+
     /// リモート（seiranユーザー所有でない）Bskyリストの全メンバーDIDを`app.bsky.graph.getList`
     /// から取得し、`bsky_remote_list_membership_cache`へ24時間TTLで保存する。
     /// threadgate の listRule 評価（`docs/protocols.md`参照）でキャッシュ未登録/期限切れの
@@ -550,6 +556,7 @@ mod tests {
                 url: "https://youtube.com/watch?v=x".into(),
             },
             Job::FollowImportProcess { request_id: 1 },
+            Job::EmojiImportProcess { request_id: 1 },
             Job::FetchBridgeOriginal {
                 bridge_post_id: 1,
                 target_uri: "at://did:plc:test/app.bsky.feed.post/abc".into(),

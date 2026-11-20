@@ -1,5 +1,6 @@
 pub mod actors;
 pub mod auth_ip_blocks;
+pub mod emoji_export;
 pub mod emoji_import;
 pub mod emojis;
 pub mod relays;
