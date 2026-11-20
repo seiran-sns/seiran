@@ -17,7 +17,7 @@
     "emptyList": "이 목록의 회원이 올린 게시물이 여기에 표시됩니다.",
     "quickNotifications": "빠른 알림",
     "quickNotificationsWithCount": "빠른 알림({{count}})",
-    "trendsAndSearch": "트렌드 및 검색",
+    "search": "검색",
     "composerToggleLabel": "게시물 양식"
   },
   "noteDetailPage": {

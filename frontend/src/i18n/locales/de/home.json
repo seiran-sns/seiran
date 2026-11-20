@@ -17,7 +17,7 @@
     "emptyList": "Hier werden Beiträge der Mitglieder dieser Liste angezeigt.",
     "quickNotifications": "Schnelle Benachrichtigungen",
     "quickNotificationsWithCount": "Schnellbenachrichtigungen ({{count}})",
-    "trendsAndSearch": "Trends & Suche",
+    "search": "Suche",
     "composerToggleLabel": "Formular posten"
   },
   "noteDetailPage": {

@@ -17,7 +17,7 @@
     "emptyList": "Las publicaciones de los miembros de esta lista aparecerán aquí.",
     "quickNotifications": "Notificaciones rápidas",
     "quickNotificationsWithCount": "Notificaciones rápidas ({{count}})",
-    "trendsAndSearch": "Tendencias y búsqueda",
+    "search": "Buscar",
     "composerToggleLabel": "Formulario de publicación"
   },
   "noteDetailPage": {

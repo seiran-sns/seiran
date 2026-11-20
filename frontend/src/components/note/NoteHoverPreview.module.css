@@ -9,8 +9,8 @@
   left: 0;
   /* .leftNav・.rightは常設UIとして明示的にz-index:100を持つ（AppShell.module.css）。
      side="left"/"right"はposition:fixedへ切り替わり、ルートのスタッキング文脈で
-     .right等と比較されるため、z-indexが同程度以下だと.rightの中身（トレンド
-     パネル等）の下に潜ってしまう（実機指摘済みの回帰）。それらより確実に手前に
+     .right等と比較されるため、z-indexが同程度以下だと.rightの中身（検索
+     パネル等）の下に潜ってしまう。それらより確実に手前に
      出るよう100を超える値にする。 */
   z-index: 101;
   width: 320px;

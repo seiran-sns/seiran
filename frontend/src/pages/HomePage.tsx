@@ -7,7 +7,7 @@ import AppShell from "../components/layout/AppShell";
 import NoteList from "../components/note/NoteList";
 import PostComposer from "../components/note/PostComposer";
 import NotificationsPanel from "../components/right/NotificationsPanel";
-import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
+import SearchPanel from "../components/right/SearchPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { useRightPane } from "../contexts/RightPaneContext";
 import { Feed, feedKey, useHomeFeed } from "../contexts/HomeFeedContext";
@@ -539,7 +539,7 @@ export default function HomePage() {
     </div>
   );
 
-  // 選択中のタブシート（通知/トレンド・検索）を再度クリックした場合はタブ切替ではなく、
+  // 選択中のタブシート（通知/検索）を再度クリックした場合はタブ切替ではなく、
   // 右ペイン（PCではaside自体がoverflow-y:autoで独立スクロール、スマホでは通常のwindowスクロール
   // に合流する）の先頭へスクロールする。scrollIntoViewはどちらの場合も適切な祖先を辿って
   // 「このブロックの先頭」を画面上端に合わせてくれる。
@@ -563,7 +563,7 @@ export default function HomePage() {
       <Tabs
         tabs={[
           unread > 0 ? t("home:homePage.quickNotificationsWithCount", { count: unread }) : t("home:homePage.quickNotifications"),
-          t("home:homePage.trendsAndSearch"),
+          t("home:homePage.search"),
         ]}
         active={timelineTab}
         onChange={handleTimelineTabChange}
@@ -579,7 +579,7 @@ export default function HomePage() {
           onCacheChange={setNotifPanelCache}
         />
       ) : (
-        <TrendsSearchPanel />
+        <SearchPanel />
       )}
     </div>
   );
