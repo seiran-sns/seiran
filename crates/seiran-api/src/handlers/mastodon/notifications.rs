@@ -10,7 +10,9 @@ use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
-use super::convert::build_notifications;
+use super::convert::{
+    build_notifications, EMOJI_REACTION_NOTIFICATION, PLEROMA_EMOJI_REACTION_NOTIFICATION,
+};
 use super::extract::{id_cursors, lenient, paginated, MastodonQuery, PageParams};
 
 #[derive(Deserialize, Default)]
@@ -48,8 +50,27 @@ pub async fn list(
     let cursors = id_cursors(ids.iter().map(String::as_str));
     let mut notifications = build_notifications(&state, rows, user.actor_id).await?;
     notifications.retain(|n| {
-        (params.types.is_empty() || params.types.iter().any(|t| t == n.kind))
-            && !params.exclude_types.iter().any(|t| t == n.kind)
+        (params.types.is_empty() || params.types.iter().any(|t| type_matches(t, n.kind)))
+            && !params.exclude_types.iter().any(|t| type_matches(t, n.kind))
     });
     Ok(paginated(&uri, &state.local_domain, notifications, cursors))
+}
+
+/// `types`/`exclude_types` の指定が通知の `type` に当たるか。絵文字リアクションの通知は、
+/// Pleroma の名前（`pleroma:emoji_reaction`）で指定されても当てる。
+fn type_matches(requested: &str, kind: &str) -> bool {
+    requested == kind
+        || (requested == PLEROMA_EMOJI_REACTION_NOTIFICATION && kind == EMOJI_REACTION_NOTIFICATION)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::type_matches;
+
+    #[test]
+    fn pleroma_reaction_type_matches_emoji_reaction() {
+        assert!(type_matches("emoji_reaction", "emoji_reaction"));
+        assert!(type_matches("pleroma:emoji_reaction", "emoji_reaction"));
+        assert!(!type_matches("favourite", "emoji_reaction"));
+    }
 }

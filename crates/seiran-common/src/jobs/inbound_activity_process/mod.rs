@@ -20,6 +20,7 @@ use crate::repository::{
 };
 use crate::streaming::{
     broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update, ChannelScope,
+    ReactorChange,
 };
 use crate::traits::{Job, JobQueue};
 

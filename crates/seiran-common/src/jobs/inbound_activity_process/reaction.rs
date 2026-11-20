@@ -81,7 +81,7 @@ pub(super) async fn handle_reaction(
 
     // reactions へ INSERT（同一ユーザー・同一内容の重複、activity_id 重複はスキップ）
     let new_reaction_id = generate_snowflake_id(chrono::Utc::now());
-    inbox
+    let saved = inbox
         .reaction_repo
         .upsert(&crate::repository::NewReaction {
             id: new_reaction_id,
@@ -130,6 +130,11 @@ pub(super) async fn handle_reaction(
     // タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
     // ストリーミング挙動に合わせる）。DM（`direct`）はフォロワーへ漏れないよう配信先を
     // 参加者のみに絞った専用版を使う。
+    let reactor = ReactorChange {
+        actor_id,
+        emoji: Some(&db_content),
+        previous_emoji: saved.previous.as_ref().map(|p| p.content.as_str()),
+    };
     if is_direct_post(&inbox.db_pool, post_id).await {
         let dm_repo = PgDmRepository::new(inbox.db_pool.clone());
         broadcast_dm_reaction_update(
@@ -138,8 +143,7 @@ pub(super) async fn handle_reaction(
             inbox.reaction_repo.as_ref(),
             post_id,
             post_author_id,
-            actor_id,
-            Some(&db_content),
+            reactor,
         )
         .await;
     } else {
@@ -149,8 +153,7 @@ pub(super) async fn handle_reaction(
             inbox.reaction_repo.as_ref(),
             post_id,
             post_author_id,
-            actor_id,
-            Some(&db_content),
+            reactor,
         )
         .await;
     }

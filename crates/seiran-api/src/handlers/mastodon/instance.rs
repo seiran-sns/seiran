@@ -102,6 +102,10 @@ fn polls_configuration() -> Value {
     })
 }
 
+/// Fedibird の拡張のうち対応しているもの。Fedibird・kmyblue 対応のクライアントは、これで
+/// 投稿の `emoji_reactions` と付け外しの API（`emoji_reactions` モジュール）を使うかを決める。
+const FEDIBIRD_CAPABILITIES: [&str; 1] = ["emoji_reaction"];
+
 /// GET /api/v1/instance
 pub async fn instance_v1(State(state): State<AppState>) -> Result<Json<Value>, ApiError> {
     let site = site_info(&state).await?;
@@ -137,6 +141,7 @@ pub async fn instance_v1(State(state): State<AppState>) -> Result<Json<Value>, A
         },
         "contact_account": null,
         "rules": [],
+        "fedibird_capabilities": FEDIBIRD_CAPABILITIES,
     })))
 }
 
@@ -169,6 +174,7 @@ pub async fn instance_v2(State(state): State<AppState>) -> Result<Json<Value>, A
         "api_versions": { "mastodon": MASTODON_API_VERSION },
         "contact": { "email": "", "account": null },
         "rules": [],
+        "fedibird_capabilities": FEDIBIRD_CAPABILITIES,
     })))
 }
 

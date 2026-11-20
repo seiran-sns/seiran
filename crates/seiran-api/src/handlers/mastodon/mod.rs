@@ -8,10 +8,12 @@
 //! - `oauth`: アプリ登録と Authorization Code フロー（トークンは MiAuth と同じ無期限 JWT）
 //! - `extract`: JSON/フォーム/クエリの受け口、`Link` ヘッダーによるページネーション
 //! - `convert`: `TimelinePost`/`Actor`/通知 → Mastodon エンティティ
+//! - `emoji_reactions`: Fedibird 互換の絵文字リアクション（Scia 等の対応クライアント向け）
 //! - `instance`・`timelines`・`statuses`・`accounts`・`search`・`media`・`notifications`
 
 pub mod accounts;
 pub mod convert;
+pub mod emoji_reactions;
 pub mod extract;
 pub mod instance;
 pub mod media;

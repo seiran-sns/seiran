@@ -428,3 +428,101 @@ test("Mastodon互換API: ストリーミングでホームの新着と通知が�
     aliceWs.close();
   }
 });
+
+test("Mastodon互換API: Fedibird互換の絵文字リアクションを付け外しでき、通知とストリーミングに出る", async ({
+  request,
+}) => {
+  const instance = await (await request.get("/api/v1/instance")).json();
+  expect(instance.fedibird_capabilities).toContain("emoji_reaction");
+
+  const alice = await registerUserViaApi(request, "e2emdr");
+  const bob = await registerUserViaApi(request, "e2emds");
+  const aliceToken = await mastodonToken(request, alice.token);
+  const bobToken = await mastodonToken(request, bob.token);
+  const asAlice = { Authorization: `Bearer ${aliceToken}` };
+  const asBob = { Authorization: `Bearer ${bobToken}` };
+  const bobAccount = await (await request.get(`/api/v1/accounts/lookup?acct=${bob.username}`)).json();
+
+  const post = await (
+    await request.post("/api/v1/statuses", { headers: asAlice, data: { status: `絵文字リアクション ${Date.now()}` } })
+  ).json();
+
+  // 投稿者（Alice）の user ストリームに、絵文字ごとの件数が emoji_reaction で届く。
+  const received: { event: string; payload: string }[] = [];
+  const ws = new WebSocket(
+    `ws://localhost:${BACKEND_PORT}/api/v1/streaming?access_token=${encodeURIComponent(aliceToken)}&stream=user`,
+  );
+  ws.on("message", (data) => {
+    try {
+      received.push(JSON.parse(data.toString()));
+    } catch {
+      /* 無視 */
+    }
+  });
+  await new Promise<void>((resolve, reject) => {
+    ws.once("open", () => resolve());
+    ws.once("error", reject);
+  });
+  const reactionEvent = (name: string, count: number) =>
+    received.some((m) => {
+      if (m.event !== "emoji_reaction") return false;
+      const p = JSON.parse(m.payload);
+      return p.status_id === post.id && p.name === name && p.count === count;
+    });
+
+  try {
+    const thumbs = encodeURIComponent("👍");
+    const party = encodeURIComponent("🎉");
+    const put1 = await request.put(`/api/v1/statuses/${post.id}/emoji_reactions/${thumbs}`, { headers: asBob });
+    expect(put1.ok(), await put1.text()).toBeTruthy();
+    expect(await put1.json()).toEqual(
+      expect.objectContaining({
+        emoji_reactions: [{ name: "👍", count: 1, me: true }],
+        emoji_reactions_count: 1,
+        emoji_reactioned: true,
+        favourited: false,
+      }),
+    );
+    await expect.poll(() => reactionEvent("👍", 1), { timeout: 15_000 }).toBeTruthy();
+
+    // 1投稿1人1つなので、別の絵文字は置き換えになり、消えた絵文字は0件で届く。
+    const put2 = await request.put(`/api/v1/statuses/${post.id}/emoji_reactions/${party}`, { headers: asBob });
+    expect(put2.ok(), await put2.text()).toBeTruthy();
+    expect((await put2.json()).emoji_reactions).toEqual([{ name: "🎉", count: 1, me: true }]);
+    await expect.poll(() => reactionEvent("🎉", 1) && reactionEvent("👍", 0), { timeout: 15_000 }).toBeTruthy();
+
+    // 投稿者から見た me は false。
+    const seen = await (await request.get(`/api/v1/statuses/${post.id}`, { headers: asAlice })).json();
+    expect(seen.emoji_reactions).toEqual([{ name: "🎉", count: 1, me: false }]);
+
+    const by = await request.get(`/api/v1/statuses/${post.id}/emoji_reactioned_by`, { headers: asAlice });
+    expect(by.ok(), await by.text()).toBeTruthy();
+    const byList = (await by.json()) as { name: string; account: { id: string } }[];
+    expect(byList.map((r) => [r.name, r.account.id])).toEqual([["🎉", bobAccount.id]]);
+
+    const notifications = (await (
+      await request.get("/api/v1/notifications", { headers: asAlice })
+    ).json()) as { type: string; status?: { id: string }; emoji_reaction?: { name: string } }[];
+    expect(notifications).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ type: "emoji_reaction", status: expect.objectContaining({ id: post.id }), emoji_reaction: { name: "🎉" } }),
+      ]),
+    );
+
+    // 付けていない絵文字を外しても変わらず、付けている絵文字を外すと消える。
+    const del1 = await request.delete(`/api/v1/statuses/${post.id}/emoji_reactions/${thumbs}`, { headers: asBob });
+    expect((await del1.json()).emoji_reactions).toEqual([{ name: "🎉", count: 1, me: true }]);
+    const del2 = await request.delete(`/api/v1/statuses/${post.id}/emoji_reactions/${party}`, { headers: asBob });
+    expect(await del2.json()).toEqual(
+      expect.objectContaining({ emoji_reactions: [], emoji_reactions_count: 0, emoji_reactioned: false }),
+    );
+
+    // お気に入り（❤️）は emoji_reactions に出さない。
+    const fav = await request.post(`/api/v1/statuses/${post.id}/favourite`, { headers: asBob });
+    expect(await fav.json()).toEqual(
+      expect.objectContaining({ favourited: true, emoji_reactions: [], emoji_reactions_count: 0 }),
+    );
+  } finally {
+    ws.close();
+  }
+});

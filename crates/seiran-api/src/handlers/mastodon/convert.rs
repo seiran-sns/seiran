@@ -4,8 +4,9 @@
 //!
 //! 「いいね（favourite）」は seiran の `❤️` リアクションに対応させる（Bsky の like・AP の
 //! `Like` も受信時に `❤️` リアクションとして保存されるため）。`favourites_count` は絵文字を
-//! 問わないリアクション総数（Mastodon クライアントには絵文字リアクションの表示欄が無く、
-//! `❤️` だけを数えると絵文字で反応された投稿が無反応に見えるため）。
+//! 問わないリアクション総数（多くの Mastodon クライアントには絵文字リアクションの表示欄が無く、
+//! `❤️` だけを数えると絵文字で反応された投稿が無反応に見えるため）。`❤️` 以外のリアクションは
+//! Fedibird 互換の `emoji_reactions` にも載せる（`emoji_reactions` モジュール）。
 
 use std::collections::{HashMap, HashSet};
 
@@ -19,6 +20,7 @@ use crate::handlers::notes::{
 };
 use crate::AppState;
 
+use super::emoji_reactions::{reaction_emoji, to_fedibird_reactions};
 use super::types::{
     MastodonAccount, MastodonAccountSource, MastodonEmoji, MastodonField, MastodonMediaAttachment,
     MastodonMediaMeta, MastodonMediaMetaSize, MastodonNotification, MastodonPoll,
@@ -699,6 +701,7 @@ fn to_status(
     let is_repost = p.repost_of_post_id.is_some() || p.repost_of_ap_uri.is_some();
     let attachments = m.attachments.get(&p.id).map(Vec::as_slice).unwrap_or(&[]);
     let reactions = m.reactions.get(&p.id).map(Vec::as_slice).unwrap_or(&[]);
+    let emoji_reactions = to_fedibird_reactions(reactions, local_domain, viewer.is_some());
     let own_votes = m.poll_votes.get(&p.id).map(Vec::as_slice).unwrap_or(&[]);
 
     let content = if is_repost {
@@ -746,6 +749,8 @@ fn to_status(
         emojis: to_emojis(&[p.post_emoji_map.as_ref(), p.actor_emoji_map.as_ref()]),
         reblogs_count: p.repost_count,
         favourites_count: reactions.iter().map(|r| r.count).sum(),
+        emoji_reactions_count: emoji_reactions.iter().map(|r| r.count).sum(),
+        emoji_reactions,
         replies_count: p.reply_count,
         quotes_count: p.quote_count,
         in_reply_to_id: p.reply_to_post_id.map(|id| id.to_string()),
@@ -785,6 +790,11 @@ fn to_status(
         muted: viewer.map(|_| false),
         bookmarked: viewer.map(|_| m.bookmarked.contains(&p.id)),
         pinned: viewer.map(|_| m.pinned.contains(&p.id)),
+        emoji_reactioned: viewer.map(|_| {
+            reactions
+                .iter()
+                .any(|r| r.reacted_by_me && r.emoji != FAVOURITE_REACTION)
+        }),
     };
     Some(Converted {
         status,
@@ -933,6 +943,12 @@ pub async fn find_status(
 
 // ─── 通知 ────────────────────────────────────────────────────────────
 
+/// `❤️` 以外のリアクションの通知の `type`（Fedibird の形）。
+pub const EMOJI_REACTION_NOTIFICATION: &str = "emoji_reaction";
+/// Pleroma/Akkoma の同じ通知の `type`。通知の絞り込みでは `EMOJI_REACTION_NOTIFICATION` と
+/// 同じものとして扱う。
+pub const PLEROMA_EMOJI_REACTION_NOTIFICATION: &str = "pleroma:emoji_reaction";
+
 /// seiran の通知種別を Mastodon の `type` にする。Mastodon に相当物の無い種別（アカウント
 /// 引っ越しの再フォロー通知等）は `None`（一覧から除く）。
 fn to_mastodon_notification_type(kind: &str, reaction: Option<&str>) -> Option<&'static str> {
@@ -943,7 +959,7 @@ fn to_mastodon_notification_type(kind: &str, reaction: Option<&str>) -> Option<&
         "repost" => "reblog",
         "quote" => "quote",
         "reaction" if reaction == Some(FAVOURITE_REACTION) => "favourite",
-        "reaction" => "pleroma:emoji_reaction",
+        "reaction" => EMOJI_REACTION_NOTIFICATION,
         _ => return None,
     })
 }
@@ -1009,13 +1025,20 @@ pub async fn build_notifications(
             if kind != "follow" && kind != "follow_request" && status.is_none() {
                 return None;
             }
-            let is_emoji_reaction = kind == "pleroma:emoji_reaction";
+            let is_emoji_reaction = kind == EMOJI_REACTION_NOTIFICATION;
             Some(MastodonNotification {
                 id: r.id.to_string(),
                 kind,
                 created_at: r.created_at.to_rfc3339(),
                 account,
                 status,
+                emoji_reaction: r
+                    .reaction
+                    .as_deref()
+                    .filter(|_| is_emoji_reaction)
+                    .map(|c| {
+                        reaction_emoji(c, r.reaction_emoji_url.as_deref(), &state.local_domain)
+                    }),
                 emoji: r.reaction.clone().filter(|_| is_emoji_reaction),
                 emoji_url: r.reaction_emoji_url.clone().filter(|_| is_emoji_reaction),
             })
@@ -1140,7 +1163,7 @@ mod tests {
         );
         assert_eq!(
             to_mastodon_notification_type("reaction", Some(":blob:")),
-            Some("pleroma:emoji_reaction")
+            Some("emoji_reaction")
         );
         assert_eq!(
             to_mastodon_notification_type("repost", None),

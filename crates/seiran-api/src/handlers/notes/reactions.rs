@@ -1,5 +1,6 @@
 use super::*;
 use seiran_common::repository::{NewNotification, NewReaction, StoredReaction};
+use seiran_common::streaming::ReactorChange;
 use validation::{validate_reaction_content, ReactionContent};
 
 /// よく使う絵文字ピッカーで表示する候補数の上限。
@@ -203,12 +204,10 @@ async fn find_reactable_post(
 /// タイムライン/ノート詳細のリアクション表示をリアルタイム更新する（Misskey 互換の
 /// ストリーミング挙動に合わせる）。通知ベルと違い自作自演でも送出する。DM
 /// （`direct`）はフォロワーへ漏れないよう配信先を参加者のみに絞った専用版を使う。
-/// `content` は付けたリアクション（取り消しなら `None`）。
 async fn broadcast_reaction_change(
     state: &AppState,
     post: &TimelinePost,
-    reactor_actor_id: i64,
-    content: Option<&str>,
+    reactor: ReactorChange<'_>,
 ) {
     if post.visibility == "direct" {
         broadcast_dm_reaction_update(
@@ -217,8 +216,7 @@ async fn broadcast_reaction_change(
             state.reactions.as_ref(),
             post.id,
             post.actor_id,
-            reactor_actor_id,
-            content,
+            reactor,
         )
         .await;
     } else {
@@ -228,8 +226,7 @@ async fn broadcast_reaction_change(
             state.reactions.as_ref(),
             post.id,
             post.actor_id,
-            reactor_actor_id,
-            content,
+            reactor,
         )
         .await;
     }
@@ -418,7 +415,16 @@ async fn create_reaction_inner(
         .map_err(|e| ApiError::Internal(format!("reactions INSERT 失敗: {}", e)))?;
 
     notify_reaction(state, me, &post, &content, emoji_url.as_deref(), saved.id).await;
-    broadcast_reaction_change(state, &post, me.actor_id, Some(&content)).await;
+    broadcast_reaction_change(
+        state,
+        &post,
+        ReactorChange {
+            actor_id: me.actor_id,
+            emoji: Some(&content),
+            previous_emoji: saved.previous.as_ref().map(|p| p.content.as_str()),
+        },
+    )
+    .await;
     deliver_reaction_to_atp(
         state,
         me.actor_id,
@@ -496,7 +502,16 @@ async fn remove_reaction_inner(
         .map_err(|e| ApiError::Internal(format!("reactions DELETE 失敗: {}", e)))?
         .ok_or(ApiError::NotFound("REACTION_NOT_FOUND"))?;
 
-    broadcast_reaction_change(state, &post, actor_id, None).await;
+    broadcast_reaction_change(
+        state,
+        &post,
+        ReactorChange {
+            actor_id,
+            emoji: None,
+            previous_emoji: Some(&removed.content),
+        },
+    )
+    .await;
     delete_reaction_from_atp(state, actor_id, &removed);
 
     // AP 連携: 対象ポスト著者（Fedi リモートの場合のみ）+ 自分の Fedi フォロワー全員へ Undo を配送する。
