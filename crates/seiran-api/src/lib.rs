@@ -959,10 +959,11 @@ pub fn spawn_startup_tasks(state: &AppState) {
         resume_bsky_video_poll(&state).await;
         resume_bsky_post_commit_deferred(&state).await;
         ensure_handle_txt_records(&state).await;
-        request_relay_crawl(&state).await;
+        let unknown_to_relay = request_relay_crawl(&state).await;
         // requestCrawl 後、Relay が subscribeRepos に接続するまで待機してから
         // #identity をブロードキャストする。
         tokio::time::sleep(tokio::time::Duration::from_secs(15)).await;
+        resend_identity_events(&state, unknown_to_relay).await;
         backfill_identity_events(&state).await;
         backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
@@ -1402,24 +1403,49 @@ async fn ensure_handle_txt_records(state: &AppState) {
     }
 }
 
-/// Relay に requestCrawl を送って subscribeRepos 再接続を促す。
-/// ATP_RELAY_URL はカンマ区切りで複数指定でき、全てへ並行して送る
-/// （AtpCommitService::spawn_request_crawl と同じ規約）。
-async fn request_relay_crawl(state: &AppState) {
+/// `ATP_RELAY_URL`（カンマ区切りで複数指定可、`AtpCommitService::spawn_request_crawl` と
+/// 同じ規約）の Relay のベース URL 一覧。
+fn relay_bases() -> Vec<String> {
+    std::env::var("ATP_RELAY_URL")
+        .unwrap_or_else(|_| "https://bsky.network".to_string())
+        .split(',')
+        .map(|s| s.trim().trim_end_matches('/').to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Relay に requestCrawl を送って subscribeRepos 再接続を促す。送る前に、Relay に載って
+/// いないローカルアカウントを調べて返す（`resend_identity_events` が #identity を送り直す）。
+///
+/// Relay はアカウントを、知らない DID のイベントを受け取ったときにしか作らない。Relay に
+/// 発見される前にコミットや #identity を出し終えたアカウント（requestCrawl が届かなかった・
+/// Relay 側でホストが作り直された・Relay を追加した等）は、次にイベントを出すまで Relay にも
+/// bsky.app にも現れない。
+async fn request_relay_crawl(state: &AppState) -> Vec<(i64, String, String)> {
     // 未確定（初回セットアップ前・シングルホストモード）だと `as_str()` は "localhost" で、
     // Relay に 400 で拒否されるだけなので送らない。初回セットアップで確定した後は、
     // 最初のコミット時に `AtpCommitService::spawn_request_crawl` が送る。
     if !state.local_domain.is_confirmed() {
-        return;
+        return Vec::new();
     }
-    let relay_base_raw =
-        std::env::var("ATP_RELAY_URL").unwrap_or_else(|_| "https://bsky.network".to_string());
-    let relay_bases: Vec<String> = relay_base_raw
-        .split(',')
-        .map(|s| s.trim().trim_end_matches('/').to_string())
-        .filter(|s| !s.is_empty())
-        .collect();
-    for relay_base in relay_bases {
+    let accounts =
+        match seiran_common::repository::maintenance::local_actors_hosted_on_relay(&state.db).await
+        {
+            Ok(accounts) => accounts,
+            Err(e) => {
+                tracing::error!("[atp] Relay 掲載確認の対象取得失敗: {}", e);
+                Vec::new()
+            }
+        };
+    let mut unknown: Vec<(i64, String, String)> = Vec::new();
+    for relay_base in relay_bases() {
+        for account in &accounts {
+            if !unknown.iter().any(|(id, _, _)| *id == account.0)
+                && is_repo_unknown_to_relay(state, &relay_base, &account.2).await
+            {
+                unknown.push(account.clone());
+            }
+        }
         let url = format!("{}/xrpc/com.atproto.sync.requestCrawl", relay_base);
         match state
             .http_client
@@ -1430,6 +1456,52 @@ async fn request_relay_crawl(state: &AppState) {
         {
             Ok(res) => tracing::info!("[atp] 起動時 requestCrawl({}) → {}", url, res.status()),
             Err(e) => tracing::error!("[atp] 起動時 requestCrawl({}) 失敗: {}", url, e),
+        }
+    }
+    unknown
+}
+
+/// Relay が `did` のリポジトリを知らない（`getRepoStatus` が `RepoNotFound`）か。通信の
+/// 失敗や想定外の応答は「知っている」とみなす（毎回の起動で無駄に #identity を送らない）。
+async fn is_repo_unknown_to_relay(state: &AppState, relay_base: &str, did: &str) -> bool {
+    let url = format!("{}/xrpc/com.atproto.sync.getRepoStatus", relay_base);
+    let res = match state
+        .http_client
+        .get(&url)
+        .query(&[("did", did)])
+        .send()
+        .await
+    {
+        Ok(res) => res,
+        Err(e) => {
+            tracing::warn!("[atp] getRepoStatus({}, {}) 失敗: {}", relay_base, did, e);
+            return false;
+        }
+    };
+    if res.status().is_success() {
+        return false;
+    }
+    let body: serde_json::Value = res.json().await.unwrap_or_default();
+    body.get("error").and_then(|v| v.as_str()) == Some("RepoNotFound")
+}
+
+/// Relay に載っていないローカルアカウントの #identity を送り直し、Relay にアカウントを
+/// 作らせる（`request_relay_crawl`）。
+async fn resend_identity_events(state: &AppState, accounts: Vec<(i64, String, String)>) {
+    let now = chrono::Utc::now();
+    for (actor_id, username, did) in accounts {
+        let handle = format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&username),
+            state.local_domain
+        );
+        match state
+            .atp_service
+            .broadcast_identity_event(actor_id, &did, &handle, now)
+            .await
+        {
+            Ok(_) => tracing::info!("[startup] Relay 未掲載のため #identity 再送: {}", handle),
+            Err(e) => tracing::error!("[startup] #identity 再送失敗 {}: {}", handle, e),
         }
     }
 }

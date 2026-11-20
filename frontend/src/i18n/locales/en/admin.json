@@ -109,6 +109,7 @@
     "siteColorPlaceholder": "#2563eb (leave blank for default color)",
     "siteIconLabel": "Site icon",
     "uploading": "Uploading...",
+    "storageNotConfigured": "Cannot upload because no storage is configured. Add one in the storage settings",
     "changeIconButton": "Change icon",
     "selectIconButton": "Select icon",
     "mediaProxyTitle": "Media proxy",

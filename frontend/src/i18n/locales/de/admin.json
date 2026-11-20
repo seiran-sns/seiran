@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb (für Standardfarbe leer lassen)",
     "siteIconLabel": "Site-Symbol",
     "uploading": "Hochladen...",
+    "storageNotConfigured": "Hochladen nicht möglich, da kein Speicher konfiguriert ist. Fügen Sie in den Speichereinstellungen einen hinzu",
     "changeIconButton": "Symbol ändern",
     "selectIconButton": "Symbol auswählen",
     "mediaProxyTitle": "Medien-Proxy",

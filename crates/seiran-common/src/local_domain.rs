@@ -6,12 +6,20 @@
 //!
 //! 後方互換パス（`.env`の`LOCAL_DOMAIN`があればそのままDBへ移行する）に加え、初回セットアップ
 //! （`handlers::setup`）でHostヘッダーから確定するフローも持つ（`domain_candidate_from_host`）。
+//! セットアップで確定させるのはリクエストを受けた api プロセスだけなので、未確定で起動した
+//! 他のプロセスは `watch_until_confirmed` で DB の確定を拾う。
 
 use std::net::IpAddr;
 use std::str::FromStr;
 use std::sync::{Arc, OnceLock};
+use std::time::Duration;
 
 use crate::repository::{ConfirmOutcome, InstanceDomainRepository};
+use crate::CancellationToken;
+
+/// 未確定のプロセスが `instance_domain` を読み直す間隔。確定すれば止まるので、
+/// 初回セットアップ直後の数秒だけの負荷で済む。
+const CONFIRMATION_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// 自ホストドメイン。`Arc<OnceLock<String>>` により「一度きりの不可逆な遷移」を表現する。
 /// `Clone`すると`Arc`が共有されるため、確定操作は同一プロセス内の全ての参照箇所に
@@ -129,6 +137,36 @@ pub async fn resolve_local_domain(
     }
 
     domain
+}
+
+/// 未確定で起動したプロセスで、`instance_domain` が確定するまで読み直し続け、確定したら
+/// `domain` に反映する。初回セットアップ（`POST /api/setup`）はリクエストを受けたプロセスの
+/// `LocalDomain` しか確定させないため、api・federation・firehose・worker を別プロセスで
+/// 動かす構成では、これが無いと他のプロセスが再起動まで `localhost` のまま動く
+/// （AP の actor URI・Relay への requestCrawl 等）。確定済みなら何もせずに戻る。
+pub async fn watch_until_confirmed(
+    domain: LocalDomain,
+    repo: Arc<dyn InstanceDomainRepository>,
+    stop: CancellationToken,
+) {
+    let mut poll = tokio::time::interval(CONFIRMATION_POLL_INTERVAL);
+    while !domain.is_confirmed() {
+        tokio::select! {
+            _ = stop.cancelled() => return,
+            _ = poll.tick() => {}
+        }
+        match repo.get().await {
+            Ok(Some(confirmed)) => {
+                tracing::info!(
+                    "[local_domain] 自ホストドメインの確定を検知しました: {}",
+                    confirmed
+                );
+                domain.set_confirmed(confirmed);
+            }
+            Ok(None) => {}
+            Err(e) => tracing::warn!("[local_domain] instance_domain取得に失敗しました: {}", e),
+        }
+    }
 }
 
 /// HTTPリクエストの`Host`ヘッダー値からDBに確定してよいドメイン候補を判定する

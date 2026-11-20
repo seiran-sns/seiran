@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb（默认颜色留空）",
     "siteIconLabel": "网站图标",
     "uploading": "正在上传...",
+    "storageNotConfigured": "未配置存储，无法上传。请在存储设置中添加",
     "changeIconButton": "更改图标",
     "selectIconButton": "选择图标",
     "mediaProxyTitle": "媒体代理",

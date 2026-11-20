@@ -78,6 +78,7 @@
   "SOURCE_PDS_UNREACHABLE": "Could not connect to the source server",
   "STORAGE_PROVIDER_NOT_FOUND": "Storage provider not found",
   "STORAGE_QUOTA_EXCEEDED": "Storage capacity has been exceeded",
+  "STORAGE_NOT_CONFIGURED": "Files cannot be uploaded because no storage is configured. Add one in the admin storage settings",
   "TEXT_TOO_LONG": "The text exceeds the length limit (this may happen after expanding @usernames)",
   "TOO_MANY_LINK_CARD_URLS": "URL link cards are limited to 10.",
   "TOS_AGREEMENT_REQUIRED": "You must agree to the Terms of Service",

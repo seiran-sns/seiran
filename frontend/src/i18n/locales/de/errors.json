@@ -78,6 +78,7 @@
   "SOURCE_PDS_UNREACHABLE": "Verbindung zum Quellserver konnte nicht hergestellt werden",
   "STORAGE_PROVIDER_NOT_FOUND": "Speicheranbieter nicht gefunden",
   "STORAGE_QUOTA_EXCEEDED": "Die Speicherkapazität wurde überschritten",
+  "STORAGE_NOT_CONFIGURED": "Dateien können nicht hochgeladen werden, da kein Speicher konfiguriert ist. Fügen Sie in den Speichereinstellungen der Verwaltung einen hinzu",
   "TEXT_TOO_LONG": "Der Text überschreitet die Längenbeschränkung (dies kann nach der Erweiterung von @usernames passieren)",
   "TOO_MANY_LINK_CARD_URLS": "URL-Link-Karten sind auf 10 begrenzt.",
   "TOS_AGREEMENT_REQUIRED": "Sie müssen den Nutzungsbedingungen zustimmen",

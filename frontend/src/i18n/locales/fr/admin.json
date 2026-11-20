@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb (laisser vide pour la couleur par défaut)",
     "siteIconLabel": "Icône du site",
     "uploading": "Téléchargement...",
+    "storageNotConfigured": "Téléversement impossible, car aucun stockage n’est configuré. Ajoutez-en un dans les paramètres de stockage",
     "changeIconButton": "Changer d'icône",
     "selectIconButton": "Sélectionner l'icône",
     "mediaProxyTitle": "Mandataire média",

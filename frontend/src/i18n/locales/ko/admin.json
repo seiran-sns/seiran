@@ -92,6 +92,7 @@
     "siteColorPlaceholder": "#2563eb(기본 색상을 지정하려면 비워 두세요)",
     "siteIconLabel": "사이트 아이콘",
     "uploading": "업로드 중...",
+    "storageNotConfigured": "저장소가 설정되어 있지 않아 등록할 수 없습니다. 저장소 설정에서 등록해 주세요",
     "changeIconButton": "아이콘 변경",
     "selectIconButton": "아이콘 선택",
     "mediaProxyTitle": "미디어 프록시",
