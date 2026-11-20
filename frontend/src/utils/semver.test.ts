@@ -13,6 +13,13 @@ describe("compareVersions", () => {
     expect(compareVersions("1.0", "1.0.0")).toBe(0);
     expect(compareVersions("1.2", "1.2.1")).toBeLessThan(0);
   });
+
+  it("ignores the version suffix", () => {
+    expect(compareVersions("1.0.0-RC1", "1.0.0")).toBe(0);
+    expect(compareVersions("1.0.0-some-fork", "0.9.9")).toBeGreaterThan(0);
+    expect(compareVersions("0.9.9-dev", "1.0.0")).toBeLessThan(0);
+    expect(compareVersions("1.0.1+build.5", "1.0.0-RC1")).toBeGreaterThan(0);
+  });
 });
 
 describe("isVersionAtLeast", () => {
@@ -23,5 +30,9 @@ describe("isVersionAtLeast", () => {
 
   it("is false when older", () => {
     expect(isVersionAtLeast("0.1.0", "0.2.0")).toBe(false);
+  });
+
+  it("accepts a suffixed version of the minimum", () => {
+    expect(isVersionAtLeast("1.0.0-RC1", "1.0.0")).toBe(true);
   });
 });
