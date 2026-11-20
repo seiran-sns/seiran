@@ -50,6 +50,39 @@ test("他ユーザーのリアクション通知をホバーすると対象ポ�
   await expect(page.getByRole("link", { name: new RegExp(noteText) })).toBeVisible({ timeout: 5_000 });
 });
 
+test("リアクション通知の2行目に、対象ポストの本文（CW があれば警告文）を1行で出す", async ({ page, request }) => {
+  const author = await registerUserViaApi(request, "e2enotiftarget");
+  const reactor = await registerUserViaApi(request, "e2enotiftargetr");
+  const stamp = Date.now();
+  const create = async (data: Record<string, unknown>) => {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${author.token}` },
+      data,
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return (await res.json()) as { id: string };
+  };
+  const plain = await create({ text: `対象本文1行目 ${stamp}\n\n2行目` });
+  const withCw = await create({ text: `隠れた本文 ${stamp}`, content_warning: `警告文 ${stamp}` });
+  for (const note of [plain, withCw]) {
+    const res = await request.post(`/api/notes/${note.id}/reactions`, {
+      headers: { Authorization: `Bearer ${reactor.token}` },
+      data: { content: "👍" },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  }
+
+  await seedAuth(page, author.token);
+  await page.goto("/notifications");
+  const items = page.locator("main li").filter({ hasText: `${reactor.username} がリアクションしました` });
+  await expect(items).toHaveCount(2, { timeout: 15_000 });
+  // 改行は半角スペースでつなぐ。
+  await expect(items.filter({ hasText: `対象本文1行目 ${stamp} 2行目` })).toHaveCount(1);
+  // CW があれば本文ではなく警告文。
+  await expect(items.filter({ hasText: `警告文 ${stamp}` })).toHaveCount(1);
+  await expect(items.filter({ hasText: `隠れた本文 ${stamp}` })).toHaveCount(0);
+});
+
 test("他ユーザーによるリポストと引用が通知される（#198）", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2enotifshareauthor");
   const sharer = await registerUserViaApi(request, "e2enotifsharer");

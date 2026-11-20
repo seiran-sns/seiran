@@ -52,6 +52,30 @@
   cursor: pointer;
 }
 
+/* リアクション通知: 1行目に誰が付けたか、2行目に対象ポストの本文。どちらも折り返さず見切れさせる。 */
+.lines {
+  /* 基準幅を 0 にする。auto だと折り返さない長い本文の幅が基準になり、横に並ぶアイコン・
+     アバターまで縮められてしまう。 */
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 14px;
+  color: var(--text, #1b2333);
+}
+
+.singleLine {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.targetLine {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
 .avatarLink {
   display: inline-flex;
   flex: 0 0 auto;

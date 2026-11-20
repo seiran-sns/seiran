@@ -902,7 +902,17 @@ export interface NotificationItem {
    */
   /** `type === "renote"` の場合、この note はリポストラッパー投稿（本文なし）自体であり、
    * リポスト元の実体投稿が `renote` に埋め込まれる（`build_notes`/`embed_renotes`）。 */
-  note?: { id?: string; reactionEmojis?: Record<string, string>; renote?: { id?: string } };
+  note?: {
+    id?: string;
+    reactionEmojis?: Record<string, string>;
+    renote?: { id?: string };
+    /** 本文（リアクション通知の2行目に使う）。 */
+    text?: string | null;
+    /** CW の警告文。あれば本文の代わりに出す。 */
+    cw?: string | null;
+    /** 本文・警告文中のカスタム絵文字。キーはコロンなし shortcode。 */
+    emojis?: Record<string, string>;
+  };
 }
 
 // =====================================================================

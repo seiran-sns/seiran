@@ -36,6 +36,14 @@ function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, stri
 
 const PAGE_SIZE = 20;
 
+/** リアクション通知の2行目: 対象ポストの CW 警告文（あれば）か本文を、改行を半角スペースで
+ * つないだ1行。どのポストへのリアクションかを一目でわかるようにする。 */
+function reactionTargetSummary(n: NotificationItem): string {
+  const cw = n.note?.cw?.trim();
+  const source = cw ? cw : (n.note?.text ?? "");
+  return source.replace(/\s*(\r?\n)+\s*/g, " ").trim();
+}
+
 /** ポストへのリンクを持つ通知種別（通知文全体を対象ポストへの遷移領域にする）。
  * `renote` は Misskey 本家の呼称（seiran内部では「リポスト」と呼ぶ処理と同じもの）。 */
 const NOTE_LINKED_TYPES = new Set(["reaction", "mention", "reply", "renote", "quote"]);
@@ -410,6 +418,15 @@ export default function NotificationsPanel({
         );
         const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
         const avatar = <Avatar url={n.user?.avatarUrl} name={who} size={20} />;
+        const message = (
+          <Trans
+            i18n={i18n}
+            i18nKey={i18nKey}
+            values={{ handleSuffix, newHandle }}
+            components={{ userLink, emojiName, newUserLink }}
+          />
+        );
+        const targetSummary = n.type === "reaction" ? reactionTargetSummary(n) : "";
         const content = (
           <>
             {iconUrl ? (
@@ -435,14 +452,18 @@ export default function NotificationsPanel({
             ) : (
               avatar
             )}
-            <span className={styles.text}>
-              <Trans
-                i18n={i18n}
-                i18nKey={i18nKey}
-                values={{ handleSuffix, newHandle }}
-                components={{ userLink, emojiName, newUserLink }}
-              />
-            </span>
+            {n.type === "reaction" ? (
+              <span className={styles.lines}>
+                <span className={styles.singleLine}>{message}</span>
+                {targetSummary && (
+                  <span className={`${styles.singleLine} ${styles.targetLine}`}>
+                    <EmojiText text={targetSummary} emojis={colonizeEmojiKeys(n.note?.emojis)} />
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className={styles.text}>{message}</span>
+            )}
           </>
         );
         return (
