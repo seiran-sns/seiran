@@ -1,6 +1,6 @@
 import AppShell from "../components/layout/AppShell";
 import NotificationsPanel from "../components/right/NotificationsPanel";
-import TrendsSearchPanel from "../components/right/TrendsSearchPanel";
+import SearchPanel from "../components/right/SearchPanel";
 import { useRightPane } from "../contexts/RightPaneContext";
 
 export default function NotificationsPage() {
@@ -21,5 +21,5 @@ export default function NotificationsPage() {
     </>
   );
 
-  return <AppShell center={center} right={<TrendsSearchPanel />} />;
+  return <AppShell center={center} right={<SearchPanel />} />;
 }

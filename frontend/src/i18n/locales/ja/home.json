@@ -17,8 +17,9 @@
     "emptyList": "このリストのメンバーの投稿がここに表示されます。",
     "quickNotifications": "クイック通知",
     "quickNotificationsWithCount": "クイック通知 ({{count}})",
-    "trendsAndSearch": "トレンド＆検索",
-    "composerToggleLabel": "投稿フォーム"
+    "search": "検索",
+    "composerToggleLabel": "投稿フォーム",
+    "newPosts": "新しいポスト {{count}}件"
   },
   "noteDetailPage": {
     "title": "ポスト",

@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useRef, useState } from "react";
 import type { Note } from "../api/client";
+import { TIMELINE_TOP, type TimelineScroll } from "../lib/timelineScroll";
 
 /**
  * ホーム画面のフィードタブ選択・タイムラインキャッシュ・スクロール位置を
@@ -25,7 +26,8 @@ export function feedKey(feed: Feed): string {
 interface FeedCacheEntry {
   notes: Note[];
   hasMore: boolean;
-  scrollY: number;
+  /** 一番上に見えていたポスト（`lib/timelineScroll.ts`）。戻ったらこのポストの位置へ合わせる。 */
+  scroll: TimelineScroll;
   /** このIDの直前に「取りこぼし区間」の区切り（二重波線）を表示する対象ノートID群。 */
   gapBeforeIds: Set<string>;
 }
@@ -34,7 +36,7 @@ interface HomeFeedState {
   feed: Feed;
   setFeed: (f: Feed) => void;
   getCache: (key: string) => FeedCacheEntry | undefined;
-  /** 部分更新。既存エントリとマージする（notes/hasMore更新時にscrollYを消さないため）。 */
+  /** 部分更新。既存エントリとマージする（notes/hasMore更新時にscrollを消さないため）。 */
   setCache: (key: string, patch: Partial<FeedCacheEntry>) => void;
 }
 
@@ -65,7 +67,7 @@ export function HomeFeedProvider({ children }: { children: React.ReactNode }) {
 
   const getCache = useCallback((key: string) => cacheRef.current.get(key), []);
   const setCache = useCallback((key: string, patch: Partial<FeedCacheEntry>) => {
-    const prev = cacheRef.current.get(key) ?? { notes: [], hasMore: true, scrollY: 0, gapBeforeIds: new Set<string>() };
+    const prev = cacheRef.current.get(key) ?? { notes: [], hasMore: true, scroll: TIMELINE_TOP, gapBeforeIds: new Set<string>() };
     cacheRef.current.set(key, { ...prev, ...patch });
   }, []);
 

@@ -17,8 +17,9 @@
     "emptyList": "Les messages des membres de cette liste apparaîtront ici.",
     "quickNotifications": "Notifications rapides",
     "quickNotificationsWithCount": "Notifications rapides ({{count}})",
-    "trendsAndSearch": "Tendances et recherche",
-    "composerToggleLabel": "Formulaire de publication"
+    "search": "Recherche",
+    "composerToggleLabel": "Formulaire de publication",
+    "newPosts": "{{count}} nouvelles publications"
   },
   "noteDetailPage": {
     "title": "Poste",

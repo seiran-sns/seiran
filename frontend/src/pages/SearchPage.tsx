@@ -10,13 +10,12 @@ import { useRightPane } from "../contexts/RightPaneContext";
 import panel from "../components/common/Panel.module.css";
 import rp from "../components/right/RightPanels.module.css";
 import styles from "./HomePage.module.css";
-import TwemojiEmoji from "../components/common/TwemojiEmoji";
 
 export default function SearchPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
-  const { timelineTab, setTimelineTab, notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
+  const { notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
     useRightPane();
   const rightPaneRef = useRef<HTMLDivElement>(null);
   // Home画面と同じ`.rightScroll`独立スクロールコンテナのscrollTopを保存・復元する。
@@ -125,25 +124,14 @@ export default function SearchPage() {
 
   const right = (
     <div ref={rightPaneRef}>
-      <Tabs
-        tabs={[t("search:searchPage.tabs.quickNotifications"), t("search:searchPage.tabs.trendsSearch")]}
-        active={timelineTab}
-        onChange={setTimelineTab}
+      <Tabs tabs={[t("search:searchPage.tabs.quickNotifications")]} active={0} onChange={() => {}} />
+      <NotificationsPanel
+        scrollY={notifPanelScrollY}
+        onScrollYChange={setNotifPanelScrollY}
+        getScrollContainer={getNotifScrollContainer}
+        cache={notifPanelCache}
+        onCacheChange={setNotifPanelCache}
       />
-      {timelineTab === 0 ? (
-        <NotificationsPanel
-          scrollY={notifPanelScrollY}
-          onScrollYChange={setNotifPanelScrollY}
-          getScrollContainer={getNotifScrollContainer}
-          cache={notifPanelCache}
-          onCacheChange={setNotifPanelCache}
-        />
-      ) : (
-        <div className={panel.placeholder}>
-          <TwemojiEmoji emoji="📈" className={panel.placeholderIcon} />
-          {t("search:searchPage.trendsComingSoon")}
-        </div>
-      )}
     </div>
   );
 

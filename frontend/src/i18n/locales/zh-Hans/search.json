@@ -5,15 +5,10 @@
     "prompt": "输入关键字进行搜索。",
     "loadMoreButton": "加载更多",
     "tabs": {
-      "quickNotifications": "快速通知",
-      "trendsSearch": "趋势和搜索"
-    },
-    "trendsComingSoon": "趋势聚合即将到来。"
+      "quickNotifications": "快速通知"
+    }
   },
-  "trendsSearchPanel": {
-    "placeholder": "搜索关键词",
-    "trendsHeader": "趋势",
-    "comingSoon": "两个协议领域（AP / ATP）汇总的实时趋势即将推出。",
-    "comingSoonDetail": "一旦聚合引擎实现，这将被启用。"
+  "searchPanel": {
+    "placeholder": "搜索关键词"
   }
 }

@@ -15,7 +15,6 @@
 - [ ] **結婚成立後のATPフォロー追いコミット（#238）** — フォロー時点で未結婚だった非承認制のリモートseiranアクターは、後で結婚しても `follows.atp_rkey` が空のまま（AP側フォローは機能する）
 - [ ] **リモートseiran特権初期同期** — `/api/seiran/v1/posts/export` と相手サーバーからの一括インポート（最大300件）
 - [ ] **`inbound_activity_process` のドメイン単位レート制限**
-- [ ] **トレンド集計** — バックエンド未着手（フロントエンドはプレースホルダのみ）
 - [ ] **「Bsky DM受信許可」設定** — `chat.bsky.actor.declaration` の `allowIncoming` は現状 `"all"` 固定。`"all"`/`"following"`/`"none"` を選べるUIとAPI（`docs/protocols.md` 9節）
 - [ ] **公開リストタイムラインのブロック/ミュートフィルタ** — `list.rs::timeline` は閲覧者情報を持たない設計のため、閲覧制御全体の見直しが必要（`docs/protocols.md` 10節）
 

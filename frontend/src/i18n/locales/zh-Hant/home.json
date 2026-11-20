@@ -17,8 +17,9 @@
     "emptyList": "此列表成員的貼文將顯示在這裡。",
     "quickNotifications": "快速通知",
     "quickNotificationsWithCount": "快速通知（{{count}}）",
-    "trendsAndSearch": "趨勢與搜尋",
-    "composerToggleLabel": "發文表單"
+    "search": "搜尋",
+    "composerToggleLabel": "發文表單",
+    "newPosts": "{{count}} 則新貼文"
   },
   "noteDetailPage": {
     "title": "貼文",

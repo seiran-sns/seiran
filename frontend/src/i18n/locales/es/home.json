@@ -17,8 +17,9 @@
     "emptyList": "Las publicaciones de los miembros de esta lista aparecerán aquí.",
     "quickNotifications": "Notificaciones rápidas",
     "quickNotificationsWithCount": "Notificaciones rápidas ({{count}})",
-    "trendsAndSearch": "Tendencias y búsqueda",
-    "composerToggleLabel": "Formulario de publicación"
+    "search": "Buscar",
+    "composerToggleLabel": "Formulario de publicación",
+    "newPosts": "{{count}} publicaciones nuevas"
   },
   "noteDetailPage": {
     "title": "Correo",

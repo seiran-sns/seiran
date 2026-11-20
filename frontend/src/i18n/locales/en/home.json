@@ -17,8 +17,9 @@
     "emptyList": "Posts from this list's members will show up here.",
     "quickNotifications": "Quick notifications",
     "quickNotificationsWithCount": "Quick notifications ({{count}})",
-    "trendsAndSearch": "Trends & search",
-    "composerToggleLabel": "Post form"
+    "search": "Search",
+    "composerToggleLabel": "Post form",
+    "newPosts": "{{count}} new posts"
   },
   "noteDetailPage": {
     "title": "Post",

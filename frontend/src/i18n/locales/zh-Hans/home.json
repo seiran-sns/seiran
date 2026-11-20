@@ -17,8 +17,9 @@
     "emptyList": "该列表成员的帖子将显示在此处。",
     "quickNotifications": "快速通知",
     "quickNotificationsWithCount": "快速通知 ({{count}})",
-    "trendsAndSearch": "趋势和搜索",
-    "composerToggleLabel": "发帖表单"
+    "search": "搜索",
+    "composerToggleLabel": "发帖表单",
+    "newPosts": "{{count}} 条新帖子"
   },
   "noteDetailPage": {
     "title": "帖子",
