@@ -74,13 +74,58 @@ test("リアクション通知の2行目に、対象ポストの本文（CW が�
 
   await seedAuth(page, author.token);
   await page.goto("/notifications");
-  const items = page.locator("main li").filter({ hasText: `${reactor.username} がリアクションしました` });
+  // 同じ人からの2件は1つに重ねて出るので、li ではなく通知カード1枚ずつを数える。
+  const items = page
+    .locator("main [data-notification-id]")
+    .filter({ hasText: `${reactor.username} がリアクションしました` });
   await expect(items).toHaveCount(2, { timeout: 15_000 });
   // 改行は半角スペースでつなぐ。
   await expect(items.filter({ hasText: `対象本文1行目 ${stamp} 2行目` })).toHaveCount(1);
   // CW があれば本文ではなく警告文。
   await expect(items.filter({ hasText: `警告文 ${stamp}` })).toHaveCount(1);
   await expect(items.filter({ hasText: `隠れた本文 ${stamp}` })).toHaveCount(0);
+});
+
+test("同じポストへの連続したリアクション通知は重ねて出し、マウスが乗ったカードを前面に出す", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2enotifstack");
+  const res = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${author.token}` },
+    data: { text: `重ね表示テスト ${Date.now()}` },
+  });
+  expect(res.ok(), await res.text()).toBeTruthy();
+  const note = (await res.json()) as { id: string };
+  for (const name of ["e2enotifstacka", "e2enotifstackb", "e2enotifstackc"]) {
+    const reactor = await registerUserViaApi(request, name);
+    const r = await request.post(`/api/notes/${note.id}/reactions`, {
+      headers: { Authorization: `Bearer ${reactor.token}` },
+      data: { content: "👍" },
+    });
+    expect(r.ok(), await r.text()).toBeTruthy();
+  }
+
+  await seedAuth(page, author.token);
+  await page.goto("/notifications");
+  const stack = page.locator('main li[class*="stack"]');
+  await expect(stack).toHaveCount(1, { timeout: 15_000 });
+  const cards = stack.locator(':scope > div');
+  await expect(cards).toHaveCount(3);
+  // 前面のカード（DOM の最後）の位置。初期は一番新しいカード（ずらし 0）。
+  const frontTop = () => cards.last().evaluate((el) => (el as HTMLElement).style.top);
+  await page.mouse.move(0, 0);
+  await expect.poll(frontTop).toBe("0px");
+
+  // 一番下の帯（一番古いカードの下端）にマウスを乗せると、そのカードが前面に出る。
+  const box = await stack.boundingBox();
+  if (!box) throw new Error("stack not laid out");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 2);
+  await expect.poll(frontTop).toBe("16px");
+
+  // マウスが離れても前面のまま残る。
+  await page.mouse.move(0, 0);
+  await expect.poll(frontTop).toBe("16px");
 });
 
 test("他ユーザーによるリポストと引用が通知される（#198）", async ({ page, request }) => {

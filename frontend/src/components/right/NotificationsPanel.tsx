@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
@@ -26,6 +26,8 @@ import NotificationFilterBar, {
 } from "./NotificationFilterBar";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import NotificationStack from "./NotificationStack";
+import { groupNotifications } from "../../lib/notificationGroups";
 
 /** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
  * `:shortcode:` 形式のキーへ変換する（#186）。 */
@@ -145,9 +147,11 @@ export function describeNotification(n: NotificationItem): {
   }
 }
 
-interface NotificationsPanelCache {
+export interface NotificationsPanelCache {
   items: NotificationItem[];
   hasMore: boolean;
+  /** 重ねるまとまりの境（`groupNotifications` の `baseOldestId`）。戻ったときに同じまとまりで出す。 */
+  groupBaseId?: string;
 }
 
 interface NotificationsPanelProps {
@@ -217,6 +221,23 @@ export default function NotificationsPanel({
     filterKey
   );
   itemsRef.current = items;
+  // 重ねるまとまりの境。一覧を取り直したときだけ、その時点の一番古い通知にする（新着の
+  // 差し込み・古い通知の追加読み込みでは変えない。lib/notificationGroups.ts）。
+  const [groupBaseId, setGroupBaseId] = useState<string | undefined>(
+    () => cache?.groupBaseId ?? cache?.items[cache.items.length - 1]?.id
+  );
+  const replaceItems = useCallback(
+    (rows: NotificationItem[]) => {
+      setItems(rows);
+      setGroupBaseId(rows[rows.length - 1]?.id);
+    },
+    [setItems]
+  );
+  // 空の一覧に新着が入ったときは、その時点の一番古い通知を境にする。
+  useEffect(() => {
+    if (groupBaseId === undefined && items.length > 0) setGroupBaseId(items[items.length - 1].id);
+  }, [groupBaseId, items]);
+  const groups = useMemo(() => groupNotifications(items, groupBaseId), [items, groupBaseId]);
   const sentinelRef = useInfiniteScrollSentinel<HTMLLIElement>(loadMore, hasMore);
 
   // 遷移（ノート詳細・プロフィールへのnavigate）でこのコンポーネントがアンマウントされる際、
@@ -269,7 +290,7 @@ export default function NotificationsPanel({
       .notifications.list({ limit: PAGE_SIZE, markAsRead: true })
       .then((rows) => {
         if (cancelled) return;
-        setItems(rows);
+        replaceItems(rows);
         setHasMore(rows.length >= PAGE_SIZE);
         markRead();
       })
@@ -292,7 +313,7 @@ export default function NotificationsPanel({
       .list({ limit: PAGE_SIZE, markAsRead: !filterActive, ...queryRef.current })
       .then((rows) => {
         if (cancelled) return;
-        setItems(rows);
+        replaceItems(rows);
         setHasMore(rows.length >= PAGE_SIZE);
         if (!filterActive) markRead();
       })
@@ -317,8 +338,8 @@ export default function NotificationsPanel({
   useEffect(() => {
     // 絞り込み中の一覧は書き戻さない（キャッシュは絞り込み無しの一覧として復元されるため）。
     if (loadingInitial || !onCacheChange || filterActive) return;
-    onCacheChange({ items, hasMore });
-  }, [items, hasMore, loadingInitial, onCacheChange, filterActive]);
+    onCacheChange({ items, hasMore, groupBaseId });
+  }, [items, hasMore, groupBaseId, loadingInitial, onCacheChange, filterActive]);
 
   // スクロール位置は継続的に（都度）呼び出し元へ書き戻す（HomePageのタイムラインと同じ方式）。
   // navigatingAwayRefが立った後（上記freezeScroll参照）は、DOM除去中のクランプ由来の
@@ -382,6 +403,108 @@ export default function NotificationsPanel({
     );
   }
 
+  // 通知1件のカード。重ねるまとまりの中では li ではなく div にする（li は NotificationStack が持つ）。
+  const renderCard = (n: NotificationItem, stacked: boolean) => {
+    const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
+    const noteId = resolveTargetNoteId(n);
+    const clickNoteId = resolveClickTargetNoteId(n);
+    const userLink = n.user?.username ? (
+      <UserLinkTag
+        target={toRelationshipTarget(n.user)}
+        to={profilePath(n.user.username, n.user.host ?? undefined)}
+        className={styles.userLink}
+      />
+    ) : (
+      <span />
+    );
+    const newUserLink = n.relatedUser?.username ? (
+      <UserLinkTag
+        target={toRelationshipTarget(n.relatedUser)}
+        to={profilePath(n.relatedUser.username, n.relatedUser.host ?? undefined)}
+        className={styles.userLink}
+      />
+    ) : (
+      <span />
+    );
+    const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
+    const avatar = <Avatar url={n.user?.avatarUrl} name={who} size={20} />;
+    const message = (
+      <Trans
+        i18n={i18n}
+        i18nKey={i18nKey}
+        values={{ handleSuffix, newHandle }}
+        components={{ userLink, emojiName, newUserLink }}
+      />
+    );
+    const targetSummary = n.type === "reaction" ? reactionTargetSummary(n) : "";
+    const content = (
+      <>
+        {iconUrl ? (
+          <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
+        ) : (
+          <TwemojiEmoji emoji={icon} className={styles.icon} />
+        )}
+        {n.user?.username ? (
+          <UserHoverArea
+            target={{ username: n.user.username, domain: n.user.host ?? undefined }}
+            isSelf={isSelfUser(currentUser, n.user)}
+          >
+            <UserContextMenu target={toRelationshipTarget(n.user)}>
+              <Link
+                to={profilePath(n.user.username, n.user.host ?? undefined)}
+                className={styles.avatarLink}
+                onClick={(e) => e.stopPropagation()}
+              >
+                {avatar}
+              </Link>
+            </UserContextMenu>
+          </UserHoverArea>
+        ) : (
+          avatar
+        )}
+        {n.type === "reaction" ? (
+          <span className={styles.lines}>
+            <span className={styles.singleLine}>{message}</span>
+            {targetSummary && (
+              <span className={`${styles.singleLine} ${styles.targetLine}`}>
+                <EmojiText text={targetSummary} emojis={colonizeEmojiKeys(n.note?.emojis)} />
+              </span>
+            )}
+          </span>
+        ) : (
+          <span className={styles.text}>{message}</span>
+        )}
+      </>
+    );
+    const Tag = stacked ? "div" : "li";
+    const className = [styles.item, clickNoteId && styles.clickable, stacked && styles.stackItem]
+      .filter(Boolean)
+      .join(" ");
+    return (
+      <Tag
+        key={n.id}
+        className={className}
+        data-notification-id={n.id}
+        onClick={
+          clickNoteId
+            ? () => {
+                freezeScroll();
+                navigate(`/notes/${clickNoteId}`);
+              }
+            : undefined
+        }
+      >
+        {noteId ? (
+          <NoteHoverPreview noteId={noteId} className={styles.previewWrap} side="left">
+            {content}
+          </NoteHoverPreview>
+        ) : (
+          content
+        )}
+      </Tag>
+    );
+  };
+
   return (
     <>
     {filterBar}
@@ -394,101 +517,17 @@ export default function NotificationsPanel({
         if ((event.target as Element).closest("a[href]")) freezeScroll();
       }}
     >
-      {items.map((n) => {
-        const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
-        const noteId = resolveTargetNoteId(n);
-        const clickNoteId = resolveClickTargetNoteId(n);
-        const userLink = n.user?.username ? (
-          <UserLinkTag
-            target={toRelationshipTarget(n.user)}
-            to={profilePath(n.user.username, n.user.host ?? undefined)}
-            className={styles.userLink}
-          />
+      {groups.map((g) =>
+        g.items.length === 1 ? (
+          renderCard(g.items[0], false)
         ) : (
-          <span />
-        );
-        const newUserLink = n.relatedUser?.username ? (
-          <UserLinkTag
-            target={toRelationshipTarget(n.relatedUser)}
-            to={profilePath(n.relatedUser.username, n.relatedUser.host ?? undefined)}
-            className={styles.userLink}
+          <NotificationStack
+            key={g.items[g.items.length - 1].id}
+            items={g.items}
+            renderCard={(n) => renderCard(n, true)}
           />
-        ) : (
-          <span />
-        );
-        const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
-        const avatar = <Avatar url={n.user?.avatarUrl} name={who} size={20} />;
-        const message = (
-          <Trans
-            i18n={i18n}
-            i18nKey={i18nKey}
-            values={{ handleSuffix, newHandle }}
-            components={{ userLink, emojiName, newUserLink }}
-          />
-        );
-        const targetSummary = n.type === "reaction" ? reactionTargetSummary(n) : "";
-        const content = (
-          <>
-            {iconUrl ? (
-              <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
-            ) : (
-              <TwemojiEmoji emoji={icon} className={styles.icon} />
-            )}
-            {n.user?.username ? (
-              <UserHoverArea
-                target={{ username: n.user.username, domain: n.user.host ?? undefined }}
-                isSelf={isSelfUser(currentUser, n.user)}
-              >
-                <UserContextMenu target={toRelationshipTarget(n.user)}>
-                  <Link
-                    to={profilePath(n.user.username, n.user.host ?? undefined)}
-                    className={styles.avatarLink}
-                    onClick={(e) => e.stopPropagation()}
-                  >
-                    {avatar}
-                  </Link>
-                </UserContextMenu>
-              </UserHoverArea>
-            ) : (
-              avatar
-            )}
-            {n.type === "reaction" ? (
-              <span className={styles.lines}>
-                <span className={styles.singleLine}>{message}</span>
-                {targetSummary && (
-                  <span className={`${styles.singleLine} ${styles.targetLine}`}>
-                    <EmojiText text={targetSummary} emojis={colonizeEmojiKeys(n.note?.emojis)} />
-                  </span>
-                )}
-              </span>
-            ) : (
-              <span className={styles.text}>{message}</span>
-            )}
-          </>
-        );
-        return (
-          <li
-            key={n.id}
-            className={clickNoteId ? `${styles.item} ${styles.clickable}` : styles.item}
-            onClick={
-              clickNoteId
-                ? () => {
-                    freezeScroll();
-                    navigate(`/notes/${clickNoteId}`);
-                  }
-                : undefined
-            }
-          >
-            {noteId ? (
-              <NoteHoverPreview noteId={noteId} className={styles.previewWrap} side="left">
-                {content}
-              </NoteHoverPreview>
-            ) : (
-              content
-            )}
-          </li>
-        );
-      })}
+        )
+      )}
       {hasMore && (
         <li ref={sentinelRef} className={styles.sentinel}>
           {loadingMore ? t("common:loading") : ""}
