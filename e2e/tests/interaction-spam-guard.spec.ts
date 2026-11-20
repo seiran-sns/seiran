@@ -171,9 +171,20 @@ test("同じ絵文字のリアクションを付け直すと10秒間はエラー
   const card = page.locator("article").filter({ hasText: text }).first();
   await expect(card).toBeVisible({ timeout: 15_000 });
 
-  await card.getByRole("button", { name: /👍\s*1/ }).click();
+  // 件数は楽観的更新でクリック直後に変わるが、送信中のクリックは捨てられる。件数でなく
+  // 応答を待ってから次を押す（待たないと、応答が遅いときに取り消しが送られない）。
+  const clickAndWaitFor = async (name: RegExp, method: "POST" | "DELETE") => {
+    const response = page.waitForResponse(
+      (res) =>
+        res.request().method() === method &&
+        res.url().includes(`/api/notes/${note.id}/reactions`),
+    );
+    await card.getByRole("button", { name }).click();
+    expect((await response).ok()).toBeTruthy();
+  };
+  await clickAndWaitFor(/👍\s*1/, "POST");
   await expect(card.getByRole("button", { name: /👍\s*2/ })).toBeVisible({ timeout: 10_000 });
-  await card.getByRole("button", { name: /👍\s*2/ }).click();
+  await clickAndWaitFor(/👍\s*2/, "DELETE");
   await expect(card.getByRole("button", { name: /👍\s*1/ })).toBeVisible({ timeout: 10_000 });
 
   await card.getByRole("button", { name: /👍\s*1/ }).click();
