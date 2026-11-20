@@ -142,7 +142,6 @@ export default function HomePage() {
   const isNarrow = useIsNarrowViewport();
   const { subscribeChannel, unread } = useStreamingContext();
   const timers = useRef<number[]>([]);
-  const navigatingAway = useRef(false);
   const feedTabsRef = useRef<HTMLDivElement>(null);
   const centerRef = useRef<HTMLDivElement>(null);
 
@@ -268,10 +267,12 @@ export default function HomePage() {
   useEffect(() => {
     const key = feedKey(feed);
     const onScroll = () => {
-      if (navigatingAway.current || pendingScrollRestore.current) return;
+      if (pendingScrollRestore.current) return;
       // 離れるとき、DOM が外れてからこのリスナーが外れるまでの間にスクロールイベントが来る
       // （次の画面の描画で高さが変わる）。一覧が無い状態で読むと「トップ」になり、覚えていた
-      // 位置を上書きする。onBeforeNavigate を通らない移動（通知欄の項目クリック等）で起きる。
+      // 位置を上書きする。リンクを押した時点で読むのを止める方式にはしない: 次の画面の
+      // コードを読み込む間は遷移が保留され、この画面が表示されたままになる。その間に
+      // ブラウザバックすると遷移が取り消されてこの画面がそのまま残り、止めたままになる。
       if (!centerRef.current?.isConnected) return;
       // 自分で位置を合わせたスクロールのイベントは、届くまでの間に画面より上の高さが変わって
       // いることがある（遅れて描かれる中身等）。そこで読むと、上が伸びた分だけ別のポストを
@@ -402,7 +403,7 @@ export default function HomePage() {
     const el = centerRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(() => {
-      if (pendingScrollRestore.current || navigatingAway.current || !el.isConnected) return;
+      if (pendingScrollRestore.current || !el.isConnected) return;
       const scroll = scrollRef.current;
       if (scroll.kind === "anchor") pinScroll(scroll);
     });
@@ -526,7 +527,6 @@ export default function HomePage() {
   }
 
   const saveCurrentScroll = useCallback(() => {
-    navigatingAway.current = true;
     setCache(feedKey(feed), { scroll: captureScroll() });
   }, [feed, setCache, captureScroll]);
 

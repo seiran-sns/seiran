@@ -122,6 +122,10 @@ test("同じポストへの連続したリアクション通知は重ねて出�
   if (!box) throw new Error("stack not laid out");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height - 2);
   await expect.poll(frontTop).toBe("16px");
+
+  // マウスが離れても前面のまま残る。
+  await page.mouse.move(0, 0);
+  await expect.poll(frontTop).toBe("16px");
 });
 
 test("他ユーザーによるリポストと引用が通知される（#198）", async ({ page, request }) => {

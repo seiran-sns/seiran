@@ -22,7 +22,7 @@ function useNoHover(): boolean {
 /**
  * まとめた通知（`lib/notificationGroups.ts`）を、縦に `STACK_OFFSET_PX` ずつずらして重ねる。
  *
- * 前面に出すカード: マウス環境はマウスが乗っているカード、タッチ環境は画面の上から
+ * 前面に出すカード: マウス環境は最後にマウスが乗ったカード（離れても前面のまま残す）、タッチ環境は画面の上から
  * `TOUCH_FOCUS_LINE` の線にかかっているカード（まとまりの高さを件数で等分し、線の位置に
  * 当たるカード）で、まとまり全体が線より上にあれば一番古いカード。どちらでもなければ
  * 一番新しいカード。
@@ -92,7 +92,6 @@ export default function NotificationStack({
       ref={ref}
       className={styles.stack}
       style={{ paddingBottom: (count - 1) * STACK_OFFSET_PX }}
-      onMouseLeave={() => setHovered(null)}
     >
       {paintOrder.map(({ n, index }) => (
         <div
