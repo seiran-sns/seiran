@@ -55,6 +55,49 @@ test("ホーム画面から他画面へ遷移して戻ると、選択タブと�
   expect(Math.abs(scrollYAfter - scrollYBefore)).toBeLessThan(50);
 });
 
+test("トップにいない間の新しいポストは一覧に入れず件数で知らせ、押すとトップへ戻って入る", async ({
+  page,
+  request,
+}) => {
+  const user = await registerUserViaApi(request, "e2ehomepend");
+  for (let i = 0; i < 25; i++) {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text: `新着保留テスト投稿 ${i} ${Date.now()}` },
+    });
+    expect(res.ok(), `投稿作成失敗: ${res.status()} ${await res.text()}`).toBeTruthy();
+  }
+
+  await seedAuth(page, user.token);
+  await page.goto("/");
+  await page.getByRole("button", { name: "ホーム", exact: true }).click();
+  await expect(page.locator("article").first()).toBeVisible({ timeout: 15_000 });
+  await page.evaluate(() => window.scrollTo(0, 600));
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(400);
+  const scrollYBefore = await page.evaluate(() => window.scrollY);
+
+  const text = `新着保留テスト 最新 ${Date.now()}`;
+  const pill = page.getByRole("button", { name: /新しいポスト \d+件/ });
+  // WebSocket の購読が張られる前に投稿すると届かないので、届くまで投稿し直す。
+  await expect(async () => {
+    const res = await request.post("/api/notes/create", {
+      headers: { Authorization: `Bearer ${user.token}` },
+      data: { text },
+    });
+    expect(res.ok()).toBeTruthy();
+    await expect(pill).toBeVisible({ timeout: 3_000 });
+  }).toPass({ timeout: 20_000 });
+
+  // 一覧は変わらず、見ていた位置もそのまま。
+  await expect(page.locator("article").filter({ hasText: text })).toHaveCount(0);
+  expect(Math.abs((await page.evaluate(() => window.scrollY)) - scrollYBefore)).toBeLessThan(2);
+
+  await pill.click();
+  await expect.poll(() => page.evaluate(() => window.scrollY), { timeout: 10_000 }).toBe(0);
+  await expect(page.locator("article").first()).toContainText(text, { timeout: 10_000 });
+  await expect(pill).toHaveCount(0);
+});
+
 test("タイムラインの選択タブはリロード後も保持される", async ({ page, request }) => {
   const user = await registerUserViaApi(request, "e2ehometab");
   await seedAuth(page, user.token);

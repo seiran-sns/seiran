@@ -68,6 +68,33 @@
 .swipeContainer {
   touch-action: pan-y;
   min-height: 100%;
+  /* スクロール位置は HomePage が一番上のポスト基準で合わせる。ブラウザ標準のアンカーも
+     動くと二重に補正してずれる。 */
+  overflow-anchor: none;
+}
+
+/* トップにいない間に届いた新しいポストの件数。高さ0で張り付かせ、一覧を押し下げない。 */
+.newPostsBar {
+  position: sticky;
+  top: 56px;
+  height: 0;
+  z-index: 5;
+  display: flex;
+  justify-content: center;
+}
+
+.newPostsPill {
+  margin-top: 8px;
+  height: fit-content;
+  padding: 6px 16px;
+  border: none;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgb(0 0 0 / 0.2);
 }
 
 

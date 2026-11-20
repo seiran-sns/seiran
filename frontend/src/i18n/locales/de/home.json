@@ -18,7 +18,8 @@
     "quickNotifications": "Schnelle Benachrichtigungen",
     "quickNotificationsWithCount": "Schnellbenachrichtigungen ({{count}})",
     "search": "Suche",
-    "composerToggleLabel": "Formular posten"
+    "composerToggleLabel": "Formular posten",
+    "newPosts": "{{count}} neue Beiträge"
   },
   "noteDetailPage": {
     "title": "Post",

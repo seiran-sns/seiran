@@ -44,7 +44,9 @@ export default function NoteList({
           {gapBeforeIds?.has(note.id) && (
             <div className={styles.gap} role="separator" aria-label={t("home:noteList.gapLabel")} />
           )}
-          <div className={enteringIds?.has(note.id) ? styles.entering : undefined}>
+          {/* data-timeline-id はスクロール位置をポスト基準で覚えるため（lib/timelineScroll.ts）。
+              区切りの下のカード自体に付け、区切りが後から挟まってもカードの位置で合わせる。 */}
+          <div className={enteringIds?.has(note.id) ? styles.entering : undefined} data-timeline-id={note.id}>
             <NoteCard note={note} linkToDetail={linkToDetail} />
           </div>
         </div>

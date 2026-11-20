@@ -18,7 +18,8 @@
     "quickNotifications": "クイック通知",
     "quickNotificationsWithCount": "クイック通知 ({{count}})",
     "search": "検索",
-    "composerToggleLabel": "投稿フォーム"
+    "composerToggleLabel": "投稿フォーム",
+    "newPosts": "新しいポスト {{count}}件"
   },
   "noteDetailPage": {
     "title": "ポスト",

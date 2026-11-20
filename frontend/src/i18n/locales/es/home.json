@@ -18,7 +18,8 @@
     "quickNotifications": "Notificaciones rápidas",
     "quickNotificationsWithCount": "Notificaciones rápidas ({{count}})",
     "search": "Buscar",
-    "composerToggleLabel": "Formulario de publicación"
+    "composerToggleLabel": "Formulario de publicación",
+    "newPosts": "{{count}} publicaciones nuevas"
   },
   "noteDetailPage": {
     "title": "Correo",

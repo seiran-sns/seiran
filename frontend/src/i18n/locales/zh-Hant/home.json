@@ -18,7 +18,8 @@
     "quickNotifications": "快速通知",
     "quickNotificationsWithCount": "快速通知（{{count}}）",
     "search": "搜尋",
-    "composerToggleLabel": "發文表單"
+    "composerToggleLabel": "發文表單",
+    "newPosts": "{{count}} 則新貼文"
   },
   "noteDetailPage": {
     "title": "貼文",

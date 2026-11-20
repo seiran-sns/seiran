@@ -18,7 +18,8 @@
     "quickNotifications": "빠른 알림",
     "quickNotificationsWithCount": "빠른 알림({{count}})",
     "search": "검색",
-    "composerToggleLabel": "게시물 양식"
+    "composerToggleLabel": "게시물 양식",
+    "newPosts": "새 게시물 {{count}}개"
   },
   "noteDetailPage": {
     "title": "우편",

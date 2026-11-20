@@ -17,11 +17,16 @@ import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useSwipe } from "../hooks/useSwipe";
 import { filterTimelineNotes } from "../lib/timelineVisibility";
+import {
+  applyTimelineScroll,
+  captureTimelineScroll,
+  TIMELINE_TOP,
+  type TimelineScroll,
+} from "../lib/timelineScroll";
 import styles from "./HomePage.module.css";
 
 const PAGE_SIZE = 30;
 const COMPOSER_COLLAPSED_KEY = "seiran_composer_collapsed";
-const SCROLL_KEY_PREFIX = "seiran_home_scroll:";
 const LOCAL_MODERATION_KEY = "seiran_home_local_moderation";
 
 function loadLocalModeration(): boolean {
@@ -40,13 +45,17 @@ function saveLocalModeration(on: boolean) {
   }
 }
 
-function saveScrollPosition(key: string, y: number) {
-  sessionStorage.setItem(`${SCROLL_KEY_PREFIX}${key}`, String(y));
+/** トップにいない間に届いた新しいポスト。トップへ戻ったときにまとめて一覧の先頭へ入れる。 */
+interface PendingHead {
+  notes: Note[];
+  /** 復帰時の補完で、取得した先頭ページと一覧が重ならなかった（間に取りこぼしがある）。 */
+  gap: boolean;
 }
 
-function loadScrollPosition(key: string): number {
-  const y = Number(sessionStorage.getItem(`${SCROLL_KEY_PREFIX}${key}`));
-  return Number.isFinite(y) && y > 0 ? y : 0;
+const NO_PENDING_HEAD: PendingHead = { notes: [], gap: false };
+
+function newestFirst(a: Note, b: Note): number {
+  return a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0;
 }
 
 function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; since_id?: string }) {
@@ -135,6 +144,19 @@ export default function HomePage() {
   const timers = useRef<number[]>([]);
   const navigatingAway = useRef(false);
   const feedTabsRef = useRef<HTMLDivElement>(null);
+  const centerRef = useRef<HTMLDivElement>(null);
+
+  // スクロール位置は「トップにいる」か「どのポストが一番上に見えているか」で持つ
+  // （lib/timelineScroll.ts）。画面より上のポストの高さが変わったら（リアクション・画像の
+  // 読み込み・新しいポスト）、一番上のポストを同じ位置へ戻す。新しいポストを一覧へ入れるのは
+  // トップにいるときだけで、それ以外は pendingHead に溜めて件数を出す。
+  const scrollRef = useRef<TimelineScroll>(TIMELINE_TOP);
+  const [atTop, setAtTop] = useState(true);
+  const [pendingHead, setPendingHead] = useState<PendingHead>(NO_PENDING_HEAD);
+  const captureScroll = useCallback(
+    () => captureTimelineScroll(centerRef.current, feedTabsRef.current?.getBoundingClientRect().bottom ?? 0),
+    [],
+  );
 
   // 利用可能なフィードタブの配列（順序定義）
   const availableFeeds = useMemo(
@@ -232,29 +254,32 @@ export default function HomePage() {
   // スクロール位置は継続的に（都度）キャッシュへ書き戻す。「離脱時/アンマウント時に一度だけ
   // 捕捉する」方式は、React 18 StrictMode（開発時）が疑似アンマウントでeffectのcleanupを
   // 前倒しに発火させるため、まだ何もスクロールしていない新しいコンポーネントインスタンスの
-  // 初期値（0）で直前の復元値を上書きしてしまう。
-  // cacheはref内Mapへの軽量な同期書き込み（再renderなし）なので、scroll eventごとに
-  // 即時保存する。rAFへ遅延すると、画面遷移時にcleanupでcancelされて最終位置を失う。
+  // 初期値で直前の復元値を上書きしてしまう。rAFへ遅延すると、画面遷移時にcleanupでcancel
+  // されて最終位置を失う。復元待ちの間は書かない（復元前の短い一覧でブラウザが詰めた位置を
+  // 拾って、覚えていた位置を上書きしてしまう）。
   useEffect(() => {
     const key = feedKey(feed);
     const onScroll = () => {
-      if (navigatingAway.current) return;
-      setCache(key, { scrollY: window.scrollY });
-      saveScrollPosition(key, window.scrollY);
+      if (navigatingAway.current || pendingScrollRestore.current) return;
+      const scroll = captureScroll();
+      scrollRef.current = scroll;
+      setCache(key, { scroll });
+      setAtTop(scroll.kind === "top");
     };
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => {
       window.removeEventListener("scroll", onScroll);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentFeedKey, setCache]);
+  }, [currentFeedKey, setCache, captureScroll]);
 
   // 復元待ちのスクロール位置（キャッシュヒット時のみセットされ、一覧の描画後に一度だけ使う）。
-  const pendingScrollRestore = useRef<number | null>(null);
+  const pendingScrollRestore = useRef<TimelineScroll | null>(null);
 
   useEffect(() => {
     const key = feedKey(feed);
     const cached = getCache(key);
+    setPendingHead(NO_PENDING_HEAD);
     // 他画面から戻ってきた・タブを行き来した際は、キャッシュがあればそれをそのまま復元し
     // 再フェッチしない（一覧が一瞬空になってスクロール位置がズレるのを防ぐ）。
     if (cached) {
@@ -263,7 +288,10 @@ export default function HomePage() {
       setHasMore(cached.hasMore);
       setGapBeforeIds(cached.gapBeforeIds);
       setLoading(false);
-      pendingScrollRestore.current = Math.max(cached.scrollY, loadScrollPosition(key));
+      // 補完フェッチの結果を一覧へ入れるか溜めるかを、戻る位置で決めるので先に反映する。
+      pendingScrollRestore.current = cached.scroll;
+      scrollRef.current = cached.scroll;
+      setAtTop(cached.scroll.kind === "top");
       // 離脱中に取りこぼした新着・状態変化を補うため、先頭ページ相当を再取得してマージする
       // （WS再接続時の補完と同じ処理、詳細は下記 mergeHeadIntoTimeline）。
       mergeHeadIntoTimeline();
@@ -276,6 +304,8 @@ export default function HomePage() {
     // 見た目上の高さが変わりスマホでは右ペイン領域まで巻き込んでスクロールしてしまう。
     // 先頭へ明示的にリセットする。
     window.scrollTo(0, 0);
+    scrollRef.current = TIMELINE_TOP;
+    setAtTop(true);
     setLoading(true);
     setHasMore(true);
     setGapBeforeIds(new Set());
@@ -294,7 +324,7 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentFeedKey, feed, getCache, onError, setHasMore, setNotes]);
 
-  // 一覧・hasMoreが変わるたびキャッシュへ反映（scrollYは触らずマージする）。
+  // 一覧・hasMoreが変わるたびキャッシュへ反映（scrollは触らずマージする）。
   // loading中（フェッチ中・キャッシュ復元処理の途中）は書き込まない: React 18 StrictMode
   // （開発時）はmount直後に同一レンダーのeffectを2回連続実行するため、setNotes等の
   // 更新がまだ反映されていない「更新前の古いnotes（空配列）」をこのeffectが読んでしまい、
@@ -309,39 +339,86 @@ export default function HomePage() {
     setCache(currentFeedKey, { notes, hasMore, gapBeforeIds });
   }, [notes, hasMore, gapBeforeIds, loading, notesFeedKey, currentFeedKey, setCache]);
 
-  // キャッシュから復元した一覧がDOMへ反映された後に、一度だけスクロール位置を復元する。
-  useEffect(() => {
+  // キャッシュから復元した一覧がDOMへ反映された直後（描画前）に、一度だけ位置を戻す。
+  // 戻す先のポストが無くなっていたら先頭へ。
+  useLayoutEffect(() => {
     if (loading || pendingScrollRestore.current === null) return;
-    const y = pendingScrollRestore.current;
+    const scroll = pendingScrollRestore.current;
     pendingScrollRestore.current = null;
-    // 1回目のrAFではReactのDOM commit直後でscrollHeightが確定していないことがある。
-    // 2 frame待って一覧レイアウト確定後に復元する。
-    requestAnimationFrame(() => requestAnimationFrame(() => window.scrollTo(0, y)));
+    if (!applyTimelineScroll(centerRef.current, scroll)) {
+      window.scrollTo(0, 0);
+      scrollRef.current = TIMELINE_TOP;
+      setAtTop(true);
+    }
   }, [loading, notes]);
+
+  // 一覧が変わったら（ポストの削除・区切りの挿入等）、一番上に見えていたポストを同じ位置へ戻す。
+  // そのポストが消えていたら、今見えている位置を覚え直す。
+  useLayoutEffect(() => {
+    if (pendingScrollRestore.current) return;
+    const scroll = scrollRef.current;
+    if (scroll.kind === "anchor" && !applyTimelineScroll(centerRef.current, scroll)) {
+      scrollRef.current = captureScroll();
+    }
+  }, [notes, gapBeforeIds, captureScroll]);
+
+  // 一覧の外での高さの変化（リアクションが付いた・画像が読み込まれた・投稿欄の開閉等）にも
+  // 合わせる。ResizeObserver は描画の前に呼ばれるので、ずれた瞬間は画面に出ない。
+  // ブラウザ標準のスクロールアンカー（overflow-anchor）は二重に補正するので、
+  // .swipeContainer で切っている。
+  useEffect(() => {
+    const el = centerRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => {
+      if (pendingScrollRestore.current || navigatingAway.current) return;
+      const scroll = scrollRef.current;
+      if (scroll.kind === "anchor") applyTimelineScroll(el, scroll);
+    });
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => () => timers.current.forEach((t) => window.clearTimeout(t)), []);
 
-  // スクロールが最上部にない状態で先頭挿入すると、増えた分だけ見えているポストが
-  // 下へ押しやられてしまう。最上部でない場合は挿入前のscrollHeight/scrollYを控えておき、
-  // DOM反映直後（下記useLayoutEffect）に増えた高さぶんだけscrollYを足して見た目を相殺する。
-  const scrollAdjustRef = useRef<{ scrollHeight: number; scrollY: number } | null>(null);
-  const captureScrollAdjust = useCallback(() => {
-    if (window.scrollY > 0) {
-      scrollAdjustRef.current = {
-        scrollHeight: document.documentElement.scrollHeight,
-        scrollY: window.scrollY,
-      };
+  // 先頭へポストを入れる。gap は、入れるポストと今の一覧の間に取りこぼしがあることを示す。
+  const insertHead = useCallback((head: Note[], gap: boolean) => {
+    const prev = notesRef.current;
+    if (gap && prev.length > 0) setGapBeforeIds((g) => new Set(g).add(prev[0].id));
+    setNotes((p) => {
+      const ids = new Set(p.map((n) => n.id));
+      const fresh = head.filter((n) => !ids.has(n.id));
+      return fresh.length === 0 ? p : [...fresh, ...p];
+    });
+  }, [setNotes]);
+
+  // トップにいないときは一覧を変えずに溜める（読んでいる最中に上へ増えても困らないように）。
+  const queueHead = useCallback((head: Note[], gap: boolean) => {
+    if (scrollRef.current.kind === "top") {
+      insertHead(head, gap);
+      return;
     }
-  }, []);
+    setPendingHead((p) => {
+      const known = new Set([...notesRef.current, ...p.notes].map((n) => n.id));
+      const fresh = head.filter((n) => !known.has(n.id));
+      if (fresh.length === 0 && (!gap || p.gap)) return p;
+      return { notes: [...fresh, ...p.notes].sort(newestFirst), gap: p.gap || gap };
+    });
+  }, [insertHead]);
+
+  // トップへ戻ったら、溜めていたポストを入れる。
+  useEffect(() => {
+    if (!atTop || pendingHead.notes.length === 0) return;
+    insertHead(pendingHead.notes, pendingHead.gap);
+    setPendingHead(NO_PENDING_HEAD);
+  }, [atTop, pendingHead, insertHead]);
 
   const prepend = useCallback((note: Note, animate = false) => {
-    const preserveScroll = window.scrollY > 0;
-    captureScrollAdjust();
-    setNotes((prev) => (prev.some((n) => n.id === note.id) ? prev : [note, ...prev]));
-    // push-downアニメーション（.entering、max-heightを0.4秒かけて展開）は高さがじわじわ
-    // 伸びるため、非最上部でのスクロール補正（差分を一度に足し込む方式）と噛み合わない。
-    // 最上部にいる時だけ演出する。
-    if (animate && !preserveScroll) {
+    if (scrollRef.current.kind !== "top") {
+      queueHead([note], false);
+      return;
+    }
+    insertHead([note], false);
+    if (animate) {
       setEnteringIds((prev) => new Set(prev).add(note.id));
       const t = window.setTimeout(() => {
         setEnteringIds((prev) => {
@@ -352,17 +429,7 @@ export default function HomePage() {
       }, 450);
       timers.current.push(t);
     }
-  }, [setNotes, captureScrollAdjust]);
-
-  useLayoutEffect(() => {
-    const adjust = scrollAdjustRef.current;
-    scrollAdjustRef.current = null;
-    if (!adjust) return;
-    const diff = document.documentElement.scrollHeight - adjust.scrollHeight;
-    if (diff !== 0) {
-      window.scrollTo(0, adjust.scrollY + diff);
-    }
-  }, [notes]);
+  }, [insertHead, queueHead]);
 
   // 離脱中（他画面へ遷移・WebSocket切断）に取りこぼした新着・状態変化を補うため、
   // 先頭ページ相当を再取得して現在の一覧の先頭とマージする。復帰時（上記キャッシュ復元時）と
@@ -381,24 +448,20 @@ export default function HomePage() {
         }
         const prevIds = new Set(prev.map((n) => n.id));
         const overlapIndex = fetched.findIndex((n) => prevIds.has(n.id));
+        // 取得した先頭ページと既存の一覧がまったく重ならない＝間に取りこぼしがある。
+        // 境目に区切り（二重波線）を挟んで、取得できた分だけ先頭へ追加する。
         if (overlapIndex === -1) {
-          // 取得した先頭ページと既存の一覧がまったく重ならない＝間に取りこぼしがある。
-          // 境目に区切り（二重波線）を挟んで、取得できた分だけ先頭へ追加する。
-          captureScrollAdjust();
-          setGapBeforeIds((g) => new Set(g).add(prev[0].id));
-          setNotes((p) => [...fetched, ...p]);
+          queueHead(fetched, true);
           return;
         }
         const newOnes = fetched.slice(0, overlapIndex);
-        if (newOnes.length === 0) return;
-        captureScrollAdjust();
-        setNotes((p) => [...newOnes, ...p]);
+        if (newOnes.length > 0) queueHead(newOnes, false);
       })
       .catch(() => {
         // 復帰時・再接続時の補完フェッチはベストエフォート。失敗してもエラー表示はしない
         // （元々表示中の一覧はそのまま残るため、ユーザー体験上は無視して問題ない）。
       });
-  }, [feed, captureScrollAdjust, setNotes]);
+  }, [feed, queueHead, setNotes]);
 
   // リアルタイム更新（#37）: 表示中タブに対応するチャンネルを購読し、届いたポストを
   // アニメ付きで先頭挿入する。タブ切替のたびに旧チャンネルをdisconnectし新チャンネルへ
@@ -432,13 +495,11 @@ export default function HomePage() {
 
   const saveCurrentScroll = useCallback(() => {
     navigatingAway.current = true;
-    const key = feedKey(feed);
-    setCache(key, { scrollY: window.scrollY });
-    saveScrollPosition(key, window.scrollY);
-  }, [feed, setCache]);
+    setCache(feedKey(feed), { scroll: captureScroll() });
+  }, [feed, setCache, captureScroll]);
 
   const center = (
-    <div className={styles.swipeContainer} {...swipeHandlers}>
+    <div className={styles.swipeContainer} ref={centerRef} {...swipeHandlers}>
       <div className={styles.composerWrap}>
         <button
           type="button"
@@ -499,6 +560,18 @@ export default function HomePage() {
           </button>
         ))}
       </div>
+
+      {pendingHead.notes.length > 0 && (
+        <div className={styles.newPostsBar}>
+          <button
+            type="button"
+            className={styles.newPostsPill}
+            onClick={() => window.scrollTo({ top: 0, behavior: "smooth" })}
+          >
+            {t("home:homePage.newPosts", { count: pendingHead.notes.length })}
+          </button>
+        </div>
+      )}
 
       {selectedFeed.kind === "local" && isAdmin && (
         <label className={styles.moderationToggle}>

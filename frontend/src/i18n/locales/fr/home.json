@@ -18,7 +18,8 @@
     "quickNotifications": "Notifications rapides",
     "quickNotificationsWithCount": "Notifications rapides ({{count}})",
     "search": "Recherche",
-    "composerToggleLabel": "Formulaire de publication"
+    "composerToggleLabel": "Formulaire de publication",
+    "newPosts": "{{count}} nouvelles publications"
   },
   "noteDetailPage": {
     "title": "Poste",
