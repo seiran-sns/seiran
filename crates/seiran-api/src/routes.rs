@@ -143,12 +143,13 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             patch(handlers::admin::emojis::update_emoji)
                 .delete(handlers::admin::emojis::delete_emoji),
         )
-        // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数十〜数百MBになりうるため、
-        // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。
+        // 絵文字インポート（#50）。多数のカスタム絵文字を含むZIPは数百MBになりうるため、
+        // axum のデフォルトボディ上限（2MB）を明示的に引き上げる。前段の nginx（docker/*.conf）も
+        // このパスだけ同じ上限にしている。
         .route(
             "/api/admin/emojis/import",
             post(handlers::admin::emoji_import::start_import)
-                .layer(DefaultBodyLimit::max(200 * 1024 * 1024))
+                .layer(DefaultBodyLimit::max(500 * 1024 * 1024))
                 .merge(get(handlers::admin::emoji_import::get_import_status)),
         )
         .route(
