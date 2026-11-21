@@ -58,6 +58,8 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 `app.bsky.feed.post`コレクションのみ`posts`テーブルへ構造化パースする。それ以外のコレクションは`atp_records`への生バイト列複製が基本方針（`docs/database.md`「ATP リポジトリ関連」参照、既存の投稿コミットパイプラインと共通のテーブル設計）。
 
+- **投稿 id と表示順**: `posts.id` はレコードの`createdAt`から採番する（受信Bsky投稿と同じ。`createdAt`が無い・読めない場合は取り込み時刻）。タイムラインは id 順に並ぶので、取り込み時刻で採番すると過去の投稿が新着としてローカルタイムラインの先頭を占めるため。取り込んだ投稿はどのストリーミングチャンネルにも流さない（新規投稿ではないため）。
+
 - **`seiranPost`拡張オブジェクト（転入元もseiranの場合）**: 転入元PDSがseiranインスタンスであれば、取り込んだ`app.bsky.feed.post`レコードは`seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、`docs/protocols.md` 5節）を持つ。検出できた場合、本文（`body`）・絵文字マップ（`emojiMap`）・CW（`contentWarning`）・投票（`poll`）・公開範囲（`visibility`）・URLカードの申告値（`linkCards`）をATP標準フィールドの変換値より優先して`posts`へ反映する。リモートseiranポストのATP受信（`seiran-atp-repo::firehose::save_bsky_post`）と同じ優先順位。
 
 - **画像・動画添付**: `app.bsky.feed.post`の`embed`（画像・動画）は、DID＋blob CIDのみからBluesky CDN/動画パイプラインのURLを決定的に組み立てる既存ロジック（`seiran_common::atp::parse_bsky_embed_attachments`、他の受信Bsky投稿と共通）で復元する。転入元PDSから取得した実バイト列（`at_migration_blobs`→`atp_blobs`）を再ホストするのではなく、Bluesky公式のCDN/動画配信を指す点は他の受信Bsky投稿の添付表示と同じ扱い。
