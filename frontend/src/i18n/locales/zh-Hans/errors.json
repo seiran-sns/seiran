@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "密码必须至少为 8 个字符",
   "PIN_NOT_FOUND": "未找到该置顶项目",
   "PLC_DIRECTORY_UNREACHABLE": "无法连接到 DID 目录服务器（plc.directory）",
-  "PLC_SIGN_FAILED": "在源服务器上签署 DID 更新失败，验证码可能已过期",
+  "PLC_SIGN_FAILED": "在源服务器上签署 DID 更新失败，验证码可能已过期。请点击“重新发送验证码”获取新的验证码",
   "PLC_SUBMIT_FAILED": "提交 DID 更新失败",
   "POST_RATE_LIMITED": "已达到该时间段内的发帖数量上限，请稍后再试。",
   "PRIVATE_POST_NOT_QUOTABLE": "私密帖子不能引用",

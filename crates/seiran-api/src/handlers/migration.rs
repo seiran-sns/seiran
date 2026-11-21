@@ -267,8 +267,8 @@ pub enum SubmitPlcTokenResponse {
 /// 再送しない）保存済みの署名鍵でアカウント作成だけをやり直す。
 ///
 /// `signPlcOperation`のtokenはPDS A側で15分・ワンタイムのため、`awaiting_plc_token`
-/// からの一発勝負。署名に失敗したらステータスを据え置き、ユーザーは`requesting_plc_signature`
-/// から新しいメールトークンを取り直す。
+/// からの一発勝負。署名に失敗したらステータスを据え置き、ユーザーは`resend-plc-token`で
+/// 新しいメールトークンを取り直す。
 pub async fn submit_plc_token(
     State(state): State<AppState>,
     Path(id): Path<i64>,
@@ -635,6 +635,34 @@ pub async fn retry(
         }
         _ => Err(ApiError::BadRequest("NOT_RETRYABLE".into())),
     }
+}
+
+/// PLC 操作の確認コードのメールを送り直す。コードは PDS A 側で15分で切れ、`awaiting_plc_token`
+/// のまま入力が遅れると、切れたコードでは`submit-plc-token`が通らない。
+/// `requesting_plc_signature`へ戻して署名要求のジョブを積み直す（ジョブが新しいコードを
+/// 送らせ、再び`awaiting_plc_token`にする）。状態が変わっていたら（コードの送信と競合した等）
+/// 何もしない。
+pub async fn resend_plc_token(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Json<MigrationStatusStub>, ApiError> {
+    authorize_migration_request(&state, id, &headers).await?;
+    let moved = seiran_common::repository::at_migration::transition_status(
+        &state.db,
+        id,
+        "awaiting_plc_token",
+        "requesting_plc_signature",
+    )
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !moved {
+        return Err(ApiError::BadRequest("INVALID_STATE".into()));
+    }
+    state.enqueue_migration_request_plc_signature(id).await;
+    Ok(Json(MigrationStatusStub {
+        status: "requesting_plc_signature",
+    }))
 }
 
 #[derive(Deserialize)]

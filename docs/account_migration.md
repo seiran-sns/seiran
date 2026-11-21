@@ -34,7 +34,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
 | `awaiting_source_password` | 移行元にアプリパスワードでログインしていて PLC 操作に署名させられない。本来のパスワードの入れ直し待ち。入力されたら`POST /api/migration/:id/submit-source-password`が DID を識別子に`createSession`をやり直し（メール2FAを求められたら`start`と同じく`AUTH_FACTOR_TOKEN_REQUIRED`で確認コードを足して再送）、新しいセッションを保存して`requesting_plc_signature`へ戻す | ユーザー入力待ち |
-| `awaiting_plc_token` | PDS Aメールの確認コード入力待ち | ユーザー入力待ち |
+| `awaiting_plc_token` | PDS Aメールの確認コード入力待ち。コードは PDS A 側で15分で切れるので、転入画面の「確認コードを送り直す」（`POST /api/migration/:id/resend-plc-token`）で`requesting_plc_signature`へ戻して送り直せる | ユーザー入力待ち |
 | `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
 | `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
 | `importing_data` | ステージング済みレコード/blobの実体化中 | `Job::MigrationImportProcess`（自己再enqueue） |

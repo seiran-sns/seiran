@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "La contraseña debe tener al menos 8 caracteres.",
   "PIN_NOT_FOUND": "Pin no encontrado",
   "PLC_DIRECTORY_UNREACHABLE": "No se pudo conectar con el directorio de DID (plc.directory)",
-  "PLC_SIGN_FAILED": "No se pudo firmar la actualización del DID en el servidor de origen. El código puede haber caducado",
+  "PLC_SIGN_FAILED": "No se pudo firmar la actualización del DID en el servidor de origen. El código puede haber caducado. Use «Reenviar el código» para recibir uno nuevo",
   "PLC_SUBMIT_FAILED": "No se pudo enviar la actualización del DID",
   "POST_RATE_LIMITED": "Has alcanzado el límite de publicaciones para este período. Inténtalo de nuevo más tarde.",
   "PRIVATE_POST_NOT_QUOTABLE": "Las publicaciones privadas no se pueden citar",

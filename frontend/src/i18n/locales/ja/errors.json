@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "パスワードは8文字以上で入力してください",
   "PIN_NOT_FOUND": "ピン留めが見つかりません",
   "PLC_DIRECTORY_UNREACHABLE": "DID管理サーバー（plc.directory）に接続できませんでした",
-  "PLC_SIGN_FAILED": "移行元でのDID更新署名に失敗しました。コードの有効期限が切れている可能性があります",
+  "PLC_SIGN_FAILED": "移行元でのDID更新署名に失敗しました。コードの有効期限が切れている可能性があります。「確認コードを送り直す」で新しいコードを受け取ってください",
   "PLC_SUBMIT_FAILED": "DID更新の送信に失敗しました",
   "POST_RATE_LIMITED": "この時間内の投稿数上限に達しました。しばらく待ってから再試行してください",
   "PRIVATE_POST_NOT_QUOTABLE": "非公開の投稿は引用できません",

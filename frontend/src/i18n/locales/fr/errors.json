@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "Le mot de passe doit contenir au moins 8 caractères",
   "PIN_NOT_FOUND": "Épingle introuvable",
   "PLC_DIRECTORY_UNREACHABLE": "Impossible de se connecter à l'annuaire DID (plc.directory)",
-  "PLC_SIGN_FAILED": "Échec de la signature de la mise à jour du DID sur le serveur source. Le code a peut-être expiré",
+  "PLC_SIGN_FAILED": "Échec de la signature de la mise à jour du DID sur le serveur source. Le code a peut-être expiré. Utilisez « Renvoyer le code » pour en recevoir un nouveau",
   "PLC_SUBMIT_FAILED": "Échec de l'envoi de la mise à jour du DID",
   "POST_RATE_LIMITED": "Vous avez atteint la limite de publications pour cette période. Veuillez réessayer plus tard.",
   "PRIVATE_POST_NOT_QUOTABLE": "Les messages privés ne peuvent pas être cités",

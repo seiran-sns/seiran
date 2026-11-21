@@ -315,6 +315,10 @@ fn auth_account_routes() -> Router<AppState> {
         )
         .route("/api/migration/:id/retry", post(handlers::migration::retry))
         .route(
+            "/api/migration/:id/resend-plc-token",
+            post(handlers::migration::resend_plc_token),
+        )
+        .route(
             "/api/migration/:id/submit-source-password",
             post(handlers::migration::submit_source_password),
         )
