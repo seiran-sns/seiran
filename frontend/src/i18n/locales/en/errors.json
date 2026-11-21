@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "Password must be at least 8 characters",
   "PIN_NOT_FOUND": "Pin not found",
   "PLC_DIRECTORY_UNREACHABLE": "Could not connect to the DID directory (plc.directory)",
-  "PLC_SIGN_FAILED": "Failed to sign the DID update on the source server. The code may have expired",
+  "PLC_SIGN_FAILED": "Failed to sign the DID update on the source server. The code may have expired. Use \"Resend the code\" to get a new one",
   "PLC_SUBMIT_FAILED": "Failed to submit the DID update",
   "POST_RATE_LIMITED": "You've reached the posting limit for this time window. Please try again later.",
   "PRIVATE_POST_NOT_QUOTABLE": "Private posts cannot be quoted",

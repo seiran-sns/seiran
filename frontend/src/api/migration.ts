@@ -101,6 +101,10 @@ export const migration = {
       auth_factor_token: authFactorToken,
     });
   },
+  /** PLC 操作の確認コードのメールを送り直す（`awaiting_plc_token` のときだけ。コードは15分で切れる）。 */
+  resendPlcToken(id: string, requestToken: string) {
+    return migrationRequest<SimpleStatus>("POST", `/migration/${id}/resend-plc-token`, requestToken);
+  },
   retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);
   },

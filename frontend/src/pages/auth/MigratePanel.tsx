@@ -311,6 +311,20 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     }
   }
 
+  async function handleResendPlcToken() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.migration.resendPlcToken(stored.id, stored.token);
+      setInputValue("");
+      await fetchStatus();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleAbandon() {
     setError("");
     setSubmitting(true);
@@ -404,6 +418,12 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
           </label>
           <button type="submit" className={styles.button} disabled={submitting}>
             {t("auth:migrationStatus.submitInput")}
+          </button>
+          <p style={{ color: "#a0aec0", fontSize: "0.85rem", marginTop: "0.5rem" }}>
+            {t("auth:migrationStatus.resendPlcTokenDescription")}
+          </p>
+          <button type="button" className={styles.button} onClick={handleResendPlcToken} disabled={submitting}>
+            {t("auth:migrationStatus.resendPlcToken")}
           </button>
         </form>
       )}

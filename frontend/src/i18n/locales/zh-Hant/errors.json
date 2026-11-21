@@ -55,7 +55,7 @@
   "PASSWORD_TOO_SHORT": "密碼必須至少為 8 個字元",
   "PIN_NOT_FOUND": "找不到該置頂項目",
   "PLC_DIRECTORY_UNREACHABLE": "無法連線至 DID 目錄伺服器（plc.directory）",
-  "PLC_SIGN_FAILED": "在來源伺服器上簽署 DID 更新失敗，驗證碼可能已過期",
+  "PLC_SIGN_FAILED": "在來源伺服器上簽署 DID 更新失敗，驗證碼可能已過期。請點選「重新傳送驗證碼」取得新的驗證碼",
   "PLC_SUBMIT_FAILED": "提交 DID 更新失敗",
   "POST_RATE_LIMITED": "已達到此時間段內的發文數量上限，請稍後再試。",
   "PRIVATE_POST_NOT_QUOTABLE": "私密貼文無法被引用",
