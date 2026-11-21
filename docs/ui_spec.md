@@ -36,7 +36,7 @@
 
 ### 1.2 NoteCardヘッダー（投稿者名・日付・アカウント行）
 
-* 1行目: 表示名（あふれる分は ellipsis）と右寄せの投稿日付。日付は常に全文を出し、表示名側を縮める。
+* 1行目: 表示名（あふれる分は ellipsis）と右寄せの投稿日付。日付は常に全文を出し、表示名側を縮める。日付は今年なら「月/日 時:分」、今年でなければ年を足す（閲覧者のローカル時刻の年で判定。ポスト日時を出す他の箇所も同じ `formatDate` を使う）。
 * 2行目: アカウントID（`@user@domain`、配送先/公開範囲の小バッジ込み、ellipsis）と、その右の「リモートサーバー表示」。
   * ローカルと `remote_seiran` には出さない。`remote_seiran` はアカウントID直後の小バッジだけで、アイコンは Twemoji の 🌃 左半分と 🏙️ 右半分を合成した自前 SVG（`assets/seiran-skyline.svg`。seiran 同士を外部プロトコルの記号ではなく「同じ都市の景色」で表す）。
   * Fedi はサーバーアイコン（`note.user.instance.iconUrl`、無ければ 🌐）＋サーバー名（`instance.name`、nodeinfo 未取得ならドメイン名）。Bsky は Bluesky ロゴ SVG ＋「Bluesky」固定。
