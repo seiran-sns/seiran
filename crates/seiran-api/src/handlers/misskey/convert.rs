@@ -638,7 +638,7 @@ async fn embed_referenced_notes(
 /// Misskey本家の `isPureRenote` と同じ判定（リノート先があり、本文・CW・添付・投票を持たない）。
 /// クライアントはこの形のノートを「リノート先そのもの」として描画し、リアクションも
 /// リノート先（`renote`）のものを表示する。
-fn is_pure_renote(note: &MisskeyNote) -> bool {
+pub(super) fn is_pure_renote(note: &MisskeyNote) -> bool {
     note.renote_id.is_some()
         && note.text.is_none()
         && note.cw.is_none()

@@ -49,7 +49,18 @@ impl ChannelKind {
                 Some(Self::UserList(list_id))
             }
             "hashtag" => {
-                let tag = params["tag"].as_str()?;
+                // `tag` は SPA。Misskey 本家は `q`（OR で並べた AND の組、`[["foo"]]`）で、
+                // seiran のタグ購読は1タグだけなので、1組1タグのときだけ受け付ける。
+                let tag = match params["tag"].as_str() {
+                    Some(tag) => tag,
+                    None => match params["q"].as_array().map(Vec::as_slice) {
+                        Some([group]) => match group.as_array().map(Vec::as_slice) {
+                            Some([tag]) => tag.as_str()?,
+                            _ => return None,
+                        },
+                        _ => return None,
+                    },
+                };
                 if tag.is_empty() {
                     return None;
                 }
@@ -452,6 +463,14 @@ mod tests {
         assert_eq!(
             ChannelKind::parse("hashtag", &serde_json::json!({"tag": "Foo"})),
             Some(ChannelKind::Hashtag("foo".to_string()))
+        );
+        assert_eq!(
+            ChannelKind::parse("hashtag", &serde_json::json!({"q": [["Foo"]]})),
+            Some(ChannelKind::Hashtag("foo".to_string()))
+        );
+        assert_eq!(
+            ChannelKind::parse("hashtag", &serde_json::json!({"q": [["a", "b"]]})),
+            None
         );
         assert_eq!(ChannelKind::parse("userList", &empty), None);
         assert_eq!(ChannelKind::parse("unknownChannel", &empty), None);

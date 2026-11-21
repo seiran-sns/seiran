@@ -671,6 +671,8 @@ fn social_routes() -> Router<AppState> {
 fn misskey_routes() -> Router<AppState> {
     Router::new()
         // Misskey 互換レイヤー
+        // ストリーミング（本家と同じく `/api` の外。トークンはクエリ `i`）
+        .route("/streaming", get(handlers::misskey::streaming::streaming))
         .route("/api/meta", post(handlers::meta::api_meta))
         .route("/api/ap/show", post(handlers::misskey::endpoints::ap_show))
         .route(
