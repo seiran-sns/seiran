@@ -2,6 +2,7 @@
   "messagesPage": {
     "title": "メッセージ",
     "newMessage": "新規メッセージ",
+    "backToList": "← メッセージ一覧",
     "emptySessions": "まだメッセージはありません",
     "composeHint": "宛先を選んでメッセージを送信してください",
     "unknownPeer": "不明な相手",

@@ -269,6 +269,14 @@ function AppRoutes() {
           }
         />
         <Route
+          path="/messages/new"
+          element={
+            <RequireAuth>
+              <MessagesPage compose />
+            </RequireAuth>
+          }
+        />
+        <Route
           path="/messages/:threadRootId"
           element={
             <RequireAuth>

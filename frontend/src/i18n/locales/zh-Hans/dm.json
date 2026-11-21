@@ -2,6 +2,7 @@
   "messagesPage": {
     "title": "私信",
     "newMessage": "新消息",
+    "backToList": "← 消息列表",
     "emptySessions": "还没有消息",
     "composeHint": "选择发送消息的收件人",
     "unknownPeer": "未知对象",

@@ -36,7 +36,9 @@ function peerLabel(session: DmSession, myActorId: string | undefined, t: (key: s
     .join(", ");
 }
 
-export default function MessagesPage() {
+/** `compose`: `/messages/new`（宛先未選択の作成画面）。幅広では `/messages` と同じ表示で、
+ * 狭い幅では `/messages` が一覧だけ、`/messages/new` が作成画面だけを出す。 */
+export default function MessagesPage({ compose = false }: { compose?: boolean }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { threadRootId } = useParams<{ threadRootId?: string }>();
@@ -225,7 +227,7 @@ export default function MessagesPage() {
 
   const right = (
     <>
-      <Link className={styles.newButton} to="/messages">
+      <Link className={styles.newButton} to="/messages/new">
         {t("dm:messagesPage.newMessage")}
       </Link>
       <ul className={styles.sessionList}>
@@ -262,7 +264,10 @@ export default function MessagesPage() {
   );
 
   const center = (
-    <>
+    <div className={styles.thread}>
+      <Link className={styles.backLink} to="/messages">
+        {t("dm:messagesPage.backToList")}
+      </Link>
       <div className={styles.messageList} ref={scrollRef}>
         {messagesLoading && <p className={styles.loading}>{t("common:loading")}</p>}
         {!messagesLoading && !threadRootId && <p className={styles.empty}>{t("dm:messagesPage.composeHint")}</p>}
@@ -336,12 +341,12 @@ export default function MessagesPage() {
         </div>
         {error && <p className={styles.error}>{error}</p>}
       </form>
-    </>
+    </div>
   );
 
   return (
     <>
-      <AppShell center={center} right={right} />
+      <AppShell center={center} right={right} narrowPane={threadRootId || compose ? "center" : "right"} />
       <Modal
         open={reactionPickerFor !== null}
         onClose={() => setReactionPickerFor(null)}
