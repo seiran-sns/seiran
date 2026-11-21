@@ -151,6 +151,7 @@
     "visibilityPrivate": "Private",
     "attachmentAlt": "Attached image",
     "removeAttachmentTitle": "Remove attachment",
+    "nsfwTooltip": "Turn on NSFW for things like sexual illustrations. The image is shown blurred at first, and viewers can see it by pressing the unblur button themselves",
     "overLimitReply": "This exceeds Bluesky's character limit.",
     "overLimitDefault": "This exceeds Bluesky's character limit. Turn off Bsky to post anyway.",
     "remainingCount": "{{count}} left",

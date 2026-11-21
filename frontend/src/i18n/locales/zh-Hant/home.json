@@ -151,6 +151,7 @@
     "visibilityPrivate": "私密",
     "attachmentAlt": "附加圖片",
     "removeAttachmentTitle": "移除附件",
+    "nsfwTooltip": "為色情插畫等內容開啟 NSFW 後，圖片起初會模糊顯示，觀看者自己按下取消模糊按鈕後才能看到",
     "overLimitReply": "這超出了 Bluesky 的字數限制。",
     "overLimitDefault": "這超出了 Bluesky 的字數限制。若要發文，請關閉 Bsky 傳送。",
     "remainingCount": "剩餘 {{count}} 字",

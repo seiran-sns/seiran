@@ -151,6 +151,7 @@
     "visibilityPrivate": "プライベート",
     "attachmentAlt": "添付画像",
     "removeAttachmentTitle": "添付を解除",
+    "nsfwTooltip": "性的なイラストなどにNSFWをオンにすると、最初はぼかして表示され、見る人が自分でぼかし解除ボタンを押すと見られるようになります",
     "overLimitReply": "Bluesky の文字数制限を超えています。",
     "overLimitDefault": "Bluesky の文字数制限を超えています。Bsky をオフにすると投稿できます。",
     "remainingCount": "残り {{count}}",

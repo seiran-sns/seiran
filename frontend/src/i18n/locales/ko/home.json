@@ -151,6 +151,7 @@
     "visibilityPrivate": "사적인",
     "attachmentAlt": "첨부된 이미지",
     "removeAttachmentTitle": "첨부파일 삭제",
+    "nsfwTooltip": "성적인 일러스트 등에 NSFW를 켜면 처음에는 흐리게 표시되며, 보는 사람이 직접 흐림 해제 버튼을 누르면 볼 수 있습니다",
     "overLimitReply": "이는 Bluesky의 글자 수 제한을 초과합니다.",
     "overLimitDefault": "이는 Bluesky의 글자 수 제한을 초과합니다. 어쨌든 게시하려면 Bsky를 끄세요.",
     "remainingCount": "{{count}} 남음",

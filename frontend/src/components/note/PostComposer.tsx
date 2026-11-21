@@ -717,6 +717,7 @@ export default function PostComposer({
         cwEnabled ? cwGuide.trim() : undefined,
         showUrlCardCheckboxList ? checkedLinkCardUrls : undefined,
         language,
+        attachments.filter((a) => a.isSensitive).map((a) => a.id),
       );
       setText("");
       setAttachments([]);
@@ -802,6 +803,12 @@ export default function PostComposer({
 
   function removeAttachment(id: string) {
     setAttachments((prev) => prev.filter((a) => a.id !== id));
+  }
+
+  function toggleAttachmentSensitive(id: string) {
+    setAttachments((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, isSensitive: !a.isSensitive } : a)),
+    );
   }
 
   const attachLimitReached = attachments.length >= MAX_ATTACHMENTS;
@@ -1305,8 +1312,20 @@ export default function PostComposer({
                   <img
                     src={attached.url}
                     alt={t("home:postComposer.attachmentAlt")}
-                    className={styles.attachThumb}
+                    className={`${styles.attachThumb} ${attached.isSensitive ? styles.attachThumbSensitive : ""}`}
                   />
+                )}
+                {attached.mimeType.startsWith("image/") && (
+                  <button
+                    type="button"
+                    className={`${styles.attachNsfwBtn} ${attached.isSensitive ? styles.attachNsfwBtnOn : ""}`}
+                    onClick={() => toggleAttachmentSensitive(attached.id)}
+                    aria-pressed={!!attached.isSensitive}
+                    title={t("home:postComposer.nsfwTooltip")}
+                  >
+                    <TwemojiEmoji emoji="🙈" />
+                    NSFW
+                  </button>
                 )}
                 <button
                   type="button"

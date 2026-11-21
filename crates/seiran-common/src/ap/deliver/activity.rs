@@ -132,6 +132,7 @@ fn build_note_object(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_
     });
     if !p.attachments.is_empty() {
         note_obj["attachment"] = serde_json::Value::Array(p.attachments.clone());
+        apply_note_sensitive(&mut note_obj, &p.attachments);
     }
     if !p.tag.is_empty() {
         note_obj["tag"] = serde_json::Value::Array(p.tag.clone());
@@ -220,21 +221,70 @@ pub(super) fn build_update_note_activity(
     })
 }
 
-/// 添付ファイル 1 件分の AP Document オブジェクトを組み立てる。
-pub(super) fn build_attachment_document(
-    public_url: &str,
-    storage_key: &str,
-    mime_type: &str,
-    width: Option<i32>,
-    height: Option<i32>,
-    blurhash: Option<&str>,
+/// 添付に NSFW 指定（Document の `sensitive`）が1つでもあれば、Note 自体にも
+/// `sensitive: true` を付ける。添付ごとの指定を読むのは Misskey 系だけで、Mastodon 系は
+/// Note の `sensitive` で投稿の添付全体をぼかすため、両方に載せる。
+pub fn apply_note_sensitive(note_obj: &mut serde_json::Value, attachments: &[serde_json::Value]) {
+    if attachments
+        .iter()
+        .any(|a| a["sensitive"].as_bool().unwrap_or(false))
+    {
+        note_obj["sensitive"] = serde_json::Value::Bool(true);
+    }
+}
+
+/// 取得済みのローカル添付 1 件を AP の Document にする（Note の再取得・outbox 用。
+/// URL は取得時に組み立て済みで blurhash は載せない）。
+pub fn local_attachment_document(
+    row: &crate::repository::note_extras::LocalAttachmentRow,
 ) -> serde_json::Value {
+    let mut doc = serde_json::json!({
+        "type": "Document",
+        "mediaType": row.mime_type,
+        "url": row.url,
+    });
+    // 動画・音声は寸法を持たないことがある。
+    if let (Some(w), Some(h)) = (row.width, row.height) {
+        doc["width"] = w.into();
+        doc["height"] = h.into();
+    }
+    if row.is_sensitive {
+        doc["sensitive"] = serde_json::Value::Bool(true);
+    }
+    doc
+}
+
+/// 添付ファイル 1 件分の AP Document の元になる値。
+pub(super) struct AttachmentDocument<'a> {
+    pub public_url: &'a str,
+    pub storage_key: &'a str,
+    pub mime_type: &'a str,
+    pub width: Option<i32>,
+    pub height: Option<i32>,
+    pub blurhash: Option<&'a str>,
+    pub sensitive: bool,
+}
+
+/// 添付ファイル 1 件分の AP Document オブジェクトを組み立てる。
+pub(super) fn build_attachment_document(a: &AttachmentDocument<'_>) -> serde_json::Value {
+    let AttachmentDocument {
+        public_url,
+        storage_key,
+        mime_type,
+        width,
+        height,
+        blurhash,
+        sensitive,
+    } = *a;
     let url = format!("{}/{}", public_url.trim_end_matches('/'), storage_key);
     let mut doc = serde_json::json!({
         "type": "Document",
         "mediaType": mime_type,
         "url": url,
     });
+    if sensitive {
+        doc["sensitive"] = serde_json::Value::Bool(true);
+    }
     if let (Some(w), Some(h)) = (width, height) {
         doc["width"] = serde_json::json!(w);
         doc["height"] = serde_json::json!(h);
@@ -1117,14 +1167,15 @@ mod tests {
 
     #[test]
     fn attachment_document_with_dimensions_and_blurhash() {
-        let doc = build_attachment_document(
-            "https://cdn.example/",
-            "media/1.png",
-            "image/png",
-            Some(100),
-            Some(200),
-            Some("LKO2?U"),
-        );
+        let doc = build_attachment_document(&AttachmentDocument {
+            public_url: "https://cdn.example/",
+            storage_key: "media/1.png",
+            mime_type: "image/png",
+            width: Some(100),
+            height: Some(200),
+            blurhash: Some("LKO2?U"),
+            sensitive: false,
+        });
         assert_eq!(doc["type"], "Document");
         assert_eq!(doc["mediaType"], "image/png");
         // public_url 末尾スラッシュは正規化される
@@ -1136,16 +1187,40 @@ mod tests {
 
     #[test]
     fn attachment_document_without_optional_fields() {
-        let doc = build_attachment_document(
-            "https://cdn.example",
-            "media/1.mp4",
-            "video/mp4",
-            None,
-            None,
-            None,
-        );
+        let doc = build_attachment_document(&AttachmentDocument {
+            public_url: "https://cdn.example",
+            storage_key: "media/1.mp4",
+            mime_type: "video/mp4",
+            width: None,
+            height: None,
+            blurhash: None,
+            sensitive: false,
+        });
         assert!(doc.get("width").is_none());
         assert!(doc.get("blurhash").is_none());
+        assert!(doc.get("sensitive").is_none());
+    }
+
+    #[test]
+    fn sensitive_attachment_marks_document_and_note() {
+        let doc = build_attachment_document(&AttachmentDocument {
+            public_url: "https://cdn.example",
+            storage_key: "media/1.png",
+            mime_type: "image/png",
+            width: None,
+            height: None,
+            blurhash: None,
+            sensitive: true,
+        });
+        assert_eq!(doc["sensitive"], true);
+
+        let mut note = serde_json::json!({"type": "Note"});
+        apply_note_sensitive(&mut note, &[serde_json::json!({"type": "Document"}), doc]);
+        assert_eq!(note["sensitive"], true);
+
+        let mut plain = serde_json::json!({"type": "Note"});
+        apply_note_sensitive(&mut plain, &[serde_json::json!({"type": "Document"})]);
+        assert!(plain.get("sensitive").is_none());
     }
 
     #[test]

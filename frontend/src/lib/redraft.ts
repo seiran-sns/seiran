@@ -37,6 +37,7 @@ function toDriveFile(a: NoteAttachment): DriveFile {
     durationMs: a.durationMs,
     thumbnailUrl: a.thumbnailUrl,
     isAnimatedImage: a.isAnimatedImage,
+    isSensitive: a.isSensitive,
   };
 }
 

@@ -148,6 +148,9 @@ pub struct CreateStatusParams {
     pub spoiler_text: Option<String>,
     pub visibility: Option<String>,
     pub language: Option<String>,
+    /// 添付の閲覧注意。Mastodon では投稿単位なので、true なら添付すべてを NSFW 指定にする。
+    #[serde(default, deserialize_with = "lenient::opt_bool")]
+    pub sensitive: Option<bool>,
 }
 
 /// `direct` の宛先は Mastodon では本文中のメンションで決まる。seiran の DM は宛先アクターIDの
@@ -223,9 +226,15 @@ async fn to_create_request(
             expires_in_seconds: p.expires_in,
             expires_at_epoch_ms: None,
         });
+    let sensitive_attachment_ids = Some(if params.sensitive == Some(true) {
+        params.media_ids.clone()
+    } else {
+        Vec::new()
+    });
     Ok(CreateNoteRequest {
         text: Some(text),
         attachment_ids: (!params.media_ids.is_empty()).then_some(params.media_ids),
+        sensitive_attachment_ids,
         deliver_to_fedi: None,
         deliver_to_bsky: None,
         renote_id: None,
@@ -245,8 +254,8 @@ async fn to_create_request(
 }
 
 /// POST /api/v1/statuses — 通常投稿・返信（`in_reply_to_id`）・引用（`quoted_status_id`）。
-/// 添付の閲覧注意（`sensitive`）は seiran のローカル投稿では指定できないため無視する
-/// （CW を付けたい場合は `spoiler_text`）。予約投稿（`scheduled_at`）は未対応。
+/// 添付の閲覧注意（`sensitive`）は添付すべての NSFW 指定になる（CW は `spoiler_text`）。
+/// 予約投稿（`scheduled_at`）は未対応。
 pub async fn create(
     user: AuthedUser,
     State(state): State<AppState>,
@@ -394,6 +403,7 @@ fn empty_create_request() -> CreateNoteRequest {
     CreateNoteRequest {
         text: None,
         attachment_ids: None,
+        sensitive_attachment_ids: None,
         deliver_to_fedi: None,
         deliver_to_bsky: None,
         renote_id: None,

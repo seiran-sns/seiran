@@ -14,7 +14,7 @@ use crate::atp::repo::{
     encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
     encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
     encode_seiran_actor_declaration, generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet,
-    BskyPostReply, Cid, CommitEvtOp, RepoError,
+    BskyPostReply, Cid, CommitEvtOp, FeedPostRecord, RepoError, NSFW_SELF_LABEL,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -759,15 +759,31 @@ impl AtpCommitService {
         )
         .await;
         let blob_cids = blob_cids_for_embed(&embed);
-        let (record_cbor, record_cid) = encode_bsky_feed_post(
+        // Bluesky は添付ごとではなく投稿単位でしかラベルを付けられないので、NSFW 指定の
+        // 添付が1つでもあれば投稿全体に `sexual` を付ける。読み取りに失敗したら付けない
+        // （投稿自体は止めない）。
+        let has_sensitive =
+            crate::repository::note_extras::post_has_sensitive_attachment(&self.pool, post_id)
+                .await
+                .unwrap_or_else(|e| {
+                    tracing::warn!("[atp] NSFW 指定の確認に失敗: post_id={post_id}: {e}");
+                    false
+                });
+        let self_labels = if has_sensitive {
+            vec![NSFW_SELF_LABEL.to_string()]
+        } else {
+            vec![]
+        };
+        let (record_cbor, record_cid) = encode_bsky_feed_post(FeedPostRecord {
             text,
-            &created_at_str,
+            created_at_rfc3339: &created_at_str,
             facets,
             embed,
             reply,
             lang,
             seiran_post,
-        )?;
+            self_labels,
+        })?;
         let record_cid_str = cid_to_string(&record_cid);
 
         let record = CommitRecord {

@@ -245,19 +245,8 @@ pub async fn get_note_ap(
         seiran_common::repository::note_extras::local_attachments_for_posts(&state.db, &[post_id])
             .await
             .unwrap_or_default()
-            .into_iter()
-            .map(|a| {
-                let mut doc = serde_json::json!({
-                    "type": "Document",
-                    "mediaType": a.mime_type,
-                    "url": a.url,
-                });
-                if let (Some(w), Some(h)) = (a.width, a.height) {
-                    doc["width"] = w.into();
-                    doc["height"] = h.into();
-                }
-                doc
-            })
+            .iter()
+            .map(seiran_common::ap::local_attachment_document)
             .collect();
 
     // find_by_id_for_viewer(post_id, None) により followers_only/direct は既に404化されている
@@ -287,6 +276,7 @@ pub async fn get_note_ap(
         "cc": cc,
     });
     if !attachments.is_empty() {
+        seiran_common::ap::apply_note_sensitive(&mut ap_note, &attachments);
         ap_note["attachment"] = serde_json::Value::Array(attachments);
     }
     if !tag.is_empty() {

@@ -771,11 +771,14 @@ pub trait PostRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// 添付ファイルを投稿に紐付ける（ローカルアップロード済みの `media_file_id` を持つケース）。
+    /// `is_sensitive` は投稿者が付けた NSFW 指定（`media_files` は同じ内容のファイルを複数の
+    /// 投稿・ユーザーで共有するため、指定は添付ごとに持つ）。
     async fn attach_media(
         &self,
         post_id: i64,
         media_file_id: i64,
         position: i16,
+        is_sensitive: bool,
     ) -> Result<(), sqlx::Error>;
 
     /// リモート添付 URL を投稿に紐付ける（`media_file_id` を持たない受信投稿用）。
@@ -1631,13 +1634,15 @@ impl PostRepository for PgPostRepository {
         post_id: i64,
         media_file_id: i64,
         position: i16,
+        is_sensitive: bool,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
-            "INSERT INTO post_attachments (post_id, media_file_id, position) VALUES ($1, $2, $3)",
+            "INSERT INTO post_attachments (post_id, media_file_id, position, is_sensitive) VALUES ($1, $2, $3, $4)",
         )
         .bind(post_id)
         .bind(media_file_id)
         .bind(position)
+        .bind(is_sensitive)
         .execute(&self.pool)
         .await
         .map(|_| ())

@@ -1093,9 +1093,15 @@ pub async fn drive_files_list(
         .list_by_uploader(user.actor_id, page.limit, page.until_id, page.since_id)
         .await
         .map_err(internal)?;
+    let ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
+    let sensitive =
+        seiran_common::repository::media_file::drive_sensitive_ids(&state.db, user.actor_id, &ids)
+            .await
+            .map_err(internal)?;
     let mut out = Vec::with_capacity(rows.len());
     for row in &rows {
-        out.push(crate::handlers::drive::to_drive_file_response(&state, row).await);
+        let is_sensitive = sensitive.contains(&row.id);
+        out.push(crate::handlers::drive::to_drive_file_response(&state, row, is_sensitive).await);
     }
     Ok(Json(out))
 }
@@ -1120,20 +1126,26 @@ pub async fn drive_files_show(
         .map_err(internal)?
         .filter(|r| r.uploaded_by_actor_id == Some(user.actor_id))
         .ok_or(ApiError::NotFound("NO_SUCH_FILE"))?;
+    let is_sensitive =
+        seiran_common::repository::media_file::drive_sensitive_ids(&state.db, user.actor_id, &[id])
+            .await
+            .map_err(internal)?
+            .contains(&id);
     Ok(Json(
-        crate::handlers::drive::to_drive_file_response(&state, &record).await,
+        crate::handlers::drive::to_drive_file_response(&state, &record, is_sensitive).await,
     ))
 }
 
-/// `POST /api/drive/files/update` のリクエストボディ。`folderId`・`name`・`isSensitive`・
-/// `comment`はいずれもseiranに保存先が無い（フォルダ非対応、ファイル名は非永続、
-/// per-file公開範囲やコメントの概念も無い）ため、存在・所有権だけ検証して中身は
+/// `POST /api/drive/files/update` のリクエストボディ。`isSensitive`（ドライブ上の NSFW 指定）
+/// だけを保存する。`folderId`・`name`・`comment`はseiranに保存先が無い（フォルダ非対応、
+/// ファイル名は非永続、コメントの概念も無い）ため、存在・所有権だけ検証して中身は
 /// 無視する（Aria等の「フォルダ間移動」操作を失敗させずルートに留め置く、
 /// フォルダ合意実装と同じ方針）。
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DriveFileUpdateBody {
     pub file_id: String,
+    pub is_sensitive: Option<bool>,
 }
 
 /// POST /api/drive/files/update
@@ -1150,8 +1162,30 @@ pub async fn drive_files_update(
         .map_err(internal)?
         .filter(|r| r.uploaded_by_actor_id == Some(user.actor_id))
         .ok_or(ApiError::NotFound("NO_SUCH_FILE"))?;
+    // 投稿済みの添付には影響しない（投稿の NSFW 指定は添付した時点で写し取る）。
+    let is_sensitive = match body.is_sensitive {
+        Some(v) => {
+            seiran_common::repository::media_file::set_drive_sensitive(
+                &state.db,
+                user.actor_id,
+                id,
+                v,
+            )
+            .await
+            .map_err(internal)?;
+            v
+        }
+        None => seiran_common::repository::media_file::drive_sensitive_ids(
+            &state.db,
+            user.actor_id,
+            &[id],
+        )
+        .await
+        .map_err(internal)?
+        .contains(&id),
+    };
     Ok(Json(
-        crate::handlers::drive::to_drive_file_response(&state, &record).await,
+        crate::handlers::drive::to_drive_file_response(&state, &record, is_sensitive).await,
     ))
 }
 

@@ -566,6 +566,8 @@ async fn materialize_migrated_post(
     // blob取り込み順に依存しない）。
     if let Some(embed) = value.get("embed") {
         let attachments = crate::atp::parse_bsky_embed_attachments(embed, &ic.req.source_did);
+        // 転入元で閲覧注意のラベルを付けていた投稿は、添付を NSFW 指定のまま引き継ぐ。
+        let is_sensitive = crate::atp::record_has_media_self_label(value);
         for (position, att) in attachments.into_iter().enumerate() {
             if let Err(e) = posts_repo
                 .attach_remote_media_url(
@@ -574,7 +576,7 @@ async fn materialize_migrated_post(
                         url: &att.url,
                         mime_type: Some(&att.mime_type),
                         thumbnail_url: att.thumbnail_url.as_deref(),
-                        is_sensitive: false,
+                        is_sensitive,
                         is_gif: att.is_gif,
                         position: position as i16,
                     },
