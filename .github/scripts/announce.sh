@@ -10,8 +10,34 @@ source "$(dirname "$0")/seiran-api.sh"
 version="$1"
 repo_url="https://github.com/seiran-sns/seiran"
 
-# 前の版のタグとの差分を変更点として示す（版の降順で、今の版の次に来るタグ）
-previous="$(git tag --list 'v*' --sort=-version:refname | grep -vxF "v$version" | head -n 1 || true)"
+# 版のタグ（v<版>）を標準入力から受け、古い順に並べて出す。x.y.z でないタグは捨てる。
+# 数値部分が同じなら接尾辞の無い版が最も新しい。接尾辞どうしは、末尾の数字を切り出した残りを
+# 大文字小文字を区別せずに昇順で比べ、残りが同じなら数字の無いものを最も古く、数字のあるものを
+# 数値の昇順にする（alpha < alpha9 < alpha10 < beta < beta1 < RC1 < 無印）。git の
+# version:refname は 1.0.0-RC1 を 1.0.0 より新しく、RC を alpha より古く並べるので使わない。
+# seiran-kit の scripts/auto-update.py と同じ順序。
+sort_version_tags() {
+    LC_ALL=C awk '
+        match($0, /^v[0-9]+\.[0-9]+\.[0-9]+(-.+)?$/) {
+            split(substr($0, 2), a, "-")
+            split(a[1], n, ".")
+            suffix = substr($0, length(a[1]) + 3)
+            if (suffix == "") { release = 1; name = ""; num = -1 }
+            else {
+                release = 0
+                match(suffix, /[0-9]*$/)
+                name = tolower(substr(suffix, 1, RSTART - 1))
+                num = RLENGTH > 0 ? substr(suffix, RSTART) + 0 : -1
+            }
+            printf "%d\t%d\t%d\t%d\t%s\t%d\t%s\n", n[1], n[2], n[3], release, name, num, $0
+        }' |
+        LC_ALL=C sort -t $'\t' -k1,1n -k2,2n -k3,3n -k4,4n -k5,5 -k6,6n |
+        cut -f 7
+}
+
+# 前の版のタグとの差分を変更点として示す（版の順で、今の版のすぐ前のタグ）
+previous="$( { git tag --list 'v*'; echo "v$version"; } | sort -u | sort_version_tags |
+    grep -xF -B1 "v$version" | grep -vxF "v$version" || true)"
 if [ -n "$previous" ]; then
     changes="$repo_url/compare/$previous...v$version"
 else
