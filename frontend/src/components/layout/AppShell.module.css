@@ -454,6 +454,11 @@
     max-width: 600px;
     height: auto;
     position: static;
+    /* 幅広時の z-index: 100 は外す。.shell の flex の子なので static でも z-index が効き、
+       中央ペインの下に積まれた右ペイン全体が、中央ペインから下へ伸びる候補一覧
+       （DM の宛先候補等）より手前に描かれてしまう。横に並ばないこの幅では、左側へ
+       はみ出すポップアップを中央ペインの上に出すための指定は要らない。 */
+    z-index: auto;
   }
 
   /* 幅広時の overflow-y: auto をリセットする。height: auto の状態でも overflow-y が

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import TwemojiText from "./TwemojiText";
 import styles from "./ActionsMenu.module.css";
 
@@ -54,7 +54,13 @@ export function ActionsMenuPopoverList({
   );
 }
 
-/** トリガーボタン＋ポップオーバー形式の汎用アクションメニュー（`ReactionPicker` のパターンを踏襲）。 */
+/** ポップオーバーを画面の端から離す最小の余白（px）。 */
+const VIEWPORT_MARGIN = 8;
+
+/** トリガーボタン＋ポップオーバー形式の汎用アクションメニュー（`ReactionPicker` のパターンを踏襲）。
+ *
+ * ポップオーバーはトリガーの右端にそろえて左へ開く。トリガーが画面の左寄りにあって左端から
+ * はみ出すときは、はみ出す分だけ右へずらす。 */
 export default function ActionsMenu({
   items,
   triggerLabel = "⋯",
@@ -64,6 +70,26 @@ export default function ActionsMenu({
 }: ActionsMenuProps) {
   const [open, setOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  // 右へずらす量（px）。開くたびに右端そろえの位置から測り直す。
+  const [shift, setShift] = useState(0);
+
+  useLayoutEffect(() => {
+    if (!open) {
+      setShift(0);
+      return;
+    }
+    const el = popoverRef.current;
+    if (!el) return;
+    el.style.right = "0px";
+    const rect = el.getBoundingClientRect();
+    const overflowLeft = VIEWPORT_MARGIN - rect.left;
+    // 右へずらしても右端からははみ出させない。
+    const roomRight = document.documentElement.clientWidth - VIEWPORT_MARGIN - rect.right;
+    const next = Math.max(0, Math.min(overflowLeft, roomRight));
+    el.style.right = "";
+    setShift(next);
+  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -100,7 +126,12 @@ export default function ActionsMenu({
         {triggerLabel}
       </button>
       {open && (
-        <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
+        <div
+          ref={popoverRef}
+          className={styles.popover}
+          style={shift > 0 ? { right: -shift } : undefined}
+          onClick={(e) => e.stopPropagation()}
+        >
           <ActionsMenuPopoverList items={items} onPick={pick} />
         </div>
       )}
