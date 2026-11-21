@@ -13,6 +13,7 @@
 
 pub mod app_auth;
 pub mod endpoints;
+pub mod streaming;
 pub mod types;
 
 mod convert;
