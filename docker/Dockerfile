@@ -1,18 +1,25 @@
 # syntax=docker/dockerfile:1
 # ─── ビルドステージ ──────────────────────────────────────────────────────────
-FROM rust:1-bookworm AS builder
+# 依存クレートのビルドを cargo-chef で自前のクレートと別のレイヤーに分け、Cargo.lock と依存の
+# 指定が変わらない限りレイヤーのキャッシュから再利用する（公開イメージ docker/seiran/Dockerfile
+# と同じ構成。理由はそちらのコメント）。
+FROM rust:1-bookworm AS chef
+RUN cargo install cargo-chef --locked --version 0.1.78
 WORKDIR /app
-COPY . .
+
+FROM chef AS planner
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo chef prepare --recipe-path recipe.json
 
 # 統合バイナリ seiran-server を1本だけビルドする。
 # 役割（api / federation / worker / firehose / all）は起動時の --role で切り替わる。
-#
-# --mount=type=cache で cargo レジストリと target/ をビルドキャッシュに保持する。
-# イメージレイヤーには含まれないため、ビルドをまたいで再利用される。
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/app/target \
-    cargo build --release -p seiran-server \
+FROM chef AS builder
+COPY --from=planner /app/recipe.json recipe.json
+RUN cargo chef cook --release --locked -p seiran-server --recipe-path recipe.json
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release --locked -p seiran-server \
     && cp target/release/seiran-server /seiran-server
 
 # ─── ランタイム ───────────────────────────────────────────────────────────────
