@@ -15,9 +15,8 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::atp::did_resolve::resolve_stored_endpoint;
-use crate::atp::migration_client::{
-    fetch_repo_car, list_blobs, request_plc_operation_signature, AtpSession,
-};
+use crate::atp::migration_client::{fetch_repo_car, list_blobs, request_plc_operation_signature};
+use crate::atp::migration_session::{call_with_refresh, source_session};
 use crate::atp::mst_walk::decode_repo_records;
 use crate::queue::worker::JobContext;
 use crate::repository::{AtMigrationRepository, PgAtMigrationRepository, StagedRecord};
@@ -78,14 +77,7 @@ async fn process_fetch_repo(
     }
 
     let now = chrono::Utc::now();
-    let session = AtpSession {
-        did: req.source_did.clone(),
-        handle: req.source_handle.clone(),
-        access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
-        refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
-    };
+    let mut session = source_session(&req);
 
     // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書から
     // 再導出しない——`resolve_stored_endpoint`のドキュメントコメント参照）。
@@ -98,9 +90,12 @@ async fn process_fetch_repo(
             ))
         })?;
 
-    let car = fetch_repo_car(&resolved, &session)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] getRepo失敗: {e}")))?;
+    let car = call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+        let resolved = &resolved;
+        async move { fetch_repo_car(resolved, &s).await }
+    })
+    .await
+    .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] getRepo失敗: {e}")))?;
 
     let records = match decode_repo_records(&car) {
         Ok(r) => r,
@@ -132,9 +127,12 @@ async fn process_fetch_repo(
         ))
     })?;
 
-    let blob_cids = list_blobs(&resolved, &session)
-        .await
-        .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] listBlobs失敗: {e}")))?;
+    let blob_cids = call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+        let resolved = &resolved;
+        async move { list_blobs(resolved, &s).await }
+    })
+    .await
+    .map_err(|e| JobError::Transient(format!("[MigrationFetchRepo] listBlobs失敗: {e}")))?;
     let blob_count = blob_cids.len();
     repo.stage_blobs(request_id, &blob_cids)
         .await
@@ -230,14 +228,7 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
         return Ok(());
     }
 
-    let session = AtpSession {
-        did: req.source_did.clone(),
-        handle: req.source_handle.clone(),
-        access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
-        refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
-    };
+    let mut session = source_session(&req);
 
     let resolved = resolve_stored_endpoint(&req.source_pds_endpoint)
         .await
@@ -247,13 +238,16 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
             ))
         })?;
 
-    request_plc_operation_signature(&resolved, &session)
-        .await
-        .map_err(|e| {
-            JobError::Transient(format!(
-                "[MigrationRequestPlcSignature] requestPlcOperationSignature失敗: {e}"
-            ))
-        })?;
+    call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+        let resolved = &resolved;
+        async move { request_plc_operation_signature(resolved, &s).await }
+    })
+    .await
+    .map_err(|e| {
+        JobError::Transient(format!(
+            "[MigrationRequestPlcSignature] requestPlcOperationSignature失敗: {e}"
+        ))
+    })?;
 
     repo.set_status(request_id, "awaiting_plc_token", chrono::Utc::now())
         .await
@@ -387,7 +381,7 @@ async fn process_import(
         .await
         .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] blob取得失敗: {e}")))?
     {
-        let bytes = fetch_source_blob(&req, &cid).await?;
+        let bytes = fetch_source_blob(pool, &req, &cid).await?;
         let encryption_key = ctx.encryption_key.clone().ok_or_else(|| {
             JobError::Transient("[MigrationImportProcess] encryption_key 未設定".to_string())
         })?;
@@ -591,17 +585,11 @@ async fn materialize_migrated_post(
 
 /// 転入元PDSから blob を1件取得する。
 async fn fetch_source_blob(
+    pool: &PgPool,
     req: &crate::repository::AtMigrationRequestRow,
     cid: &str,
 ) -> Result<Vec<u8>, JobError> {
-    let session = crate::atp::migration_client::AtpSession {
-        did: req.source_did.clone(),
-        handle: req.source_handle.clone(),
-        access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
-        refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
-    };
+    let mut session = source_session(req);
     let resolved = crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint)
         .await
         .map_err(|e| {
@@ -609,13 +597,16 @@ async fn fetch_source_blob(
                 "[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"
             ))
         })?;
-    crate::atp::migration_client::fetch_blob(&resolved, &session, cid)
-        .await
-        .map_err(|e| {
-            JobError::Transient(format!(
-                "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
-            ))
-        })
+    call_with_refresh(pool, req.id, &resolved, &mut session, |s| {
+        let resolved = &resolved;
+        async move { crate::atp::migration_client::fetch_blob(resolved, &s, cid).await }
+    })
+    .await
+    .map_err(|e| {
+        JobError::Transient(format!(
+            "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
+        ))
+    })
 }
 
 /// レコード・blob とも取り込み終えたら、移行元アカウント無効化とフォロー復元へ進める。
@@ -764,18 +755,14 @@ pub async fn handle_deactivate_source(
         return Ok(());
     }
 
-    let session = crate::atp::migration_client::AtpSession {
-        did: req.source_did.clone(),
-        handle: req.source_handle.clone(),
-        access_jwt: req.source_access_jwt.clone().unwrap_or_default(),
-        refresh_jwt: req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
-    };
+    let mut session = source_session(&req);
     match crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint).await {
         Ok(resolved) => {
-            if let Err(e) =
-                crate::atp::migration_client::deactivate_account(&resolved, &session).await
+            if let Err(e) = call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+                let resolved = &resolved;
+                async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
+            })
+            .await
             {
                 tracing::error!(
                     "[MigrationDeactivateSource] deactivateAccount失敗（続行、request_id={}）: {}",
