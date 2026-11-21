@@ -518,7 +518,10 @@ async fn materialize_migrated_post(
         return Ok(existing_id);
     }
 
-    let post_id = crate::generate_snowflake_id(ic.now);
+    // id は元の投稿日時から採番する。タイムラインは id 順に並ぶため、取り込み時刻で採番すると
+    // 過去の投稿が新着としてローカルタイムラインの先頭を占め、クライアントの取りこぼし補完
+    // （再接続時の先頭ページ再取得）でも新着として扱われてしまう。
+    let post_id = crate::generate_snowflake_id(created_at);
     let ap_object_id = format!("https://{}/notes/{}", ic.follow_exec.local_domain, post_id);
     let seiran_post_uuid = uuid::Uuid::new_v4().to_string();
 
