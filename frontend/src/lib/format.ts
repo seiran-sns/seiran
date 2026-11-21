@@ -2,9 +2,13 @@ import { Note, UserProfile } from "../api/client";
 import i18n from "../i18n";
 import seiranSkyline from "../assets/seiran-skyline.svg";
 
-/** ISO 文字列を現在の表示言語の短い日時表記に変換する。 */
-export function formatDate(iso: string): string {
-  return new Date(iso).toLocaleString(i18n.language, {
+/** ISO 文字列を現在の表示言語の短い日時表記に変換する。今年の日時は年を省き、
+ * 今年でない日時（過去の年・時計のずれで来年になったもの）は年も出す（年なしだと
+ * 去年の同じ月日と区別できない）。年の境目は閲覧者のローカル時刻で判定する。 */
+export function formatDate(iso: string, now: Date = new Date()): string {
+  const date = new Date(iso);
+  return date.toLocaleString(i18n.language, {
+    ...(date.getFullYear() !== now.getFullYear() && { year: "numeric" }),
     month: "numeric",
     day: "numeric",
     hour: "2-digit",

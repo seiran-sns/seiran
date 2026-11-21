@@ -9,6 +9,7 @@ import {
   deliveryBadges,
   displayName,
   formatCount,
+  formatDate,
   pollRemainingTime,
   profilePath,
   profileQuery,
@@ -40,6 +41,23 @@ function makeNote(overrides: Partial<Note> = {}): Note {
     ...overrides,
   };
 }
+
+describe("formatDate", () => {
+  // タイムゾーンに左右されないよう、ローカル時刻の文字列で与える
+  const now = new Date("2026-11-21T12:00:00");
+
+  it("今年の日時は年を出さない", () => {
+    expect(formatDate("2026-01-01T00:30:00", now)).not.toContain("2026");
+  });
+
+  it("去年以前の日時は年を出す", () => {
+    expect(formatDate("2025-12-31T23:30:00", now)).toContain("2025");
+  });
+
+  it("来年の日時も年を出す", () => {
+    expect(formatDate("2027-01-01T00:00:00", now)).toContain("2027");
+  });
+});
 
 describe("formatCount", () => {
   it("1000未満はそのまま表示する", () => {
