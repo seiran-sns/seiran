@@ -1,7 +1,7 @@
 {
   "name": "seiran-frontend",
   "version": "1.0.0",
-  "versionSuffix": "-RC2",
+  "versionSuffix": "",
   "private": true,
   "type": "module",
   "scripts": {
