@@ -48,6 +48,17 @@ pub struct BskyPost {
     /// 投稿者が閲覧注意系の self-label（`record.labels`）を付けているか。付いていれば
     /// 添付すべてを NSFW 指定で保存する（`crate::atp::record_has_media_self_label`）。
     pub is_sensitive: bool,
+    /// `record.seiranPost`（他 seiran の投稿）があれば、その添付とそれぞれの NSFW 指定。
+    /// あれば `embed`・`is_sensitive` の代わりにこちらを保存する
+    /// （`crate::seiran_post::SeiranPost::received_attachments`）。
+    pub seiran_attachments: Option<Vec<(crate::atp::ParsedAttachment, bool)>>,
+}
+
+/// `record.seiranPost` の添付（`BskyPost::seiran_attachments`）。
+fn seiran_attachments_of(
+    record: &serde_json::Value,
+) -> Option<Vec<(crate::atp::ParsedAttachment, bool)>> {
+    crate::seiran_post::SeiranPost::extract(record).map(|sp| sp.received_attachments())
 }
 
 #[derive(Debug, Clone)]
@@ -240,6 +251,7 @@ pub async fn fetch_atp_history(
                 facets,
                 bridged_original_url,
                 is_sensitive: crate::atp::record_has_media_self_label(record),
+                seiran_attachments: seiran_attachments_of(record),
             });
 
             if posts.len() >= max_posts {
@@ -319,6 +331,7 @@ pub async fn fetch_single_bsky_post(
         facets,
         bridged_original_url,
         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
+        seiran_attachments: seiran_attachments_of(&p["record"]),
     }))
 }
 
@@ -637,28 +650,38 @@ pub async fn upsert_bsky_post(
     // 実際にこのリクエストで新規作成できた場合のみ添付・URLカードを復元する。
     // ON CONFLICT でスキップされた場合（並行競合）は、先に作成した側で処理済みのはず。
     if result.rows_affected() > 0 {
-        if let Some(embed) = &post.embed {
-            let attachments = crate::atp::parse_bsky_embed_attachments(embed, &post.author_did);
-            for (position, att) in attachments.iter().enumerate() {
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
-                     VALUES ($1, NULL, $2, $3, $4, $7, $5, $6)
-                     ON CONFLICT (post_id, position) DO NOTHING",
-                )
-                .bind(final_id)
-                .bind(&att.url)
-                .bind(&att.mime_type)
-                .bind(att.thumbnail_url.as_deref())
-                .bind(att.is_gif)
-                .bind(position as i16)
-                .bind(post.is_sensitive)
-                .execute(pool)
-                .await
-                {
-                    tracing::error!("[upsert_bsky_post] 添付URL保存失敗（スキップ）: {}", e);
-                }
+        let attachments = match &post.seiran_attachments {
+            Some(attachments) => attachments.clone(),
+            None => post
+                .embed
+                .as_ref()
+                .map(|embed| crate::atp::parse_bsky_embed_attachments(embed, &post.author_did))
+                .unwrap_or_default()
+                .into_iter()
+                .map(|att| (att, post.is_sensitive))
+                .collect(),
+        };
+        for (position, (att, is_sensitive)) in attachments.iter().enumerate() {
+            if let Err(e) = sqlx::query(
+                "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
+                 VALUES ($1, NULL, $2, $3, $4, $7, $5, $6)
+                 ON CONFLICT (post_id, position) DO NOTHING",
+            )
+            .bind(final_id)
+            .bind(&att.url)
+            .bind(&att.mime_type)
+            .bind(att.thumbnail_url.as_deref())
+            .bind(att.is_gif)
+            .bind(position as i16)
+            .bind(*is_sensitive)
+            .execute(pool)
+            .await
+            {
+                tracing::error!("[upsert_bsky_post] 添付URL保存失敗（スキップ）: {}", e);
             }
+        }
 
+        if let Some(embed) = &post.embed {
             if let Some(card) = crate::atp::parse_bsky_embed_link_card(embed, &post.author_did) {
                 let insert_result = crate::repository::note_extras::insert_link_card(
                     pool,
@@ -905,6 +928,7 @@ pub async fn search_appview_posts(
                             .as_str()
                             .map(str::to_string),
                         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
+                        seiran_attachments: seiran_attachments_of(&p["record"]),
                     })
                 })
                 .collect()
