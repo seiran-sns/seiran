@@ -26,7 +26,7 @@ import NotificationFilterBar, {
 } from "./NotificationFilterBar";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
-import NotificationStack from "./NotificationStack";
+import CardStack from "../common/CardStack";
 import { groupNotifications } from "../../lib/notificationGroups";
 
 /** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
@@ -38,11 +38,20 @@ function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, stri
 
 const PAGE_SIZE = 20;
 
-/** リアクション通知の2行目: 対象ポストの CW 警告文（あれば）か本文を、改行を半角スペースで
- * つないだ1行。どのポストへのリアクションかを一目でわかるようにする。 */
-function reactionTargetSummary(n: NotificationItem): string {
-  const cw = n.note?.cw?.trim();
-  const source = cw ? cw : (n.note?.text ?? "");
+/** 2行で出す通知種別。2行目に対象ポストを出し、どのポストへの反応かを一目でわかるようにする。 */
+const TWO_LINE_TYPES = new Set(["reaction", "renote"]);
+
+/** 2行目に出す対象ポスト。リポスト通知の `note` は本文の無いラッパーなので、リポスト元を出す
+ * （取り消し済みでラッパーが残っていなければ `note` がリポスト元そのもの）。 */
+function targetNote(n: NotificationItem) {
+  return n.type === "renote" ? (n.note?.renote ?? n.note) : n.note;
+}
+
+/** 2行目: 対象ポストの CW 警告文（あれば）か本文を、改行を半角スペースでつないだ1行。 */
+function targetSummary(n: NotificationItem): string {
+  const note = targetNote(n);
+  const cw = note?.cw?.trim();
+  const source = cw ? cw : (note?.text ?? "");
   return source.replace(/\s*(\r?\n)+\s*/g, " ").trim();
 }
 
@@ -403,7 +412,7 @@ export default function NotificationsPanel({
     );
   }
 
-  // 通知1件のカード。重ねるまとまりの中では li ではなく div にする（li は NotificationStack が持つ）。
+  // 通知1件のカード。重ねるまとまりの中では li ではなく div にする（li は CardStack が持つ）。
   const renderCard = (n: NotificationItem, stacked: boolean) => {
     const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
     const noteId = resolveTargetNoteId(n);
@@ -436,7 +445,8 @@ export default function NotificationsPanel({
         components={{ userLink, emojiName, newUserLink }}
       />
     );
-    const targetSummary = n.type === "reaction" ? reactionTargetSummary(n) : "";
+    const twoLine = TWO_LINE_TYPES.has(n.type);
+    const summary = twoLine ? targetSummary(n) : "";
     const content = (
       <>
         {iconUrl ? (
@@ -462,12 +472,12 @@ export default function NotificationsPanel({
         ) : (
           avatar
         )}
-        {n.type === "reaction" ? (
+        {twoLine ? (
           <span className={styles.lines}>
             <span className={styles.singleLine}>{message}</span>
-            {targetSummary && (
+            {summary && (
               <span className={`${styles.singleLine} ${styles.targetLine}`}>
-                <EmojiText text={targetSummary} emojis={colonizeEmojiKeys(n.note?.emojis)} />
+                <EmojiText text={summary} emojis={colonizeEmojiKeys(targetNote(n)?.emojis)} />
               </span>
             )}
           </span>
@@ -521,10 +531,12 @@ export default function NotificationsPanel({
         g.items.length === 1 ? (
           renderCard(g.items[0], false)
         ) : (
-          <NotificationStack
+          <CardStack
             key={g.items[g.items.length - 1].id}
-            items={g.items}
-            renderCard={(n) => renderCard(n, true)}
+            as="li"
+            className={styles.stack}
+            keys={g.items.map((n) => n.id)}
+            renderCard={(i) => renderCard(g.items[i], true)}
           />
         )
       )}

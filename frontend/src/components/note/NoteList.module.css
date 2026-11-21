@@ -40,3 +40,18 @@
   -webkit-mask-size: 16px 22px;
   mask-size: 16px 22px;
 }
+
+/* 同じポストのリポストの連続を重ねたまとまり（CardStack）。余白は NoteCard(.card) の分を持つ。 */
+.stack {
+  margin: 12px 12px 0;
+}
+
+/* 重ねたカードの入れ物。中の NoteCard を一番高いカードの高さまで伸ばす。 */
+.stackSlot {
+  display: flex;
+  flex-direction: column;
+}
+
+.stackSlot > * {
+  flex: 1 1 auto;
+}
