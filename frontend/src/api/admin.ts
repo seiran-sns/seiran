@@ -158,6 +158,11 @@ export const admin = {
     return request<SmtpTestResult>("POST", "/admin/site-settings/smtp-test-email", body);
   },
 
+  /** 管理画面のウィジェットで得たトークンを Siteverify にかける（Secret Key 省略・空なら保存済みの値）。 */
+  testTurnstile(body: { token: string; turnstile_secret_key?: string }) {
+    return request<TurnstileTestResult>("POST", "/admin/site-settings/turnstile-test", body);
+  },
+
   getDeniedHosts() {
     return request<DeniedHostsResponse>("GET", "/admin/denied-hosts");
   },
@@ -279,4 +284,12 @@ export interface SmtpTestResult {
   ok: boolean;
   code?: "SMTP_NOT_CONFIGURED" | "SMTP_INVALID_ADDRESS" | "SMTP_FAILED";
   detail?: string;
+}
+
+/** 失敗も 200 で返る。`detail` は Siteverify の error-codes か通信エラー文、`hostname` はウィジェットを解いたホスト名。 */
+export interface TurnstileTestResult {
+  ok: boolean;
+  code?: "TURNSTILE_NOT_CONFIGURED" | "TURNSTILE_FAILED" | "TURNSTILE_UNREACHABLE";
+  detail?: string;
+  hostname?: string;
 }

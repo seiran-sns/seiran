@@ -685,6 +685,95 @@ pub async fn send_smtp_test_email(
     Ok(Json(SmtpTestResponse::from_result(result)))
 }
 
+// ─── Turnstile の動作確認 ─────────────────────────────────────────────────
+
+/// 管理画面のウィジェットで得たトークンと、入力中の（保存前の）Secret Key。鍵を誤って
+/// 保存すると登録が `TURNSTILE_FAILED` で全滅するので、保存前に試せるようにする。
+/// Secret Key を省略・空にすると保存済みの値を使う。
+#[derive(Deserialize)]
+pub struct TurnstileTestRequest {
+    pub token: String,
+    pub turnstile_secret_key: Option<String>,
+}
+
+/// SMTP の動作確認と同じく失敗も 200 で返す。`detail` は Siteverify の `error-codes`
+/// （`invalid-input-secret` 等）か通信エラー文、`hostname` はウィジェットを解いたホスト名。
+#[derive(Serialize)]
+pub struct TurnstileTestResponse {
+    pub ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub code: Option<&'static str>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hostname: Option<String>,
+}
+
+impl TurnstileTestResponse {
+    fn failure(code: &'static str, detail: Option<String>) -> Self {
+        Self {
+            ok: false,
+            code: Some(code),
+            detail,
+            hostname: None,
+        }
+    }
+}
+
+/// POST /api/admin/site-settings/turnstile-test
+pub async fn test_turnstile(
+    State(state): State<AppState>,
+    ip: crate::middleware::ClientIp,
+    Json(req): Json<TurnstileTestRequest>,
+) -> Result<Json<TurnstileTestResponse>, ApiError> {
+    let secret = match req
+        .turnstile_secret_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        Some(v) => v.to_string(),
+        None => state
+            .site_settings
+            .get("turnstile_secret_key")
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .unwrap_or_default()
+            .trim()
+            .to_string(),
+    };
+    if secret.is_empty() || req.token.trim().is_empty() {
+        return Ok(Json(TurnstileTestResponse::failure(
+            "TURNSTILE_NOT_CONFIGURED",
+            None,
+        )));
+    }
+    let response =
+        match crate::handlers::auth::siteverify(&state, &secret, &req.token, ip.0.as_deref()).await
+        {
+            Ok(r) => r,
+            Err(e) => {
+                return Ok(Json(TurnstileTestResponse::failure(
+                    "TURNSTILE_UNREACHABLE",
+                    Some(e),
+                )))
+            }
+        };
+    if !response.success {
+        let detail = (!response.error_codes.is_empty()).then(|| response.error_codes.join(", "));
+        return Ok(Json(TurnstileTestResponse::failure(
+            "TURNSTILE_FAILED",
+            detail,
+        )));
+    }
+    Ok(Json(TurnstileTestResponse {
+        ok: true,
+        code: None,
+        detail: None,
+        hostname: response.hostname,
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

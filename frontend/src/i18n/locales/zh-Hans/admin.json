@@ -157,7 +157,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "两个密钥都设置后，登录和注册页面将启用Turnstile验证。",
+    "turnstileHint": "两个密钥都设置后，注册页面（包括申请邮箱验证）将启用Turnstile验证。",
+    "turnstileTestButton": "测试",
+    "turnstileTestSolve": "请完成下方显示的小组件验证。",
+    "turnstileTestOk": "验证成功（主机名：{{hostname}}）",
+    "turnstileTestHint": "使用保存前的输入值进行测试。Secret Key 栏为空时使用已保存的值。",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "未设置 Secret Key",
+      "TURNSTILE_FAILED": "Siteverify 验证失败（请确认 Secret Key 与 Site Key 是否配对）",
+      "TURNSTILE_UNREACHABLE": "无法连接到 Cloudflare",
+      "WIDGET": "小组件返回错误（请检查 Site Key，以及是否已在 Cloudflare 中允许此域名）"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS (AT Protocol handle verification)",
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",

@@ -15,9 +15,11 @@ interface Props {
   onToken: (token: string) => void;
   /** 値が変わるたびにウィジェットをリセットし、新しいトークンを取り直す。 */
   resetKey?: number;
+  /** ウィジェットのエラー（Site Key の誤り・許可されていないドメイン等）。引数は Cloudflare のエラーコード。 */
+  onError?: (code: string) => void;
 }
 
-export default function Turnstile({ siteKey, onToken, resetKey = 0 }: Props) {
+export default function Turnstile({ siteKey, onToken, resetKey = 0, onError }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const widgetIdRef = useRef<string | undefined>(undefined);
 
@@ -30,7 +32,10 @@ export default function Turnstile({ siteKey, onToken, resetKey = 0 }: Props) {
         sitekey: siteKey,
         callback: onToken,
         "expired-callback": () => onToken(""),
-        "error-callback": () => onToken(""),
+        "error-callback": (code: string) => {
+          onToken("");
+          onError?.(String(code));
+        },
       });
     };
     let script = document.querySelector<HTMLScriptElement>('script[data-seiran-turnstile]');
@@ -50,7 +55,7 @@ export default function Turnstile({ siteKey, onToken, resetKey = 0 }: Props) {
       if (widgetIdRef.current) window.turnstile?.remove(widgetIdRef.current);
       widgetIdRef.current = undefined;
     };
-  }, [siteKey, onToken]);
+  }, [siteKey, onToken, onError]);
 
   useEffect(() => {
     if (resetKey === 0 || !widgetIdRef.current) return;

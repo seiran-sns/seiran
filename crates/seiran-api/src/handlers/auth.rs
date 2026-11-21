@@ -35,9 +35,40 @@ pub struct RegisterRequest {
     pub agree_tos: Option<bool>,
 }
 
+/// Siteverify の応答。`error-codes` と `hostname` は管理画面の動作確認で原因を示すのに使う。
 #[derive(Deserialize)]
-struct TurnstileResponse {
-    success: bool,
+pub(crate) struct SiteverifyResponse {
+    pub success: bool,
+    #[serde(rename = "error-codes", default)]
+    pub error_codes: Vec<String>,
+    #[serde(default)]
+    pub hostname: Option<String>,
+}
+
+/// Cloudflare の Siteverify にトークンを問い合わせる。通信・応答解釈の失敗だけを `Err` にし、
+/// 検証の可否は `success` で返す。
+pub(crate) async fn siteverify(
+    state: &AppState,
+    secret: &str,
+    token: &str,
+    remote_ip: Option<&str>,
+) -> Result<SiteverifyResponse, String> {
+    let mut form = vec![("secret", secret), ("response", token)];
+    if let Some(remote_ip) = remote_ip {
+        form.push(("remoteip", remote_ip));
+    }
+    // 公開エンドポイント固定のため連合用の共有クライアント（タイムアウト設定済み）を使う
+    // （`reqwest::Client::new()`はタイムアウト無しで、Cloudflare側の遅延で登録リクエストが滞留する）。
+    state
+        .http_client
+        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
+        .form(&form)
+        .send()
+        .await
+        .map_err(|e| format!("Turnstile verification failed: {e}"))?
+        .json::<SiteverifyResponse>()
+        .await
+        .map_err(|e| format!("Invalid Turnstile response: {e}"))
 }
 
 pub(crate) async fn verify_turnstile(
@@ -63,22 +94,9 @@ pub(crate) async fn verify_turnstile(
     let token = token
         .filter(|v| !v.trim().is_empty())
         .ok_or_else(|| ApiError::BadRequest("TURNSTILE_REQUIRED".into()))?;
-    let mut form = vec![("secret", secret.as_str()), ("response", token)];
-    if let Some(remote_ip) = ip.0.as_deref() {
-        form.push(("remoteip", remote_ip));
-    }
-    // 公開エンドポイント固定のため連合用の共有クライアント（タイムアウト設定済み）を使う
-    // （`reqwest::Client::new()`はタイムアウト無しで、Cloudflare側の遅延で登録リクエストが滞留する）。
-    let response = state
-        .http_client
-        .post("https://challenges.cloudflare.com/turnstile/v0/siteverify")
-        .form(&form)
-        .send()
+    let response = siteverify(state, &secret, token, ip.0.as_deref())
         .await
-        .map_err(|e| ApiError::Internal(format!("Turnstile verification failed: {e}")))?
-        .json::<TurnstileResponse>()
-        .await
-        .map_err(|e| ApiError::Internal(format!("Invalid Turnstile response: {e}")))?;
+        .map_err(ApiError::Internal)?;
     if !response.success {
         return Err(ApiError::BadRequest("TURNSTILE_FAILED".into()));
     }
