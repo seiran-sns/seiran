@@ -15,6 +15,18 @@ function r(user: string, post: string): NotificationItem {
   };
 }
 
+/** `user` が `post` をリポストした通知（`note` はリポストラッパー）。 */
+function rp(user: string, post: string): NotificationItem {
+  seq += 1;
+  return {
+    id: `n${seq}-rp-${user}-${post}`,
+    createdAt: "",
+    type: "renote",
+    user: { id: user, username: user, host: null },
+    note: { id: `w${seq}`, renote: { id: post } },
+  };
+}
+
 function follow(user: string): NotificationItem {
   seq += 1;
   return { id: `n${seq}-follow-${user}`, createdAt: "", type: "follow", user: { id: user, username: user, host: null } };
@@ -36,6 +48,25 @@ describe("groupNotifications", () => {
   it("リアクション以外の通知はまとめず、連続を切る", () => {
     const items = [r("a", "P1"), follow("x"), r("a", "P1")];
     expect(sizes(items)).toEqual([1, 1, 1]);
+  });
+
+  it("リポスト通知もリポスト元のポストと人でリアクション通知とまとめる", () => {
+    // 古い側から: c-P2 のリポスト・c-P1 のリアクションが同じ人、残りが P1 で同じポスト。
+    const items = [rp("a", "P1"), r("b", "P1"), r("c", "P1"), rp("c", "P2")];
+    expect(sizes(items)).toEqual([2, 2]);
+  });
+
+  it("同じ人から同じポストへの通知が続く間はどちらの規則でまとめるかを保留する", () => {
+    // 古い側から a-P1 のリポスト・a-P1 のリアクションの時点では規則が決まらない。
+    // 続く b-P1 で「同じポスト」に決まり、3件で1つになる。
+    expect(sizes([r("b", "P1"), r("a", "P1"), rp("a", "P1")])).toEqual([3]);
+    // 続く a-P2 なら「同じ人」に決まる。
+    expect(sizes([r("a", "P2"), r("a", "P1"), rp("a", "P1")])).toEqual([3]);
+  });
+
+  it("取り消し済みでラッパーが残っていないリポスト通知は note 自体をリポスト元とみなす", () => {
+    const withdrawn: NotificationItem = { ...rp("a", "P1"), repostWithdrawn: true, note: { id: "P1" } };
+    expect(sizes([r("b", "P1"), withdrawn])).toEqual([2]);
   });
 
   it("まとまりの数が最小になる", () => {

@@ -98,22 +98,13 @@
   color: var(--text-faint, #8a94a6);
 }
 
-/* まとめた通知（NotificationStack）。カードを同じ格子に重ね、top で 8px ずつずらす。
-   高さは一番高いカード＋ずらした分（padding-bottom、件数から NotificationStack が付ける）。 */
+/* まとめた通知（CardStack）の外側の余白。 */
 .stack {
-  display: grid;
   margin: 12px 12px 0;
 }
 
-.stackCard {
-  grid-area: 1 / 1;
-  position: relative;
-  min-width: 0;
-}
-
-/* 重ねたカードは同じ高さにそろえる（短いカードの下端が隠れないように）。余白は .stack が持つ。 */
+/* 重ねたカード。高さは CardStack が一番高いカードにそろえ、余白は .stack が持つ。 */
 .stackItem {
-  height: 100%;
   margin: 0;
   box-sizing: border-box;
   /* ライトテーマの --card-bg は透明なので、そのままだと裏のカードの文字が透けて混ざる。

@@ -1,6 +1,5 @@
-import { ReactNode, useEffect, useRef, useState } from "react";
-import type { NotificationItem } from "../../api/client";
-import styles from "./NotificationsPanel.module.css";
+import { HTMLAttributes, ReactNode, Ref, useEffect, useRef, useState } from "react";
+import styles from "./CardStack.module.css";
 
 /** 重ねたカードを縦にずらす量（px）。 */
 const STACK_OFFSET_PX = 8;
@@ -20,7 +19,8 @@ function useNoHover(): boolean {
 }
 
 /**
- * まとめた通知（`lib/notificationGroups.ts`）を、縦に `STACK_OFFSET_PX` ずつずらして重ねる。
+ * まとめたカード（通知欄の `lib/notificationGroups.ts`、タイムラインの `lib/timelineGroups.ts`）を、
+ * 縦に `STACK_OFFSET_PX` ずつずらして重ねる。`keys` は上（新しい）から順。
  *
  * 前面に出すカード: マウス環境は最後にマウスが乗ったカード（離れても前面のまま残す）、タッチ環境は画面の上から
  * `TOUCH_FOCUS_LINE` の線にかかっているカード（まとまりの高さを件数で等分し、線の位置に
@@ -32,19 +32,27 @@ function useNoHover(): boolean {
  * z-index は使わず、遠いカードほど DOM の前に置いて描画順で重ねる。z-index を付けるとカードごとに
  * 重なりの文脈ができ、中のホバープレビュー（position: fixed）が左ペイン等の下に潜る。同じ理由で
  * ずらしも transform ではなく top で行う（transform の中では position: fixed の基準がカードになる）。
+ *
+ * カードは一番高いカードの高さまで伸ばす（`.stackCard` の直下の要素）。
  */
-export default function NotificationStack({
-  items,
+export default function CardStack({
+  keys,
   renderCard,
+  as: Tag = "div",
+  className,
+  containerProps,
 }: {
-  items: NotificationItem[];
-  renderCard: (n: NotificationItem) => ReactNode;
+  keys: string[];
+  renderCard: (index: number) => ReactNode;
+  as?: "div" | "li";
+  className?: string;
+  containerProps?: HTMLAttributes<HTMLElement> & Record<`data-${string}`, string>;
 }) {
-  const ref = useRef<HTMLLIElement>(null);
+  const ref = useRef<HTMLElement>(null);
   const noHover = useNoHover();
   const [hovered, setHovered] = useState<number | null>(null);
   const [touchFocused, setTouchFocused] = useState<number | null>(null);
-  const count = items.length;
+  const count = keys.length;
 
   useEffect(() => {
     if (!noHover) return;
@@ -83,26 +91,27 @@ export default function NotificationStack({
 
   const front = Math.min(count - 1, (noHover ? touchFocused : hovered) ?? 0);
   // 前面から遠い順（同じ距離なら上のカードを先）に並べる。最後が前面。
-  const paintOrder = items
-    .map((n, index) => ({ n, index }))
+  const paintOrder = keys
+    .map((key, index) => ({ key, index }))
     .sort((a, b) => Math.abs(b.index - front) - Math.abs(a.index - front) || a.index - b.index);
 
   return (
-    <li
-      ref={ref}
-      className={styles.stack}
+    <Tag
+      {...containerProps}
+      ref={ref as Ref<HTMLDivElement & HTMLLIElement>}
+      className={[styles.stack, className].filter(Boolean).join(" ")}
       style={{ paddingBottom: (count - 1) * STACK_OFFSET_PX }}
     >
-      {paintOrder.map(({ n, index }) => (
+      {paintOrder.map(({ key, index }) => (
         <div
-          key={n.id}
+          key={key}
           className={styles.stackCard}
           style={{ top: index * STACK_OFFSET_PX }}
           onMouseEnter={() => setHovered(index)}
         >
-          {renderCard(n)}
+          {renderCard(index)}
         </div>
       ))}
-    </li>
+    </Tag>
   );
 }

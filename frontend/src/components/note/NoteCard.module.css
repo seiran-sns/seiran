@@ -76,6 +76,11 @@
   padding-left: 4px;
 }
 
+/* 重ねたまとまりの中のリポスト元ポストで、リポストラッパーの rail と同じ高さを空ける。 */
+.railSpacer {
+  visibility: hidden;
+}
+
 .repostTime {
   color: var(--accent);
   text-decoration: none;
@@ -803,4 +808,16 @@
 .card.adminOverride,
 .card.adminOverride:hover {
   background: var(--card-bg-admin-override);
+}
+
+/* 重ねたまとまり（NoteList の CardStack）の中のカード。余白はまとまりが持つ。
+   ライトテーマの --card-bg は透明なので、ページの背景色を下に敷いて裏のカードが透けないようにする。 */
+.card.stacked {
+  margin: 0;
+  box-sizing: border-box;
+  background: linear-gradient(var(--card-bg), var(--card-bg)), var(--bg);
+}
+
+.card.stacked:hover {
+  background: linear-gradient(var(--card-bg-hover), var(--card-bg-hover)), var(--bg);
 }

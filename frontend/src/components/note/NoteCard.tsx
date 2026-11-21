@@ -63,6 +63,10 @@ interface NoteCardProps {
    * あくまで参照であるため）。タイムライン項目・引用元カード・返信先の積み上げ小カードでは
    * 常に省略（`false`）でよい。 */
   isMainSubject?: boolean;
+  /** タイムラインで同じポストのリポストと重ねて表示する（`NoteList`・`lib/timelineGroups.ts`）。
+   * リポスト元のポスト自体では rail と同じ高さを先頭に空け、本文の位置をリポストラッパーと
+   * そろえる（揃えないと重ねたときに上端の帯の見え方がカードごとにずれる）。 */
+  stacked?: boolean;
 }
 
 /** 引用元を1段だけ表示する共通カード。引用元の `quoteId` はバッジだけ表示し、
@@ -855,12 +859,13 @@ export default function NoteCard({
   forceOpenCw = false,
   onReplyIndicatorClick,
   isMainSubject = false,
+  stacked = false,
 }: NoteCardProps) {
   const { t } = useTranslation();
   const [hidden, setHidden] = useState(false);
   // pendingなリポスト対象が「取り込む」で解決された場合のローカル反映（#234）。
   const [resolvedRenote, setResolvedRenote] = useState<Note | null>(null);
-  const sizeClass = large ? styles.large : small ? styles.small : "";
+  const sizeClass = [large ? styles.large : small ? styles.small : "", stacked ? styles.stacked : ""].join(" ");
 
   if (hidden) return null;
 
@@ -932,6 +937,11 @@ export default function NoteCard({
         note.visibleByAdminOverride ? styles.adminOverride : ""
       }`}
     >
+      {stacked && (
+        <div className={`${styles.rail} ${styles.railSpacer}`} aria-hidden>
+          <TwemojiEmoji emoji="🔁" />
+        </div>
+      )}
       <PostContent
         note={note}
         linkToDetail={linkToDetail}

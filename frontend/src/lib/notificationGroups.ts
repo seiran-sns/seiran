@@ -3,22 +3,33 @@ import type { NotificationItem } from "../api/client";
 /**
  * 通知欄で重ねて表示する通知のまとまり。`items` は新しい順（一覧と同じ順）。
  *
- * まとめるのはリアクション通知だけで、「同じポストへの連続」か「同じ人からの連続」の
- * どちらかを満たす区間を1つのまとまりにする。それ以外の通知は1件で1つ。
+ * まとめるのはリアクション通知とリポスト通知で、「同じポストへの連続」か「同じ人からの連続」の
+ * どちらかを満たす区間を1つのまとまりにする（種別が混ざってもよい）。それ以外の通知は1件で1つ。
  */
 export interface NotificationGroup {
   items: NotificationItem[];
 }
 
+const GROUPED_TYPES = new Set(["reaction", "renote"]);
+
+/** 反応された自分のポスト。リポスト通知の `note` はリポストラッパーなので、リポスト元を見る。 */
 function postKey(n: NotificationItem): string | undefined {
-  return n.type === "reaction" ? n.note?.id : undefined;
+  if (n.type === "reaction") return n.note?.id;
+  if (n.type === "renote") return n.note?.renote?.id ?? n.note?.id;
+  return undefined;
 }
 
 function userKey(n: NotificationItem): string | undefined {
-  return n.type === "reaction" ? (n.user?.id ?? n.userId) : undefined;
+  return GROUPED_TYPES.has(n.type) ? (n.user?.id ?? n.userId) : undefined;
 }
 
-/** `group` に `n` を足しても「全部同じポスト」か「全部同じ人」のままか。 */
+/**
+ * `group` に `n` を足しても「全部同じポスト」か「全部同じ人」のままか。
+ *
+ * まとまり全体で判定するので、同じ人から同じポストへの通知だけが並んでいる間は、どちらの規則で
+ * まとめているかを決めずに保留し、両方の続きを受け付ける（最初の2件で規則を決めると、
+ * 3件目が他の人から同じポストへの通知のときにまとめ損ねる）。
+ */
 function canJoin(group: NotificationItem[], n: NotificationItem): boolean {
   const post = postKey(n);
   const user = userKey(n);

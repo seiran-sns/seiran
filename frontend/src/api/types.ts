@@ -924,7 +924,8 @@ export interface NotificationItem {
   note?: {
     id?: string;
     reactionEmojis?: Record<string, string>;
-    renote?: { id?: string };
+    /** リポスト元。本文・警告文・絵文字はリポスト通知の2行目に使う。 */
+    renote?: { id?: string; text?: string | null; cw?: string | null; emojis?: Record<string, string> };
     /** 本文（リアクション通知の2行目に使う）。 */
     text?: string | null;
     /** CW の警告文。あれば本文の代わりに出す。 */
