@@ -209,7 +209,9 @@
     "clickToRemove": "Haga clic para eliminar",
     "clickToAdd": "Haga clic para agregar la misma reacción.",
     "customEmojiBlocked": "No puedes agregar esta reacción emoji personalizada: no está registrada en este servidor",
-    "actorsFetchFailed": "No se pudo cargar"
+    "actorsFetchFailed": "No se pudo cargar",
+    "showAll": "Ver todo",
+    "collapse": "Contraer"
   },
   "reactionPicker": {
     "addReactionTitle": "Añadir una reacción",

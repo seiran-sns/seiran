@@ -1,4 +1,6 @@
 .wrap {
+  /* 流れの外へ出した見えないチップ（.offFlow）の基準。 */
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -12,6 +14,37 @@
 .chipWrap {
   position: relative;
   display: inline-block;
+}
+
+/* たたんで見せないチップ・幅を測るための複製。幅は測れるよう描画したまま、流れの外で隠す。 */
+.offFlow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* 「全部」「たたむ」。本文の「全部表示」・投稿ボタンと同じ青地・控えめな角丸。チップと同じ高さの
+   行に収まるよう、縦の寸法（行の高さ・上下の余白・枠の太さ）はチップに合わせる。 */
+.toggle {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
+  line-height: 1.52rem;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.toggle:hover {
+  background: var(--accent-hover);
 }
 
 .chip {
