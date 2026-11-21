@@ -21,7 +21,7 @@ members = [
 # `versionSuffix`が同じ役割を持つ。
 [workspace.package]
 version = "1.0.0"
-version_suffix = "-RC1"
+version_suffix = "-RC2"
 
 # デバッグビルドにデバッグシンボル（DWARF情報）を含めない。
 # gdb/lldb 等でのステップ実行はしない開発フローのため、バイナリサイズ・リンク時間・
