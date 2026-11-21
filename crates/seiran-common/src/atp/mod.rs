@@ -5,6 +5,7 @@ pub mod embed;
 pub mod facets;
 pub mod handle_resolve;
 pub mod migration_client;
+pub mod migration_session;
 pub mod mst_walk;
 pub mod plc;
 pub mod repo;

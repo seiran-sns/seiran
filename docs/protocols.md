@@ -405,6 +405,9 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 | `com.atproto.identity.signPlcOperation` | 確認コードを添えて PLC 操作に署名させる。`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services` は省略時の挙動が仕様上不定なので、全部明示して渡す |
 | `com.atproto.identity.submitPlcOperation` | plc.directory へ提出。この成功が転入の不可逆境界（DID の service endpoint が seiran に切り替わる） |
 | `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート） |
+| `com.atproto.server.refreshSession` | accessJwt の期限切れ（`ExpiredToken`）で拒まれたとき、refreshJwt で取り直す |
+
+**セッションの更新（`atp::migration_session::call_with_refresh`）**: PDS A の accessJwt は数時間で切れるが、転入は確認コードの入力待ちやジョブの停止（ストレージの容量不足等）でそれより長くかかりうる。PDS A を呼ぶ処理（上の表の `createSession`・`submitPlcOperation` 以外すべて）は、`ExpiredToken` で拒まれたら `refreshSession` で取り直し、新しい組を `at_migration_requests` に保存してから1回だけやり直す。PDS は使った refreshJwt を失効させるので、保存は更新に使った refreshJwt がまだ DB にある場合だけ行い、別の処理が先に更新していればその組を使う（`repository::at_migration::replace_source_tokens`）。`refreshSession` はパスワードもメール2FAも要らない。期限切れで拒まれた `signPlcOperation` は確認コードを消費しないので、取り直してそのまま送り直せる。
 
 **SSRF 対策（`atp::did_resolve`）**:
 - `resolve_service_endpoint`（DID 起点）: 初めて PDS A に接続するとき。DID 文書の `service` からエンドポイントを解決し、非公開IPを拒否して検証済みIPへ接続する。

@@ -403,14 +403,7 @@ async fn stage_plc_operation(
     plc_token: &str,
 ) -> Result<(), ApiError> {
     let id = migration_req.id;
-    let session = seiran_common::atp::migration_client::AtpSession {
-        did: migration_req.source_did.clone(),
-        handle: migration_req.source_handle.clone(),
-        access_jwt: migration_req.source_access_jwt.clone().unwrap_or_default(),
-        refresh_jwt: migration_req.source_refresh_jwt.clone().unwrap_or_default(),
-        email: None,
-        email_confirmed: false,
-    };
+    let mut session = seiran_common::atp::migration_session::source_session(migration_req);
     // `start`時点で確定したPDS Aのエンドポイント文字列をそのまま使う（DID文書からの
     // 再導出ではない——`resolve_stored_endpoint`のドキュメントコメント参照。
     // DID文書から再導出すると、PLC操作が既に成功した後の再試行時に移行先(seiran自身)を
@@ -444,8 +437,22 @@ async fn stage_plc_operation(
         }),
     };
 
-    let operation = seiran_common::atp::migration_client::sign_plc_operation(
-        &resolved, &session, plc_token, &desired,
+    // メールのトークンを入力するまでに accessJwt が切れていることがある（期限切れで
+    // 拒まれた呼び出しではトークンは消費されないので、更新してやり直せる）。
+    let operation = seiran_common::atp::migration_session::call_with_refresh(
+        &state.db,
+        id,
+        &resolved,
+        &mut session,
+        |s| {
+            let (resolved, desired) = (&resolved, &desired);
+            async move {
+                seiran_common::atp::migration_client::sign_plc_operation(
+                    resolved, &s, plc_token, desired,
+                )
+                .await
+            }
+        },
     )
     .await
     .map_err(|e| {

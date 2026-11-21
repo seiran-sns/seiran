@@ -650,3 +650,34 @@ pub async fn transition_status(
     .await?;
     Ok(res.rows_affected() == 1)
 }
+
+/// `refreshSession` で得た移行元PDSのトークンを保存し、以後使うべき (accessJwt, refreshJwt) を
+/// 返す。保存は、更新に使った refreshJwt（`old_refresh_jwt`）がまだ DB にある場合だけ行う。
+/// 別の処理が先に更新していたら（refreshJwt は使うと失効するので、その組の方が新しい）
+/// 上書きせずに DB の組を返す。行が無ければ `None`。
+pub async fn replace_source_tokens(
+    pool: &PgPool,
+    id: i64,
+    old_refresh_jwt: &str,
+    access_jwt: &str,
+    refresh_jwt: &str,
+) -> Result<Option<(Option<String>, Option<String>)>, sqlx::Error> {
+    sqlx::query_as(
+        "WITH upd AS (
+             UPDATE at_migration_requests
+             SET source_access_jwt = $3, source_refresh_jwt = $4
+             WHERE id = $1 AND source_refresh_jwt = $2
+             RETURNING source_access_jwt, source_refresh_jwt
+         )
+         SELECT source_access_jwt, source_refresh_jwt FROM upd
+         UNION ALL
+         SELECT source_access_jwt, source_refresh_jwt FROM at_migration_requests
+         WHERE id = $1 AND NOT EXISTS (SELECT 1 FROM upd)",
+    )
+    .bind(id)
+    .bind(old_refresh_jwt)
+    .bind(access_jwt)
+    .bind(refresh_jwt)
+    .fetch_optional(pool)
+    .await
+}

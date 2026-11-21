@@ -35,6 +35,16 @@ pub enum MigrationClientError {
         code: String,
         message: String,
     },
+    /// 更新したセッションの保存に失敗した（`migration_session::call_with_refresh`）。
+    #[error("セッションの保存に失敗しました: {0}")]
+    Db(String),
+}
+
+impl MigrationClientError {
+    /// PDS Aが accessJwt の期限切れで拒んだか。`refreshSession` で取り直せば通る。
+    pub fn is_expired_token(&self) -> bool {
+        matches!(self, Self::Xrpc { code, .. } if code == "ExpiredToken")
+    }
 }
 
 fn xrpc_error_from_body(status: u16, body: &serde_json::Value) -> MigrationClientError {
@@ -161,6 +171,44 @@ pub async fn create_session_with_2fa(
         email: session.email,
         email_confirmed: session.email_confirmed.unwrap_or(false),
     })
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RefreshSessionResp {
+    access_jwt: String,
+    refresh_jwt: String,
+}
+
+/// `com.atproto.server.refreshSession` — refreshJwt で新しい (accessJwt, refreshJwt) を得る。
+/// パスワードもメール2FAも要らない。PDS は使った refreshJwt を失効させるので、
+/// 返った組は必ず保存して次から使う（`migration_session::call_with_refresh`）。
+pub async fn refresh_session(
+    resolved: &ResolvedServiceEndpoint,
+    refresh_jwt: &str,
+) -> Result<(String, String), MigrationClientError> {
+    let client = build_pinned_client(resolved)?;
+    let resp = client
+        .post(format!(
+            "{}/xrpc/com.atproto.server.refreshSession",
+            resolved.url
+        ))
+        .bearer_auth(refresh_jwt)
+        .send()
+        .await
+        .map_err(|e| MigrationClientError::Http(e.to_string()))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let err_body: serde_json::Value = resp.json().await.unwrap_or_default();
+        return Err(xrpc_error_from_body(status.as_u16(), &err_body));
+    }
+
+    let parsed: RefreshSessionResp = resp
+        .json()
+        .await
+        .map_err(|e| MigrationClientError::Parse(e.to_string()))?;
+    Ok((parsed.access_jwt, parsed.refresh_jwt))
 }
 
 /// `com.atproto.sync.getRepo` — リポジトリ全体をCAR(v1)バイト列で取得する。
@@ -410,6 +458,21 @@ pub async fn deactivate_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn expired_token_is_detected_only_by_its_code() {
+        let expired = xrpc_error_from_body(
+            400,
+            &serde_json::json!({"error": "ExpiredToken", "message": "Token has expired"}),
+        );
+        assert!(expired.is_expired_token());
+        let bad_sig = xrpc_error_from_body(
+            401,
+            &serde_json::json!({"error": "BadJwtSignature", "message": "could not verify jwt signature"}),
+        );
+        assert!(!bad_sig.is_expired_token());
+        assert!(!MigrationClientError::Http("timeout".into()).is_expired_token());
+    }
 
     /// `@testimport.bsky.social`（did:plc:n3tpur22sxb57zgzwe3lkl5m）に対する疎通確認（実ネットワークを使う）。
     /// パスワードを要する`createSession`以降は含めず、認証不要な読み取り系のみを検証する
