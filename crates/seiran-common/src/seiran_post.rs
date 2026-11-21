@@ -14,6 +14,9 @@
 use serde::{Deserialize, Serialize};
 use sqlx::{PgPool, Row};
 
+/// 受信した`seiranPost`から保存する添付の上限（`SeiranPost::received_attachments`）。
+const MAX_RECEIVED_ATTACHMENTS: usize = 16;
+
 /// `seiranPost.attachments[]`の1件分。
 ///
 /// フィールドはDAG-CBOR canonical順（キーのバイト長→辞書順、`atp/repo.rs`の規約）で
@@ -215,6 +218,36 @@ impl SeiranPost {
         serde_json::from_value(obj.get("seiranPost")?.clone()).ok()
     }
 
+    /// 受信側で`post_attachments`へ保存する添付と、それぞれを NSFW 指定にするか。
+    ///
+    /// `seiranPost`があれば、添付は標準フィールドではなくこちらから組み立てる（AP・ATP 共通）。
+    /// 標準フィールドでは画像ごとの NSFW を再現できない（AP の Note の`sensitive`は1枚でも
+    /// あれば立ち、Bluesky のラベルは投稿単位）うえ、ATP の`embed`は Bluesky 向けに選んだ
+    /// 一部（画像は先頭4枚・動画は1件等）しか含まないため。
+    ///
+    /// URL は送信元が申告したものをそのまま表示に使うので、`https://`以外は捨てる。
+    /// 件数は`MAX_RECEIVED_ATTACHMENTS`で打ち切る（ローカル投稿の上限より十分大きい）。
+    pub fn received_attachments(&self) -> Vec<(crate::atp::ParsedAttachment, bool)> {
+        self.attachments
+            .iter()
+            .filter(|a| a.url.starts_with("https://"))
+            .take(MAX_RECEIVED_ATTACHMENTS)
+            .map(|a| {
+                (
+                    crate::atp::ParsedAttachment {
+                        url: a.url.clone(),
+                        mime_type: a.mime_type.clone(),
+                        width: a.width.unwrap_or(0),
+                        height: a.height.unwrap_or(0),
+                        thumbnail_url: None,
+                        is_gif: a.is_gif,
+                    },
+                    a.is_sensitive,
+                )
+            })
+            .collect()
+    }
+
     /// `serde_json::Value`へ変換する（AP Note / ATP post record への埋め込み用）。
     pub fn to_value(&self) -> serde_json::Value {
         serde_json::to_value(self).unwrap_or(serde_json::Value::Null)
@@ -224,6 +257,46 @@ impl SeiranPost {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn attachment(url: &str, is_sensitive: bool) -> SeiranPostAttachment {
+        SeiranPostAttachment {
+            url: url.to_string(),
+            kind: "image".to_string(),
+            is_gif: false,
+            width: Some(640),
+            height: None,
+            blurhash: None,
+            mime_type: "image/png".to_string(),
+            is_sensitive,
+        }
+    }
+
+    #[test]
+    fn received_attachments_keep_per_attachment_sensitivity() {
+        let mut sp = sample();
+        sp.attachments = vec![
+            attachment("https://example.com/a.png", false),
+            attachment("https://example.com/b.png", true),
+            attachment("javascript:alert(1)", true),
+            attachment("http://example.com/c.png", false),
+        ];
+        let got = sp.received_attachments();
+        let summary: Vec<(&str, bool)> = got.iter().map(|(a, s)| (a.url.as_str(), *s)).collect();
+        assert_eq!(
+            summary,
+            vec![
+                ("https://example.com/a.png", false),
+                ("https://example.com/b.png", true)
+            ]
+        );
+        assert_eq!(got[0].0.width, 640);
+        assert_eq!(got[0].0.height, 0);
+
+        sp.attachments = (0..30)
+            .map(|i| attachment(&format!("https://example.com/{i}.png"), false))
+            .collect();
+        assert_eq!(sp.received_attachments().len(), MAX_RECEIVED_ATTACHMENTS);
+    }
 
     fn sample() -> SeiranPost {
         SeiranPost {

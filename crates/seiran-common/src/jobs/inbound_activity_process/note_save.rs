@@ -212,10 +212,8 @@ pub(crate) async fn save_ap_note_core(
     let (bridge_target_at_uri, bridge_of_post_id) = resolve_bridge_original(inbox, note).await;
 
     // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
-    // Truth、`docs/protocols.md` 5節）。添付の寸法・blurhash（`post_attachments`に該当
-    // カラムが無いため）は本パスでは未対応のまま（標準AP添付フィールドのベストエフォート
-    // フォールバック、is_sensitive/is_gifのみ反映）。URLカードは下記`seiran_post_ext`
-    // 分岐で`linkCards[]`を直接反映する。
+    // Truth、`docs/protocols.md` 5節）。添付は`save_remote_attachments`が`attachments[]`
+    // から、URLカードは`store_note_extras`が`linkCards[]`から反映する。
     let body = seiran_post_ext
         .as_ref()
         .map(|sp| sp.body.clone())
@@ -708,7 +706,7 @@ async fn store_note_extras(
     }
 
     // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
-    save_remote_attachments(inbox, post_id, note).await;
+    save_remote_attachments(inbox, post_id, note, seiran_post_ext).await;
     Ok(())
 }
 
@@ -808,7 +806,32 @@ pub(super) async fn save_remote_attachments(
     inbox: &InboxContext,
     post_id: i64,
     note: &serde_json::Value,
+    seiran_post_ext: Option<&crate::seiran_post::SeiranPost>,
 ) {
+    // seiranPost があれば添付はそちらから（画像ごとの NSFW を再現する。Note の `sensitive`
+    // は1枚でも NSFW があれば立つので、それを全添付に当てると全部ぼかしになる）。
+    if let Some(sp) = seiran_post_ext {
+        for (position, (att, is_sensitive)) in sp.received_attachments().iter().enumerate() {
+            if let Err(e) = inbox
+                .post_repo
+                .attach_remote_media_url(
+                    post_id,
+                    &crate::repository::RemoteAttachment {
+                        url: &att.url,
+                        mime_type: Some(&att.mime_type),
+                        thumbnail_url: None,
+                        is_sensitive: *is_sensitive,
+                        is_gif: att.is_gif,
+                        position: position as i16,
+                    },
+                )
+                .await
+            {
+                tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
+            }
+        }
+        return;
+    }
     let Some(attachments) = note["attachment"].as_array() else {
         return;
     };

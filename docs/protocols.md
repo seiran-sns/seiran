@@ -501,7 +501,8 @@ seiran の投稿は AP の Note や ATP の post より表現力が高い（CW�
 - 返信・引用・リポスト先は含めない。標準の参照機構（`inReplyTo`/`quoteUrl`、`reply.parent`/`embed.record`）に任せる（送信側の内部IDは受信側で解決できない）。
 - DM のスレッド起点、返信・引用制限は含めない（前者は相手側で再現でき、後者はローカル投稿に設定機能が無い）。
 - `linkCards[].embedSrc`/`embedType` は含めない。送信元の申告どおりに iframe を埋め込むと、受信側の `oembed_allowed_domains` を迂回した XSS の入口になる。受信側は `title`/`description`/`thumbnailUrl` を `post_link_cards` に直接入れ（`seiran_post::insert_seiran_post_link_cards`、AP/ATP 共通）、`embed_src`/`embed_type` は NULL のままにする。
-- `attachments[].altText` は含めない（ローカル投稿に alt 設定機能が無い）。受信側は `is_sensitive`/`is_gif` を反映するが、`width`/`height`/`blurhash` は `post_attachments` に列が無いため反映しない。
+- `attachments[].altText` は含めない（ローカル投稿に alt 設定機能が無い）。
+- **添付の受信**: `seiranPost` があれば、受信側は添付を標準フィールド（AP の `attachment`、ATP の `embed`）ではなく `attachments[]` から組み立て、`isSensitive`/`isGif` を添付ごとに反映する（`SeiranPost::received_attachments`。AP の受信・ATP の firehose・AppView からの取得で共通）。標準フィールドでは画像ごとの NSFW を再現できない（AP は Note の `sensitive` が1枚でもあれば立ち、Bluesky のラベルは投稿単位）うえ、ATP の `embed` は Bluesky 向けに選んだ一部（静止画は先頭4枚、動画は1件等）しか含まないため。URL は送信元のストレージのものをそのまま使うので、`https://` 以外は捨て、件数も打ち切る。`width`/`height`/`blurhash` は `post_attachments` に列が無いため反映しない。
 - バージョニングはしない。seiran 同士の通信だけなので、変更は上位互換にする。
 
 ### ブリッジポスト（brid.gy等、別実体のまま保持）

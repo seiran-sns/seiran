@@ -583,6 +583,15 @@ async fn save_new_bsky_post(
         Some(sp) => (sp.body.clone(), sp.emoji_map.clone()),
         None => (body_text, emoji_map),
     };
+    // seiranPost があれば添付はそちらから（`SeiranPost::received_attachments`）。
+    let attachments = match &sp {
+        Some(sp) => sp.received_attachments(),
+        None => parsed
+            .attachments
+            .into_iter()
+            .map(|att| (att, parsed.attachments_sensitive))
+            .collect(),
+    };
     save_bsky_post(
         pool,
         &deps.job_queue,
@@ -602,8 +611,7 @@ async fn save_new_bsky_post(
             avatar_url: author.avatar_url.as_deref(),
             reply_to_post_id,
             quote_of_post_id,
-            attachments: parsed.attachments,
-            attachments_sensitive: parsed.attachments_sensitive,
+            attachments,
             link_card: parsed.link_card,
             claimed_ap_object_id: sp.as_ref().and_then(|sp| sp.counterpart_post_id.clone()),
             content_warning: sp.as_ref().and_then(|sp| sp.content_warning.clone()),
@@ -728,9 +736,8 @@ struct IncomingBskyPost<'a> {
     avatar_url: Option<&'a str>,
     reply_to_post_id: Option<i64>,
     quote_of_post_id: Option<i64>,
-    attachments: Vec<ParsedAttachment>,
-    /// 添付を NSFW 指定で保存するか（`ParsedPostRecord::attachments_sensitive`）。
-    attachments_sensitive: bool,
+    /// 添付と、それぞれを NSFW 指定で保存するか。
+    attachments: Vec<(ParsedAttachment, bool)>,
     link_card: Option<ParsedLinkCard>,
     /// `seiranPost.counterpartPostId`（AP側の ap_object_id の自己申告、#237）。
     claimed_ap_object_id: Option<String>,
@@ -937,7 +944,7 @@ async fn store_bsky_post_extras(
     // 添付（画像・動画）を post_attachments に保存
     if !attachments.is_empty() {
         let posts_repo = PgPostRepository::new(pool.clone());
-        for (position, att) in attachments.iter().enumerate() {
+        for (position, (att, is_sensitive)) in attachments.iter().enumerate() {
             if let Err(e) = posts_repo
                 .attach_remote_media_url(
                     post_id,
@@ -945,7 +952,7 @@ async fn store_bsky_post_extras(
                         url: &att.url,
                         mime_type: Some(&att.mime_type),
                         thumbnail_url: att.thumbnail_url.as_deref(),
-                        is_sensitive: post.attachments_sensitive,
+                        is_sensitive: *is_sensitive,
                         is_gif: att.is_gif,
                         position: position as i16,
                     },
@@ -1177,7 +1184,7 @@ async fn publish_bsky_post_to_timelines(
 
     let attachments_json: Vec<JsonValue> = attachments
         .iter()
-        .map(|att| {
+        .map(|(att, _)| {
             serde_json::json!({
                 "url": att.url,
                 "mimeType": att.mime_type,
