@@ -6,15 +6,30 @@
 # ビルドはリポジトリのルートをコンテキストにする: docker build -f docker/seiran/Dockerfile .
 
 # ─── seiran-server ────────────────────────────────────────────────────────────
-FROM rust:1-bookworm AS server
+# 依存クレートのビルドを cargo-chef で自前のクレートと別のレイヤーに分け、Cargo.lock と依存の
+# 指定が変わらない限りレイヤーのキャッシュ（CI では type=gha）から再利用する。target/ を
+# `--mount=type=cache` に置く方式は、使い捨ての builder で動く CI ではキャッシュが毎回空になり、
+# type=gha にも保存されないため、コードを1行変えるたびに依存をすべてビルドし直すことになる。
+FROM rust:1-bookworm AS chef
+RUN cargo install cargo-chef --locked --version 0.1.78
 WORKDIR /src
+
+# 依存の一覧（recipe.json）だけを取り出す。cargo-chef はワークスペースのクレートの版を
+# 伏せるので、版上げだけのコミットでも次の段のキャッシュは外れない。
+FROM chef AS planner
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
-# cargo のレジストリと target/ はビルドキャッシュに置き、イメージのレイヤーには含めない。
-RUN --mount=type=cache,target=/usr/local/cargo/registry \
-    --mount=type=cache,target=/usr/local/cargo/git \
-    --mount=type=cache,target=/src/target,id=seiran-release-target \
-    cargo build --release --locked -p seiran-server \
+RUN cargo chef prepare --recipe-path recipe.json
+
+FROM chef AS server
+COPY --from=planner /src/recipe.json recipe.json
+# レジストリと target/ はこのレイヤーに含める（cache mount にすると CI では次の段から
+# 見えず、ソースのダウンロードと依存のビルドをやり直してしまう）。最終イメージには
+# バイナリだけをコピーするので、公開イメージの大きさには影響しない。
+RUN cargo chef cook --release --locked -p seiran-server --recipe-path recipe.json
+COPY Cargo.toml Cargo.lock ./
+COPY crates ./crates
+RUN cargo build --release --locked -p seiran-server \
     && cp target/release/seiran-server /seiran-server
 
 # ─── フロントエンド ────────────────────────────────────────────────────────────
