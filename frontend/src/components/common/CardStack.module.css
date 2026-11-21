@@ -1,0 +1,19 @@
+/* 重ねたカード（CardStack）。カードを同じ格子に重ね、top で 8px ずつずらす。
+   高さは一番高いカード＋ずらした分（padding-bottom、件数から CardStack が付ける）。
+   外側の余白は呼び出し側が className で付ける。 */
+.stack {
+  display: grid;
+}
+
+.stackCard {
+  grid-area: 1 / 1;
+  position: relative;
+  min-width: 0;
+  /* 中のカードを一番高いカードの高さまで伸ばせるようにする（短いカードの下端が隠れないように）。 */
+  display: flex;
+  flex-direction: column;
+}
+
+.stackCard > * {
+  flex: 1 1 auto;
+}
