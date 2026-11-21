@@ -20,8 +20,8 @@ members = [
 # （`crates/seiran-api/src/version.rs`参照）。frontend側は`frontend/package.json`の
 # `versionSuffix`が同じ役割を持つ。
 [workspace.package]
-version = "0.3.5"
-version_suffix = ""
+version = "1.0.0"
+version_suffix = "-RC1"
 
 # デバッグビルドにデバッグシンボル（DWARF情報）を含めない。
 # gdb/lldb 等でのステップ実行はしない開発フローのため、バイナリサイズ・リンク時間・
