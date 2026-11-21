@@ -209,7 +209,9 @@
     "clickToRemove": "Click to remove",
     "clickToAdd": "Click to add the same reaction",
     "customEmojiBlocked": "You can't add this custom emoji reaction — it's not registered on this server",
-    "actorsFetchFailed": "Failed to load"
+    "actorsFetchFailed": "Failed to load",
+    "showAll": "Show all",
+    "collapse": "Collapse"
   },
   "reactionPicker": {
     "addReactionTitle": "Add a reaction",

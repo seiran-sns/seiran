@@ -209,7 +209,9 @@
     "clickToRemove": "クリックで取り消す",
     "clickToAdd": "クリックで同じリアクションを付ける",
     "customEmojiBlocked": "このサーバーに無いカスタム絵文字は自分では付けられません",
-    "actorsFetchFailed": "取得に失敗しました"
+    "actorsFetchFailed": "取得に失敗しました",
+    "showAll": "全部",
+    "collapse": "たたむ"
   },
   "reactionPicker": {
     "addReactionTitle": "リアクションを付ける",

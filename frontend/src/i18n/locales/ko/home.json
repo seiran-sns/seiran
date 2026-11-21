@@ -209,7 +209,9 @@
     "clickToRemove": "제거하려면 클릭하세요.",
     "clickToAdd": "동일한 반응을 추가하려면 클릭하세요.",
     "customEmojiBlocked": "이 맞춤 이모티콘 반응은 추가할 수 없습니다. 이 이모티콘은 이 서버에 등록되어 있지 않습니다.",
-    "actorsFetchFailed": "로드하지 못했습니다."
+    "actorsFetchFailed": "로드하지 못했습니다.",
+    "showAll": "모두",
+    "collapse": "접기"
   },
   "reactionPicker": {
     "addReactionTitle": "반응 추가",

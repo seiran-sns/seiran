@@ -209,7 +209,9 @@
     "clickToRemove": "Klicken Sie zum Entfernen",
     "clickToAdd": "Klicken Sie, um dieselbe Reaktion hinzuzufügen",
     "customEmojiBlocked": "Sie können diese benutzerdefinierte Emoji-Reaktion nicht hinzufügen, da sie nicht auf diesem Server registriert ist",
-    "actorsFetchFailed": "Laden fehlgeschlagen"
+    "actorsFetchFailed": "Laden fehlgeschlagen",
+    "showAll": "Alle",
+    "collapse": "Einklappen"
   },
   "reactionPicker": {
     "addReactionTitle": "Fügen Sie eine Reaktion hinzu",

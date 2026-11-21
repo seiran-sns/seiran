@@ -209,7 +209,9 @@
     "clickToRemove": "点击删除",
     "clickToAdd": "单击以添加相同的反应",
     "customEmojiBlocked": "您无法添加此自定义表情符号反应——它未在此服务器上注册",
-    "actorsFetchFailed": "加载失败"
+    "actorsFetchFailed": "加载失败",
+    "showAll": "全部",
+    "collapse": "收起"
   },
   "reactionPicker": {
     "addReactionTitle": "添加反应",

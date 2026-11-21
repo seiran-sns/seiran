@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { ReactionActor, ReactionSummary } from "../../api/client";
+import { fitChipsInLines } from "../../lib/chipRows";
 import { fetchReactionActors } from "../../lib/repostReactions";
 import { fetchCustomEmojiShortcodes, parseCustomEmojiShortcode } from "../../lib/customEmojis";
 import RemoteImg from "../common/RemoteImg";
@@ -26,11 +27,18 @@ interface ReactionChipsProps {
   indent?: boolean;
 }
 
+/** たたんでいる間に見せる行数。 */
+const COLLAPSED_LINES = 2;
+
 /** 届いたリアクションの集計チップ表示。クリックで同じ絵文字を自分も付ける/取り消す/切り替える。
  * ホバーするとそのリアクションを付けたアクター一覧（アイコン付き）をポップオーバー表示する。
  * カスタム絵文字（`:shortcode:`）はこのサーバーの `custom_emojis` に登録済みのものしか送信できない
  * （Fedi/Bsky受信のよそのサーバー由来のカスタム絵文字リアクションはクリックで追いリアクションできず、
- * 自分が既に付けている分の取消のみ許可する）。 */
+ * 自分が既に付けている分の取消のみ許可する）。
+ *
+ * `COLLAPSED_LINES` 行に収まらないときはたたみ、最後の行の末尾に「全部」ボタンを出す。広げたら
+ * 末尾に「たたむ」ボタンを出す。何個見せるかは実測した幅から決める（`lib/chipRows.ts`）。
+ * 見せないチップも幅を測るために描画したまま、流れの外へ出して隠す。 */
 export default function ReactionChips({
   noteId,
   viaRepostId,
@@ -39,18 +47,62 @@ export default function ReactionChips({
   disabled,
   indent = true,
 }: ReactionChipsProps) {
+  const { t } = useTranslation();
   const [knownShortcodes, setKnownShortcodes] = useState<Set<string> | null>(null);
+  const [expanded, setExpanded] = useState(false);
+  // 実測前（null）は全部見せる。
+  const [fit, setFit] = useState<{ visible: number; overflow: boolean } | null>(null);
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const measureButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     fetchCustomEmojiShortcodes().then(setKnownShortcodes);
   }, []);
 
+  // 欄の幅・チップの幅（絵文字画像の読み込みで変わる）が変わるたびに測り直す。
+  useLayoutEffect(() => {
+    const wrap = wrapRef.current;
+    if (!wrap) return;
+    const chips = Array.from(wrap.querySelectorAll<HTMLElement>(":scope > [data-reaction-chip]"));
+    const measure = () => {
+      const next = fitChipsInLines(
+        chips.map((el) => el.getBoundingClientRect().width),
+        wrap.clientWidth,
+        parseFloat(getComputedStyle(wrap).columnGap) || 0,
+        measureButtonRef.current?.getBoundingClientRect().width ?? 0,
+        COLLAPSED_LINES
+      );
+      setFit((prev) => (prev && prev.visible === next.visible && prev.overflow === next.overflow ? prev : next));
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(wrap);
+    chips.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [reactions]);
+
   if (!reactions || reactions.length === 0) return null;
+  const overflow = fit?.overflow ?? false;
+  const visible = overflow && !expanded ? (fit?.visible ?? reactions.length) : reactions.length;
+  const toggle = (label: string) => (
+    <button
+      type="button"
+      className={styles.toggle}
+      onClick={(e) => {
+        e.stopPropagation();
+        setExpanded((v) => !v);
+      }}
+    >
+      {label}
+    </button>
+  );
   return (
-    <div className={`${styles.wrap} ${indent ? styles.indent : ""}`}>
-      {reactions.map((r) => (
+    <div ref={wrapRef} className={`${styles.wrap} ${indent ? styles.indent : ""}`}>
+      {reactions.map((r, i) => (
         <ReactionChip
           key={r.emoji}
+          hidden={i >= visible}
           noteId={noteId}
           viaRepostId={viaRepostId}
           reaction={r}
@@ -59,6 +111,11 @@ export default function ReactionChips({
           knownShortcodes={knownShortcodes}
         />
       ))}
+      {overflow && (expanded ? toggle(t("home:reactionChips.collapse")) : toggle(t("home:reactionChips.showAll")))}
+      {/* 「全部」ボタンの幅を測るための見えない複製。 */}
+      <button ref={measureButtonRef} type="button" className={`${styles.toggle} ${styles.offFlow}`} aria-hidden tabIndex={-1}>
+        {t("home:reactionChips.showAll")}
+      </button>
     </div>
   );
 }
@@ -71,9 +128,11 @@ interface ReactionChipProps {
   disabled?: boolean;
   /** このサーバーに登録済みのカスタム絵文字 shortcode 一覧。未ロードなら null（ロード完了まで安全側でブロック）。 */
   knownShortcodes: Set<string> | null;
+  /** たたんでいて見せないチップ。幅を測るため描画はしたまま流れの外へ出す。 */
+  hidden?: boolean;
 }
 
-function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, knownShortcodes }: ReactionChipProps) {
+function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, knownShortcodes, hidden }: ReactionChipProps) {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -133,7 +192,7 @@ function ReactionChip({ noteId, viaRepostId, reaction: r, onToggle, disabled, kn
   }, [onEnter, onLeave]);
 
   return (
-    <div className={styles.chipWrap}>
+    <div className={`${styles.chipWrap} ${hidden ? styles.offFlow : ""}`} data-reaction-chip aria-hidden={hidden || undefined}>
       <button
         type="button"
         ref={chipRef}
