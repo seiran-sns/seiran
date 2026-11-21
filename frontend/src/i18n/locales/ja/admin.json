@@ -174,7 +174,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "両方設定するとログイン画面・アカウント作成画面でTurnstile認証が有効になります。未設定の場合は発動しません。",
+    "turnstileHint": "両方設定するとアカウント作成画面（メール確認の申請を含む）でTurnstile認証が有効になります。未設定の場合は発動しません。",
+    "turnstileTestButton": "動作確認",
+    "turnstileTestSolve": "表示されたウィジェットの確認を済ませてください。",
+    "turnstileTestOk": "検証に成功しました（ホスト名: {{hostname}}）",
+    "turnstileTestHint": "保存前の入力内容で試します。Secret Key 欄が空なら保存済みの値を使います。",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "Secret Key が設定されていません",
+      "TURNSTILE_FAILED": "Siteverify で検証に失敗しました（Secret Key が Site Key と対になっているか確認してください）",
+      "TURNSTILE_UNREACHABLE": "Cloudflare に接続できませんでした",
+      "WIDGET": "ウィジェットがエラーを返しました（Site Key と、Cloudflare 側でこのドメインを許可しているか確認してください）"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS（ATプロトコルのハンドル検証）",
     "cloudflareApiTokenLabel": "API トークン",
     "cloudflareZoneIdLabel": "Zone ID",

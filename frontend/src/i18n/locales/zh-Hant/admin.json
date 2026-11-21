@@ -157,7 +157,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "兩組金鑰都設定後，登入與註冊頁面將啟用Turnstile驗證。",
+    "turnstileHint": "兩組金鑰都設定後，註冊頁面（包括申請電子郵件驗證）將啟用Turnstile驗證。",
+    "turnstileTestButton": "測試",
+    "turnstileTestSolve": "請完成下方顯示的小工具驗證。",
+    "turnstileTestOk": "驗證成功（主機名稱：{{hostname}}）",
+    "turnstileTestHint": "使用儲存前的輸入值進行測試。Secret Key 欄為空時使用已儲存的值。",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "尚未設定 Secret Key",
+      "TURNSTILE_FAILED": "Siteverify 驗證失敗（請確認 Secret Key 與 Site Key 是否成對）",
+      "TURNSTILE_UNREACHABLE": "無法連線到 Cloudflare",
+      "WIDGET": "小工具回傳錯誤（請檢查 Site Key，以及是否已在 Cloudflare 中允許此網域）"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS (AT Protocol handle verification)",
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",

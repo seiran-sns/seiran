@@ -1,7 +1,9 @@
-import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
+import { ChangeEvent, FormEvent, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import type { TFunction } from "i18next";
 import { api, getErrorMessage } from "../../api/client";
-import type { SmtpTestResult } from "../../api/admin";
+import type { SmtpTestResult, TurnstileTestResult } from "../../api/admin";
+import Turnstile from "../Turnstile";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
@@ -53,6 +55,9 @@ export default function SiteSettingsPanel() {
   const [turnstileSiteKey, setTurnstileSiteKey] = useState("");
   const [turnstileSecretKey, setTurnstileSecretKey] = useState("");
   const [turnstileSecretKeySet, setTurnstileSecretKeySet] = useState(false);
+  // 動作確認: "widget" の間はウィジェットを出してトークン待ち、"verifying" は Siteverify 待ち
+  const [turnstileTesting, setTurnstileTesting] = useState<"" | "widget" | "verifying">("");
+  const [turnstileTestMessage, setTurnstileTestMessage] = useState<{ ok: boolean; text: string } | null>(null);
   const [cloudflareApiToken, setCloudflareApiToken] = useState("");
   const [cloudflareApiTokenSet, setCloudflareApiTokenSet] = useState(false);
   const [cloudflareZoneId, setCloudflareZoneId] = useState("");
@@ -185,6 +190,38 @@ export default function SiteSettingsPanel() {
       setSmtpTesting("");
     }
   }
+
+  // 保存前のフォームの値で試す。Site Key でウィジェットを出し、得たトークンを入力中の
+  // Secret Key（空なら保存済みの値）で Siteverify にかける。
+  const onTurnstileTestToken = useCallback(
+    async (token: string) => {
+      if (!token) return;
+      setTurnstileTesting("verifying");
+      try {
+        const r = await api.admin.testTurnstile({
+          token,
+          ...(turnstileSecretKey ? { turnstile_secret_key: turnstileSecretKey } : {}),
+        });
+        setTurnstileTestMessage({ ok: r.ok, text: turnstileTestMessageText(t, r) });
+      } catch (err) {
+        setTurnstileTestMessage({ ok: false, text: getErrorMessage(err) });
+      } finally {
+        setTurnstileTesting("");
+      }
+    },
+    [turnstileSecretKey, t],
+  );
+
+  const onTurnstileTestError = useCallback(
+    (code: string) => {
+      setTurnstileTesting("");
+      setTurnstileTestMessage({
+        ok: false,
+        text: `${t("admin:siteSettingsPanel.turnstileTestFailure.WIDGET")}: ${code}`,
+      });
+    },
+    [t],
+  );
 
   async function save(e: FormEvent) {
     e.preventDefault();
@@ -507,6 +544,41 @@ export default function SiteSettingsPanel() {
               placeholder={turnstileSecretKeySet ? t("admin:siteSettingsPanel.passwordSetPlaceholder") : t("admin:siteSettingsPanel.passwordUnsetPlaceholder")}
             />
           </label>
+          <div className={styles.actions} style={{ marginBottom: 8 }}>
+            <button
+              type="button"
+              className={styles.btnGhost}
+              onClick={() => {
+                setTurnstileTestMessage(null);
+                setTurnstileTesting("widget");
+              }}
+              disabled={
+                turnstileTesting !== "" ||
+                turnstileSiteKey.trim() === "" ||
+                (turnstileSecretKey === "" && !turnstileSecretKeySet)
+              }
+            >
+              {turnstileTesting === ""
+                ? t("admin:siteSettingsPanel.turnstileTestButton")
+                : t("admin:siteSettingsPanel.smtpTesting")}
+            </button>
+          </div>
+          {turnstileTesting === "widget" && (
+            <>
+              <p className={styles.hint}>{t("admin:siteSettingsPanel.turnstileTestSolve")}</p>
+              <Turnstile
+                siteKey={turnstileSiteKey.trim()}
+                onToken={onTurnstileTestToken}
+                onError={onTurnstileTestError}
+              />
+            </>
+          )}
+          {turnstileTestMessage && (
+            <p className={turnstileTestMessage.ok ? styles.success : styles.error} role="status">
+              {turnstileTestMessage.text}
+            </p>
+          )}
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.turnstileTestHint")}</p>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.turnstileHint")}</p>
         </div>
 
@@ -558,4 +630,10 @@ export default function SiteSettingsPanel() {
       </form>
     </div>
   );
+}
+
+function turnstileTestMessageText(t: TFunction, r: TurnstileTestResult): string {
+  if (r.ok) return t("admin:siteSettingsPanel.turnstileTestOk", { hostname: r.hostname ?? "-" });
+  const reason = t(`admin:siteSettingsPanel.turnstileTestFailure.${r.code ?? "TURNSTILE_FAILED"}`);
+  return r.detail ? `${reason}: ${r.detail}` : reason;
 }

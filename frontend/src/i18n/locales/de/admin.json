@@ -157,7 +157,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "Turnstile wird auf der Login- und Registrierungsseite aktiviert, sobald beide Schlüssel gesetzt sind.",
+    "turnstileHint": "Turnstile wird auf den Registrierungsseiten (einschließlich der Anforderung der E-Mail-Bestätigung) aktiviert, sobald beide Schlüssel gesetzt sind.",
+    "turnstileTestButton": "Testen",
+    "turnstileTestSolve": "Schließe die angezeigte Widget-Prüfung ab.",
+    "turnstileTestOk": "Überprüfung erfolgreich (Hostname: {{hostname}})",
+    "turnstileTestHint": "Testet die eingegebenen Werte vor dem Speichern. Ist das Feld Secret Key leer, wird der gespeicherte Wert verwendet.",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "Secret Key ist nicht gesetzt",
+      "TURNSTILE_FAILED": "Siteverify hat das Token abgelehnt (prüfe, ob Secret Key und Site Key zusammengehören)",
+      "TURNSTILE_UNREACHABLE": "Cloudflare ist nicht erreichbar",
+      "WIDGET": "Das Widget hat einen Fehler gemeldet (prüfe den Site Key und ob diese Domain in Cloudflare erlaubt ist)"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS (AT Protocol handle verification)",
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",

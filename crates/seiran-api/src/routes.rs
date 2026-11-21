@@ -112,6 +112,10 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             post(handlers::admin::site_settings::send_smtp_test_email),
         )
         .route(
+            "/api/admin/site-settings/turnstile-test",
+            post(handlers::admin::site_settings::test_turnstile),
+        )
+        .route(
             "/api/admin/relays",
             get(handlers::admin::relays::list_relays).post(handlers::admin::relays::create_relay),
         )

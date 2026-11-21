@@ -157,7 +157,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Site Key",
     "turnstileSecretKeyLabel": "Secret Key",
-    "turnstileHint": "두 키를 모두 설정하면 로그인/계정 생성 화면에서 Turnstile 인증이 활성화됩니다.",
+    "turnstileHint": "두 키를 모두 설정하면 계정 생성 화면(이메일 확인 신청 포함)에서 Turnstile 인증이 활성화됩니다.",
+    "turnstileTestButton": "동작 확인",
+    "turnstileTestSolve": "표시된 위젯 확인을 완료해 주세요.",
+    "turnstileTestOk": "검증에 성공했습니다 (호스트 이름: {{hostname}})",
+    "turnstileTestHint": "저장 전 입력값으로 시험합니다. Secret Key 칸이 비어 있으면 저장된 값을 사용합니다.",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "Secret Key가 설정되지 않았습니다",
+      "TURNSTILE_FAILED": "Siteverify 검증에 실패했습니다 (Secret Key가 Site Key와 짝이 맞는지 확인하세요)",
+      "TURNSTILE_UNREACHABLE": "Cloudflare에 연결할 수 없습니다",
+      "WIDGET": "위젯이 오류를 반환했습니다 (Site Key와 Cloudflare에서 이 도메인을 허용했는지 확인하세요)"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS (AT Protocol handle verification)",
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",

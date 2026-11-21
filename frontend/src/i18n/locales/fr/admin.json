@@ -157,7 +157,17 @@
     "turnstileSectionTitle": "Cloudflare Turnstile",
     "turnstileSiteKeyLabel": "Clé de site",
     "turnstileSecretKeyLabel": "Clé secrète",
-    "turnstileHint": "Turnstile est activé sur les pages de connexion et d'inscription une fois les deux clés configurées.",
+    "turnstileHint": "Turnstile est activé sur les pages d'inscription (y compris la demande de vérification d'e-mail) une fois les deux clés configurées.",
+    "turnstileTestButton": "Tester",
+    "turnstileTestSolve": "Effectuez la vérification du widget affiché ci-dessous.",
+    "turnstileTestOk": "Vérification réussie (nom d'hôte : {{hostname}})",
+    "turnstileTestHint": "Teste les valeurs saisies avant l'enregistrement. Si le champ Secret Key est vide, la valeur enregistrée est utilisée.",
+    "turnstileTestFailure": {
+      "TURNSTILE_NOT_CONFIGURED": "La Secret Key n'est pas configurée",
+      "TURNSTILE_FAILED": "Siteverify a refusé le jeton (vérifiez que la Secret Key correspond à la Site Key)",
+      "TURNSTILE_UNREACHABLE": "Impossible de joindre Cloudflare",
+      "WIDGET": "Le widget a renvoyé une erreur (vérifiez la Site Key et que ce domaine est autorisé dans Cloudflare)"
+    },
     "cloudflareDnsSectionTitle": "Cloudflare DNS (AT Protocol handle verification)",
     "cloudflareApiTokenLabel": "API token",
     "cloudflareZoneIdLabel": "Zone ID",
