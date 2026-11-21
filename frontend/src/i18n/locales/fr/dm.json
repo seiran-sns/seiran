@@ -2,6 +2,7 @@
   "messagesPage": {
     "title": "Messages",
     "newMessage": "Nouveau message",
+    "backToList": "← Messages",
     "emptySessions": "Pas encore de messages",
     "composeHint": "Choisissez un destinataire pour envoyer un message",
     "unknownPeer": "Homologue inconnu",

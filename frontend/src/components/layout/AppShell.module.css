@@ -469,6 +469,12 @@
     height: auto;
     overflow-y: visible;
   }
+
+  /* narrowPane: 横に並ばない幅では指定したペインだけを出す */
+  .narrowCenterOnly .right,
+  .narrowRightOnly .center {
+    display: none;
+  }
 }
 
 @media (max-width: 768px) {
@@ -559,6 +565,18 @@
     max-width: 100%;
     height: auto;
     position: static;
+  }
+
+  /* 中央ペインを出さないときは、フローティングボタンの逃げ（中央ペインの padding-bottom）を
+     右ペインに付け替える。無いと一覧の末尾がボタンの下に隠れる。 */
+  .narrowRightOnly .right {
+    padding-bottom: calc(92px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* .shell は縦並びの中央寄せ（幅広時に中央ペインを画面中央へ置くための指定が残る）なので、
+     右ペインしか無いと一覧が画面の縦中央に浮く。上端から並べる。 */
+  .narrowRightOnly {
+    justify-content: flex-start;
   }
 
   .floatingMenuIcon {

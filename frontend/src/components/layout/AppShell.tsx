@@ -22,9 +22,12 @@ interface AppShellProps {
   onPosted?: (note: Note) => void;
   /** RouterがDOMを差し替えてwindow.scrollYを変える前に、現在画面の状態を保存する。 */
   onBeforeNavigate?: () => void;
+  /** 中央と右のペインが横に並ばない幅（1220px以下）で、片方だけを出す。省略時は両方を縦に積む。
+   * 一覧（右）と本体（中央）を行き来する画面（DM）で、縦に積むと本体の下に一覧が埋もれるため。 */
+  narrowPane?: "center" | "right";
 }
 
-export default function AppShell({ center, right, onPosted, onBeforeNavigate }: AppShellProps) {
+export default function AppShell({ center, right, onPosted, onBeforeNavigate, narrowPane }: AppShellProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
@@ -50,7 +53,9 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate }: 
 
   return (
     <div
-      className={styles.shell}
+      className={`${styles.shell} ${
+        narrowPane === "center" ? styles.narrowCenterOnly : narrowPane === "right" ? styles.narrowRightOnly : ""
+      }`}
       onClickCapture={(event) => {
         if ((event.target as Element).closest("a[href]")) onBeforeNavigate?.();
       }}

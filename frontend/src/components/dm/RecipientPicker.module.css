@@ -73,9 +73,11 @@
   color: var(--text);
 }
 
+/* 宛先欄は画面下端に固定した送信フォームの中にあるので、候補は上（メッセージ欄の上）へ開く。
+   下へ開くと画面の外やスマホのフローティングボタンの下に隠れる。 */
 .suggestList {
   position: absolute;
-  top: calc(100% + 4px);
+  bottom: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 10;
