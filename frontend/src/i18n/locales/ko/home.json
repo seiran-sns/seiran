@@ -145,7 +145,7 @@
     "replyPlaceholder": "답장 쓰기",
     "quotePlaceholder": "댓글 추가",
     "attachTitle": "이미지, 비디오, 오디오 파일 첨부",
-    "forcedPrivateNote": "🔒️ 이 답글 역시 비공개 게시물에 대한 답글이므로 비공개입니다.",
+    "forcedPrivateNote": "이 답글 역시 비공개 게시물에 대한 답글이므로 비공개입니다.",
     "visibilityPublic": "공공의",
     "visibilityUnlisted": "미등록",
     "visibilityPrivate": "사적인",
