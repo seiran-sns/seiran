@@ -361,6 +361,7 @@ Fediverse 仕様のアンケート（選択肢2〜10・単一/複数選択・期
 
 - **受理**: `CreateNoteRequest.sensitive_attachment_ids`（`attachment_ids` の一部。含まれない ID は無視）。省略時は投稿者が Misskey 互換 API のドライブで付けた指定（`drive_file_sensitivity`）を写す。Mastodon 互換の `sensitive=true` は添付すべてを指定する。外部 ATP クライアントの `createRecord` は、閲覧注意系の self-label（`sexual`・`nudity`・`porn`・`graphic-media`）があれば添付すべてを指定する（DID 転入の取り込みも同じ）。
 - **AP**: 指定した添付の Document に `sensitive: true`、1つでもあれば Note にも `sensitive: true`（`apply_note_sensitive`）。添付ごとの指定を読むのは Misskey 系だけで、Mastodon 系は Note の値で投稿の添付全体をぼかすため両方に載せる。配送・Note の再取得・outbox で同じ。
+- **Bsky からの受信**: レコードの閲覧注意系 self-label（`sexual`・`nudity`・`porn`・`graphic-media`、種類は区別しない）があれば添付すべてを NSFW 指定で保存する（`record_has_media_self_label`。Jetstream・AppView からの取得とも）。読むのは投稿者自身が付けた self-label だけで、ラベラー（Bluesky のモデレーション等）が後から付けるラベルは見ない（Jetstream のレコードには載らないため）。
 - **Bsky**: ラベルは投稿単位なので、1つでもあれば投稿に self-label `sexual`（`NSFW_SELF_LABEL`）を付ける（`labels: {$type: com.atproto.label.defs#selfLabels, values: [{val}]}`）。性的なイラスト等を想定した指定なので、ラベルのうち最も弱い「きわどい」相当を使う（`porn` だと成人向け表示をオンにしていない相手には投稿自体が出ない）。
 
 ### CW（閲覧注意、#229）
