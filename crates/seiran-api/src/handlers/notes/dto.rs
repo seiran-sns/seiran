@@ -68,6 +68,13 @@ pub struct CreateNoteRequest {
     /// 送らないクライアントとの後方互換のため省略可能で、省略時は従来通り言語情報なしで
     /// Bsky配送する（`langs`フィールド自体を省略）。
     pub language: Option<String>,
+    /// NSFW 指定する添付の ID（`attachment_ids` の一部）。指定した添付は閲覧者側で最初は
+    /// ぼかして表示され、AP では Document と Note の `sensitive`、Bluesky では投稿の
+    /// self-label（`sexual`）として配送される。`attachment_ids` に含まれない ID は無視する。
+    /// 省略時は投稿者がドライブで付けた NSFW 指定（`drive_file_sensitivity`）を写す
+    /// （Misskey 互換クライアントは `drive/files/create`・`update` の `isSensitive` で
+    /// ファイル側に指定してから `notes/create` する）。
+    pub sensitive_attachment_ids: Option<Vec<String>>,
 }
 
 /// [`CreateNoteRequest::poll`] の中身。

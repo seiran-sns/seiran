@@ -381,7 +381,8 @@ pub(super) async fn fetch_attachment_documents(
     post_id: i64,
 ) -> Result<Vec<serde_json::Value>, ApError> {
     let rows = sqlx::query(
-        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, mf.blurhash, sp.public_url
+        "SELECT mf.storage_key, mf.mime_type, mf.width, mf.height, mf.blurhash, sp.public_url,
+                pa.is_sensitive
          FROM post_attachments pa
          JOIN media_files mf ON mf.id = pa.media_file_id
          JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -402,14 +403,16 @@ pub(super) async fn fetch_attachment_documents(
             let height: Option<i32> = r.try_get("height").ok()?;
             let blurhash: Option<String> = r.try_get("blurhash").ok()?;
             let public_url: String = r.try_get("public_url").ok()?;
-            Some(build_attachment_document(
-                &public_url,
-                &storage_key,
-                &mime_type,
+            let sensitive: bool = r.try_get("is_sensitive").ok()?;
+            Some(build_attachment_document(&AttachmentDocument {
+                public_url: &public_url,
+                storage_key: &storage_key,
+                mime_type: &mime_type,
                 width,
                 height,
-                blurhash.as_deref(),
-            ))
+                blurhash: blurhash.as_deref(),
+                sensitive,
+            }))
         })
         .collect())
 }

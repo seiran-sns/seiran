@@ -255,11 +255,13 @@ pub async fn create_post_from_record(
         .await
         .map_err(|e| ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)))?;
 
+    // Bluesky のラベルは投稿単位なので、閲覧注意のラベルがあれば添付すべてを NSFW 指定にする。
+    let is_sensitive = seiran_common::atp::record_has_media_self_label(record);
     for (position, media_file_id) in resolved_attachments.into_iter().enumerate() {
         let position = position as i16;
         if let Err(e) = state
             .posts
-            .attach_media(post_id, media_file_id, position)
+            .attach_media(post_id, media_file_id, position, is_sensitive)
             .await
         {
             tracing::error!("[post_from_record] 添付 INSERT 失敗: {}", e);

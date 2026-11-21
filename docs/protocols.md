@@ -356,6 +356,14 @@ Fediverse 仕様のアンケート（選択肢2〜10・単一/複数選択・期
 - **pull**: `Update(Question)` を送らない実装向け。投稿を読み込む各経路（`queries::enqueue_stale_poll_fetches`、`attach_remote_instance_info` の呼び出しすべてに隣接）が、リポスト・引用越しを含め「poll を持つリモート投稿で `poll_update_received=false`」のものを `find_stale_remote_poll_post_ids` に照会し、`Job::PollFetch` を積む。締切前は `poll_fetched_at` が10分より古いもの、締切後（`poll.closed` 優先、無ければ `endTime`）は締切以降まだ取得していないもの。締切前に取り逃した票数を締切後に取り戻せるよう、締切済みでも一律には除外しない。ジョブはシステム署名鍵で Note を再取得して更新する。`Question` でなくなっていたら `poll_fetched_at` だけ進める。
 - **反映**: どちらも `broadcast_poll_update` で `pollUpdated` を配信する（ローカル投票と同じイベント）。
 
+### 添付の NSFW 指定
+指定は添付ごとに `post_attachments.is_sensitive` に持つ（`docs/database.md`）。
+
+- **受理**: `CreateNoteRequest.sensitive_attachment_ids`（`attachment_ids` の一部。含まれない ID は無視）。省略時は投稿者が Misskey 互換 API のドライブで付けた指定（`drive_file_sensitivity`）を写す。Mastodon 互換の `sensitive=true` は添付すべてを指定する。外部 ATP クライアントの `createRecord` は、閲覧注意系の self-label（`sexual`・`nudity`・`porn`・`graphic-media`）があれば添付すべてを指定する（DID 転入の取り込みも同じ）。
+- **AP**: 指定した添付の Document に `sensitive: true`、1つでもあれば Note にも `sensitive: true`（`apply_note_sensitive`）。添付ごとの指定を読むのは Misskey 系だけで、Mastodon 系は Note の値で投稿の添付全体をぼかすため両方に載せる。配送・Note の再取得・outbox で同じ。
+- **Bsky からの受信**: レコードの閲覧注意系 self-label（`sexual`・`nudity`・`porn`・`graphic-media`、種類は区別しない）があれば添付すべてを NSFW 指定で保存する（`record_has_media_self_label`。Jetstream・AppView からの取得とも）。読むのは投稿者自身が付けた self-label だけで、ラベラー（Bluesky のモデレーション等）が後から付けるラベルは見ない（Jetstream のレコードには載らないため）。
+- **Bsky**: ラベルは投稿単位なので、1つでもあれば投稿に self-label `sexual`（`NSFW_SELF_LABEL`）を付ける（`labels: {$type: com.atproto.label.defs#selfLabels, values: [{val}]}`）。性的なイラスト等を想定した指定なので、ラベルのうち最も弱い「きわどい」相当を使う（`porn` だと成人向け表示をオンにしていない相手には投稿自体が出ない）。
+
 ### CW（閲覧注意、#229）
 `posts.content_warning`（Fedi 受信の CW と同じ列）。アンケートと違い、Bsky では他のすべての embed 候補を上書きする。
 
@@ -623,7 +631,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **対応エンドポイント**: `meta`、MiAuth、`i`、`users/show`（`userIds` 指定時は配列、`userId`/`username` 指定時は単一。`UsersShowResponse` の untagged で切り替え）、`users/notes`、`users/following`・`followers`（`MisskeyFollowRelation` が `follower`/`followee` の片方だけを出す）、`users/reactions`、`users/lists/list`・`show`・`push`・`pull`、`notes/show`・`create`・`delete`・`reactions`・`reactions/create`・`reactions/delete`・`unrenote`・`mentions`・`search`・`search-by-tag`・`polls/vote`、`notes/local-timeline`・`timeline`・`hybrid-timeline`（ソーシャル）・`global-timeline`・`user-list-timeline`、`following/create`・`delete`、`i/notifications`、`ap/show`、`stats`、`endpoints`、`emojis`（GET/POST）、`drive/files/create`・`files`・`files/show`・`folders`、`notifications/create`。カスタム API と同じパスの `GET` とはメソッドで共存する。
 
-**ドライブ（`drive/files`・`files/show`・`files/update`・`files/attached-notes`・`folders`・`folders/show`・`folders/create`）**: seiran のドライブはフォルダ階層を持たない（`media_files` に `folder_id` が無い）フラットな構造のため、`drive/files` は `folderId` の指定を無視し、常にアップロード者自身の全ファイルをカーソルページネーションで返す（Mewk作者と合意済みのいい加減な互換実装：「存在しないフォルダ」ではなく「指定されたフォルダの中身は常にルート＝全ファイル」として振る舞う）。`drive/folders` は常に空配列（ルート直下にフォルダは無い）。`drive/folders/show` は何を指定されても`{id: 指定されたfolderId, name: "Drive", parentId: null}` 相当のダミーを返して常に成功、`drive/folders/create` も何も永続化せずその場で生成したIDを含むダミーの`DriveFolder`を返して常に成功する（フォルダは持てないが、作成・参照そのものを失敗させるとクライアントの添付整理フローが止まるため）。`drive/files/update` も同じ方針で、`folderId`（フォルダ間移動）・`name`・`isSensitive`・`comment`はいずれも保存先が無いため無視し、ファイルの存在・所有権だけ検証して現在の`DriveFile`をそのまま返す（Aria等の「ファイルをフォルダ移動」操作を404にせずルートに留め置く）。`drive/files/show`・`files/update`・`files/attached-notes`はいずれもアップロード者本人のファイルのみ対象。`drive/files/attached-notes`は`post_attachments`を実際に引いて添付投稿を返す（ここは本物のデータで実装）。
+**ドライブ（`drive/files`・`files/show`・`files/update`・`files/attached-notes`・`folders`・`folders/show`・`folders/create`）**: seiran のドライブはフォルダ階層を持たない（`media_files` に `folder_id` が無い）フラットな構造のため、`drive/files` は `folderId` の指定を無視し、常にアップロード者自身の全ファイルをカーソルページネーションで返す（Mewk作者と合意済みのいい加減な互換実装：「存在しないフォルダ」ではなく「指定されたフォルダの中身は常にルート＝全ファイル」として振る舞う）。`drive/folders` は常に空配列（ルート直下にフォルダは無い）。`drive/folders/show` は何を指定されても`{id: 指定されたfolderId, name: "Drive", parentId: null}` 相当のダミーを返して常に成功、`drive/folders/create` も何も永続化せずその場で生成したIDを含むダミーの`DriveFolder`を返して常に成功する（フォルダは持てないが、作成・参照そのものを失敗させるとクライアントの添付整理フローが止まるため）。`drive/files/update` も同じ方針で、`folderId`（フォルダ間移動）・`name`・`comment`は保存先が無いため無視し、ファイルの存在・所有権だけ検証して現在の`DriveFile`をそのまま返す。`isSensitive` だけは呼んだ本人の指定として `drive_file_sensitivity` に保存し（`drive/files/create` の `isSensitive` も同じ）、`notes/create` で添付へ写す。`DriveFile.isSensitive` もこの本人の指定を返す。指定を変えても投稿済みの添付は変わらない（Aria等の「ファイルをフォルダ移動」操作を404にせずルートに留め置く）。`drive/files/show`・`files/update`・`files/attached-notes`はいずれもアップロード者本人のファイルのみ対象。`drive/files/attached-notes`は`post_attachments`を実際に引いて添付投稿を返す（ここは本物のデータで実装）。
 
 **`notifications/create`**: 本家 Misskey はクライアント発の自由記述通知（`body`/`header`/`icon`）をユーザー自身に送れるが、seiran の `notifications` テーブルは固定種別のシステム通知しか持たないため、内容を検証せず受理するだけで何も保存せず `204` を返す。
 
@@ -708,7 +716,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **`Account`**: `acct` はローカルが `username`、Bsky（`domain` 空）がハンドル、他は `username@domain`（`username::actor_handle` と同じ規則）。アバター未設定は `/api/avatars/:id`、ヘッダー未設定は `/api/headers/missing.png`（1x1 透明 PNG。空文字だと Swift 系クライアントの URL デコードが失敗する）。`note`・`fields[].value` も `text_to_html`。
 
-**投稿（`POST /api/v1/statuses`）**: `status`・`in_reply_to_id`・`quoted_status_id`（Fedibird 等の `quote_id` も可）・`media_ids[]`・`poll[options][]`/`poll[expires_in]`/`poll[multiple]`・`spoiler_text`（CW）・`visibility`・`language`（`SUPPORTED_LANGUAGES` 外は付けない）を `CreateNoteRequest` に変換する。`direct` の宛先は本文のメンションを既知のアクター（`@user`→ローカル、`@user@host`、`.` を含む単独ハンドル→Bsky）に引き当てる（引き当たらなければ `DIRECT_REQUIRES_KNOWN_MENTION`）。`sensitive`（ローカル投稿の添付に閲覧注意を付けられない）・`scheduled_at`・`Idempotency-Key` は無視する。削除（`DELETE /api/v1/statuses/:id`）は下書き復元用に元の本文を `text` に入れて返す。
+**投稿（`POST /api/v1/statuses`）**: `status`・`in_reply_to_id`・`quoted_status_id`（Fedibird 等の `quote_id` も可）・`media_ids[]`・`poll[options][]`/`poll[expires_in]`/`poll[multiple]`・`spoiler_text`（CW）・`visibility`・`language`（`SUPPORTED_LANGUAGES` 外は付けない）を `CreateNoteRequest` に変換する。`direct` の宛先は本文のメンションを既知のアクター（`@user`→ローカル、`@user@host`、`.` を含む単独ハンドル→Bsky）に引き当てる（引き当たらなければ `DIRECT_REQUIRES_KNOWN_MENTION`）。`sensitive=true` は添付すべてを NSFW 指定にする。`scheduled_at`・`Idempotency-Key` は無視する。削除（`DELETE /api/v1/statuses/:id`）は下書き復元用に元の本文を `text` に入れて返す。
 
 **その他のエンドポイント**:
 - インスタンス: `GET /api/v1/instance`・`/api/v2/instance`（`version` は `4.5.0 (compatible; seiran x.y.z)`、`api_versions.mastodon` は7。クライアントはこれで引用 UI 等の機能有無を決める）、`custom_emojis`、`preferences`。

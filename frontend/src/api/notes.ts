@@ -23,6 +23,7 @@ export const notes = {
     contentWarning?: string,
     linkCardUrls?: string[],
     language?: string,
+    sensitiveAttachmentIds: string[] = [],
   ) {
     return normalizeNote(
       await request<RawNote>("POST", "/notes/create", {
@@ -30,6 +31,8 @@ export const notes = {
         deliver_to_fedi: deliverToFedi,
         deliver_to_bsky: deliverToBsky,
         attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+        // 空でも送る（省略するとドライブ側の指定が使われる。Misskey 互換クライアント向け）。
+        sensitive_attachment_ids: sensitiveAttachmentIds,
         reply_to_id: replyToId,
         renote_id: renoteId,
         quote_of_id: quoteOfId,

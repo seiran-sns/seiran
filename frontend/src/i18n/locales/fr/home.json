@@ -151,6 +151,7 @@
     "visibilityPrivate": "Privé",
     "attachmentAlt": "Image ci-jointe",
     "removeAttachmentTitle": "Supprimer la pièce jointe",
+    "nsfwTooltip": "Activez NSFW pour les contenus comme les illustrations à caractère sexuel. L'image s'affiche d'abord floutée, et chacun peut la voir en appuyant lui-même sur le bouton pour retirer le flou",
     "overLimitReply": "Cela dépasse la limite de caractères de Bluesky.",
     "overLimitDefault": "Cela dépasse la limite de caractères de Bluesky. Désactivez quand même Bsky pour publier.",
     "remainingCount": "{{count}} restant",

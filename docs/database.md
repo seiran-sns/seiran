@@ -27,6 +27,7 @@ ID の採番は2系統:
 | `blocks` / `mutes` / `repost_mutes` | ブロック（Bsky 準拠）・ミュート・リポストミュート |
 | `notifications` | 通知 |
 | `media_files` / `post_attachments` | メディア実体と投稿との中間テーブル |
+| `drive_file_sensitivity` | Misskey 互換 API でドライブのファイルに付けた NSFW 指定（投稿時に添付へ写すための預け先） |
 | `custom_emojis` / `remote_emojis` | ローカルのカスタム絵文字、AP 受信で見つけたリモート絵文字のカタログ |
 | `emoji_import_requests` / `emoji_import_items` | 絵文字インポート（Misskey 形式 ZIP）の実行単位と絵文字ごとの状態 |
 | `fediverse_relays` | 参加する Fediverse リレー |
@@ -281,7 +282,8 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
   - `last_uploaded_at`: 最後にアップロードされた時刻（重複ヒットも含む）。孤立ファイル GC の生存判定はこちらを見る。`created_at` だと、古い孤児が再アップロードで再利用された直後に GC が消してしまう。
   - `is_animated_image`: アニメーション画像由来か（`ImagePipeline::AnimatedPassthrough` のときだけ `TRUE`）。Bsky embed 選択で静止画とアニメGIFを分けるのに使う。
 - `post_attachments`: `media_file_id`（ローカル）と `remote_url`/`remote_mime_type`/`remote_thumbnail_url`（リモート）のどちらかが埋まる。
-  - `is_sensitive`: AP の `attachment[].sensitive`。投稿全体の `sensitive=true` は全添付に伝播させる。
+  - `is_sensitive`: NSFW 指定。表示・配送が見るのはこの列だけ。ローカル投稿は投稿の作成時に添付ごとに決める（`CreateNoteRequest.sensitive_attachment_ids`、省略時は `drive_file_sensitivity` から写す）。同じ画像を後から別の投稿に付けても、過去の投稿の指定は変わらない。受信では AP の `attachment[].sensitive`（投稿全体の `sensitive=true` は全添付に伝播させる）、ATP の閲覧注意系 self-label（`sexual`・`nudity`・`porn`・`graphic-media`、種類は区別しない。投稿単位なので全添付）。Jetstream・AppView からの取得・外部 ATP クライアントの `createRecord`・DID 転入のどれでもレコードの `labels` を読む。
+- `drive_file_sensitivity`: Misskey 互換 API でドライブのファイルに付けた NSFW 指定（`drive/files/create`・`update` の `isSensitive`）の預け先。`(actor_id, media_file_id)` の行があれば指定あり。Misskey の `notes/create` は添付ごとの指定を持たないので、投稿の作成で `sensitive_attachment_ids` が省略されたときだけ読み、`post_attachments.is_sensitive` へ写す。表示・配送は見ない。`media_files` は同じ内容のファイルを利用者をまたいで共有するので、`media_files` の列ではなく利用者ごとに持つ。
   - `is_gif`: GIF アニメ由来（GIF ピッカー、または `presentation:"gif"`）。フロントは自動再生・ミュート・ループ・コントロール無しで表示する。
 - **孤立ファイル GC**（`run_media_gc`、7日周期）: `post_attachments`・`post_record_blobs`（どちらも論理削除されていないポストのもの）/`actors`/`custom_emojis` 等のどこからも参照されず、`last_uploaded_at` から7日以上経った行を消す。論理削除済みポストの添付は参照に数えず、`PostRepository::soft_delete_by_id` がポスト削除と同じ1文でその添付メディアの `last_uploaded_at` を更新して7日の猶予を与える（削除して編集再投稿が、削除直後でも同じメディアを使い回せる）。猶予を過ぎた行は、死んだ `post_attachments` 行（外部キーが残るため）と同じ文でまとめて消す。参照の有無は `NOT EXISTS` で判定する（`post_attachments.media_file_id` はリモート添付で NULL の行が大半で、`NOT IN` だと結果が常に UNKNOWN になり1件も消せない）。削除は、その瞬間に孤立条件を再評価する単一の `DELETE ... RETURNING` で DB を先に確定させてから S3 を消す（DB → S3）。これで「行があれば実体もある」を保ち、途中で参照が増えるレースにも安全（削除0件になるだけ）。S3 の削除に失敗するとゴミが残るが実害は小さい。
 

@@ -151,6 +151,7 @@
     "visibilityPrivate": "Privat",
     "attachmentAlt": "Angehängtes Bild",
     "removeAttachmentTitle": "Anhang entfernen",
+    "nsfwTooltip": "Aktiviere NSFW etwa für sexuelle Illustrationen. Das Bild wird zunächst unscharf angezeigt und Betrachtende können es sehen, indem sie selbst auf die Schaltfläche zum Aufheben der Unschärfe tippen",
     "overLimitReply": "Dies überschreitet die Zeichenbeschränkung von Bluesky.",
     "overLimitDefault": "Dies überschreitet die Zeichenbeschränkung von Bluesky. Schalten Sie Bsky trotzdem aus, um etwas zu posten.",
     "remainingCount": "{{count}} übrig",

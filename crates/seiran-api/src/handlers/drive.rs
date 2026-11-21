@@ -91,6 +91,7 @@ pub async fn create_drive_file(
     let mut filename_from_name_field: Option<String> = None;
     let mut media_type_str = "post".to_owned();
     let mut deliver_to_bsky = true;
+    let mut is_sensitive: Option<bool> = None;
     let mut token_field: Option<String> = None;
 
     while let Some(field) = multipart
@@ -119,6 +120,14 @@ pub async fn create_drive_file(
                     .await
                     .map_err(|e| ApiError::BadRequest(e.to_string()))?;
                 deliver_to_bsky = v != "false";
+            }
+            // Misskey 本家の`DriveFilesCreateRequest.isSensitive`（ドライブ上の NSFW 指定）。
+            Some("isSensitive") => {
+                let v = field
+                    .text()
+                    .await
+                    .map_err(|e| ApiError::BadRequest(e.to_string()))?;
+                is_sensitive = Some(v == "true");
             }
             // Misskeyクライアント（Aria等）はアクセストークンをAuthorizationヘッダーではなく
             // multipartの`i`フィールドとして送ってくる（misskey_dart postWithBinary仕様）。
@@ -175,7 +184,7 @@ pub async fn create_drive_file(
 
     let raw_bytes =
         file_bytes.ok_or_else(|| ApiError::BadRequest("ファイルが含まれていません".to_owned()))?;
-    store_uploaded_file(
+    let Json(mut file) = store_uploaded_file(
         &state,
         &auth,
         UploadedFile {
@@ -185,7 +194,31 @@ pub async fn create_drive_file(
             original_filename,
         },
     )
-    .await
+    .await?;
+    // 投稿の作成で添付ごとの指定が送られなかったときにだけ読む預け先へ、指定どおりに
+    // 付ける・外す（`media_file::set_drive_sensitive`）。
+    if let Some(is_sensitive) = is_sensitive {
+        let media_file_id: i64 = file
+            .id
+            .parse()
+            .map_err(|_| ApiError::Internal("ファイル ID が不正です".to_owned()))?;
+        let actor = state
+            .actors
+            .find_local_by_user_id(auth.user_id)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or_else(|| ApiError::Internal("アクターが見つかりません".to_owned()))?;
+        seiran_common::repository::media_file::set_drive_sensitive(
+            &state.db,
+            actor.id,
+            media_file_id,
+            is_sensitive,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("NSFW 指定の保存失敗: {}", e)))?;
+        file.is_sensitive = is_sensitive;
+    }
+    Ok(Json(file))
 }
 
 /// アップロードされた1ファイル（multipart から取り出した内容）。
@@ -709,9 +742,13 @@ async fn mark_bsky_video_failed(state: &AppState, media_file_id: i64) {
 /// （`POST /api/drive/files`・`drive/files/show` 用。新規アップロード時の
 /// `create_image_file`/`create_video_or_audio_file` はレスポンスをストレージ保存と
 /// 同じ手順内で組み立てるため、こちらは流用しない）。
+///
+/// `is_sensitive` は閲覧している利用者自身がドライブで付けた NSFW 指定
+/// （`media_file::drive_sensitive_ids`）。
 pub(crate) async fn to_drive_file_response(
     state: &AppState,
     record: &MediaFile,
+    is_sensitive: bool,
 ) -> DriveFileResponse {
     let url = build_public_url(
         state.storage_providers.as_ref(),
@@ -749,7 +786,7 @@ pub(crate) async fn to_drive_file_response(
         // media_files は md5 を保持しない（重複排除は sha256 のみで行う）ため、
         // 新規アップロード直後（呼び出し元が生バイト列から計算済み）以外は埋められない。
         md5: String::new(),
-        is_sensitive: false,
+        is_sensitive,
         properties: DriveFileProperties {
             width: record.width.map(|w| w as u32),
             height: record.height.map(|h| h as u32),

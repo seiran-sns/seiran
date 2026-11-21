@@ -559,7 +559,8 @@ pub struct BskyPostReply {
 // ─────────────────────────────────────────────────────────────────────────────
 
 // canonical 順: text(4) < $type(5) < embed(5) < langs(5) < reply(5) < facets(6) <
-//               createdAt(9) < seiranPost(10)
+//               labels(6) < createdAt(9) < seiranPost(10)
+// 6文字のキー同士: "facets"(f = 0x66) < "labels"(l = 0x6C)
 // 5文字のキー同士: "$type"($ = 0x24) < "embed"(e = 0x65) < "langs"(l = 0x6C) < "reply"(r = 0x72)
 #[derive(Serialize)]
 struct BskyFeedPost {
@@ -576,6 +577,8 @@ struct BskyFeedPost {
     reply: Option<BskyPostReply>,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     facets: Vec<BskyFacet>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    labels: Option<BskySelfLabels>,
     #[serde(rename = "createdAt")]
     created_at: String,
     /// `seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、#237）。
@@ -584,6 +587,20 @@ struct BskyFeedPost {
     /// `embed`と異なり手組みの`Ipld`変換は不要）。
     #[serde(rename = "seiranPost", skip_serializing_if = "Option::is_none")]
     seiran_post: Option<crate::seiran_post::SeiranPost>,
+}
+
+/// `com.atproto.label.defs#selfLabels`。canonical 順: $type(5) < values(6)
+#[derive(Serialize)]
+struct BskySelfLabels {
+    #[serde(rename = "$type")]
+    kind: String,
+    values: Vec<BskySelfLabel>,
+}
+
+/// `com.atproto.label.defs#selfLabel`。
+#[derive(Serialize)]
+struct BskySelfLabel {
+    val: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -814,22 +831,57 @@ fn build_embed_images_ipld(images: &[BskyImage]) -> Result<Ipld, RepoError> {
     Ok(Ipld::Map(embed))
 }
 
+/// NSFW 指定の添付を持つ投稿に付ける self-label。seiran の NSFW 指定は性的なイラスト等を
+/// 想定するため、Bluesky のラベルのうち最も弱い「きわどい」相当を使う（既定ではぼかして
+/// 警告を出す。`porn` だと成人向け表示をオンにしていない相手には投稿自体が出ない）。
+pub const NSFW_SELF_LABEL: &str = "sexual";
+
+/// 投稿の画像・動画を閲覧注意として扱う self-label（Bluesky のアダルト系ラベルと
+/// 不快なメディアのラベル）。
+const MEDIA_SELF_LABELS: [&str; 4] = ["sexual", "nudity", "porn", "graphic-media"];
+
+/// `app.bsky.feed.post` レコード（JSON 形）が、添付を閲覧注意にすべき self-label を持つか。
+pub fn record_has_media_self_label(record: &serde_json::Value) -> bool {
+    record["labels"]["values"].as_array().is_some_and(|values| {
+        values.iter().any(|v| {
+            v["val"]
+                .as_str()
+                .is_some_and(|val| MEDIA_SELF_LABELS.contains(&val))
+        })
+    })
+}
+
+/// `encode_bsky_feed_post` に渡す `app.bsky.feed.post` レコードの中身。
+pub struct FeedPostRecord<'a> {
+    pub text: &'a str,
+    pub created_at_rfc3339: &'a str,
+    /// 空なら `facets` フィールドを省略する。
+    pub facets: Vec<BskyFacet>,
+    /// 画像・引用・URL カード。
+    pub embed: Option<BskyEmbed>,
+    /// リプライ投稿の返信先。
+    pub reply: Option<BskyPostReply>,
+    /// Some なら `langs` フィールドを1件の配列として含める（`None`なら省略、
+    /// Misskey互換API等、言語情報を送らないクライアントとの後方互換のため）。
+    pub lang: Option<String>,
+    pub seiran_post: Option<crate::seiran_post::SeiranPost>,
+    /// 投稿者自身が付けるラベル（`com.atproto.label.defs#selfLabels` の `val`、例: `sexual`）。
+    /// 空なら `labels` フィールドを省略する。
+    pub self_labels: Vec<String>,
+}
+
 /// `app.bsky.feed.post` レコードの DAG-CBOR バイト列と CID を生成する。
-///
-/// `facets` が空の場合は `facets` フィールドを省略する。
-/// `embed` が Some の場合は embed フィールドを含める（画像・引用・URL カード）。
-/// `reply` が Some の場合は `reply` フィールドを含める（リプライ投稿）。
-/// `lang` が Some の場合は `langs` フィールドを1件の配列として含める（`None`なら省略、
-/// Misskey互換API等、言語情報を送らないクライアントとの後方互換のため）。
-pub fn encode_bsky_feed_post(
-    text: &str,
-    created_at_rfc3339: &str,
-    facets: Vec<BskyFacet>,
-    embed: Option<BskyEmbed>,
-    reply: Option<BskyPostReply>,
-    lang: Option<String>,
-    seiran_post: Option<crate::seiran_post::SeiranPost>,
-) -> Result<(Vec<u8>, Cid), RepoError> {
+pub fn encode_bsky_feed_post(record: FeedPostRecord<'_>) -> Result<(Vec<u8>, Cid), RepoError> {
+    let FeedPostRecord {
+        text,
+        created_at_rfc3339,
+        facets,
+        embed,
+        reply,
+        lang,
+        seiran_post,
+        self_labels,
+    } = record;
     let embed = match embed {
         None => None,
         Some(BskyEmbed::Images(images)) => {
@@ -893,6 +945,13 @@ pub fn encode_bsky_feed_post(
         langs: lang.into_iter().collect(),
         reply,
         facets,
+        labels: (!self_labels.is_empty()).then(|| BskySelfLabels {
+            kind: "com.atproto.label.defs#selfLabels".to_string(),
+            values: self_labels
+                .into_iter()
+                .map(|val| BskySelfLabel { val })
+                .collect(),
+        }),
         created_at: created_at_rfc3339.to_string(),
         seiran_post,
     };
@@ -1409,41 +1468,104 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_deterministic() {
-        let (cbor1, cid1) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            None,
-        )
+        let (cbor1, cid1) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
-        let (cbor2, cid2) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            None,
-        )
+        let (cbor2, cid2) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         assert_eq!(cbor1, cbor2);
         assert_eq!(cid1, cid2);
     }
 
     #[test]
+    fn test_record_has_media_self_label() {
+        let labeled = |val: &str| {
+            serde_json::json!({
+                "labels": {
+                    "$type": "com.atproto.label.defs#selfLabels",
+                    "values": [{"val": val}],
+                }
+            })
+        };
+        assert!(record_has_media_self_label(&labeled("sexual")));
+        assert!(record_has_media_self_label(&labeled("graphic-media")));
+        assert!(!record_has_media_self_label(&labeled(
+            "!no-unauthenticated"
+        )));
+        assert!(!record_has_media_self_label(
+            &serde_json::json!({"text": "hi"})
+        ));
+    }
+
+    #[test]
+    fn test_encode_bsky_feed_post_self_labels() {
+        let record = |self_labels: Vec<String>| {
+            let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+                text: "hello",
+                created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+                facets: vec![],
+                embed: None,
+                reply: None,
+                lang: None,
+                seiran_post: None,
+                self_labels,
+            })
+            .unwrap();
+            let Ipld::Map(record) = serde_ipld_dagcbor::from_slice::<Ipld>(&cbor).unwrap() else {
+                panic!("record must be map")
+            };
+            record
+        };
+        assert!(!record(vec![]).contains_key("labels"));
+
+        let labeled = record(vec!["sexual".to_string()]);
+        let Some(Ipld::Map(labels)) = labeled.get("labels") else {
+            panic!("labels must be map")
+        };
+        assert_eq!(
+            labels.get("$type"),
+            Some(&Ipld::String(
+                "com.atproto.label.defs#selfLabels".to_string()
+            ))
+        );
+        let Some(Ipld::List(values)) = labels.get("values") else {
+            panic!("values must be list")
+        };
+        let Some(Ipld::Map(first)) = values.first() else {
+            panic!("value must be map")
+        };
+        assert_eq!(first.get("val"), Some(&Ipld::String("sexual".to_string())));
+    }
+
+    #[test]
     fn test_encode_bsky_feed_post_lang_none_omits_langs_field() {
-        let (cbor, _) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            None,
-        )
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1454,15 +1576,16 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_lang_some_sets_single_element_langs() {
-        let (cbor, _) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            Some("ja".to_string()),
-            None,
-        )
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: Some("ja".to_string()),
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1488,15 +1611,16 @@ mod tests {
             counterpart_post_id: Some("https://seiran.example/notes/42".to_string()),
             counterpart_author_id: "https://seiran.example/users/alice".to_string(),
         };
-        let (cbor, _) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            Some(seiran_post),
-        )
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: Some(seiran_post),
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1519,15 +1643,16 @@ mod tests {
 
     #[test]
     fn test_encode_bsky_feed_post_omits_seiran_post_when_none() {
-        let (cbor, _) = encode_bsky_feed_post(
-            "hello",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            None,
-        )
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hello",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1546,20 +1671,21 @@ mod tests {
             height: 100,
             alt: String::new(),
         };
-        let (cbor, _) = encode_bsky_feed_post(
-            "🔁",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            Some(BskyEmbed::External {
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "🔁",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: Some(BskyEmbed::External {
                 url: "https://fedi.example/@alice/1".to_string(),
                 title: "Alice (@alice@fedi.example)".to_string(),
                 description: "元投稿本文".to_string(),
                 thumb: Some(thumb),
             }),
-            None,
-            None,
-            None,
-        )
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1592,19 +1718,20 @@ mod tests {
             height: 600,
             alt: String::new(),
         };
-        let (cbor, _) = encode_bsky_feed_post(
-            "引用+画像",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            Some(BskyEmbed::RecordWithMedia {
+        let (cbor, _) = encode_bsky_feed_post(FeedPostRecord {
+            text: "引用+画像",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: Some(BskyEmbed::RecordWithMedia {
                 uri: "at://did:plc:abc/app.bsky.feed.post/xyz".to_string(),
                 cid: "bafyreidummycid".to_string(),
                 media: Box::new(BskyEmbed::Images(vec![image])),
             }),
-            None,
-            None,
-            None,
-        )
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let value: Ipld = serde_ipld_dagcbor::from_slice(&cbor).unwrap();
         let Ipld::Map(record) = value else {
@@ -1645,11 +1772,11 @@ mod tests {
 
     #[test]
     fn test_record_with_media_rejects_non_media_inner_embed() {
-        let result = encode_bsky_feed_post(
-            "不正な組み合わせ",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            Some(BskyEmbed::RecordWithMedia {
+        let result = encode_bsky_feed_post(FeedPostRecord {
+            text: "不正な組み合わせ",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: Some(BskyEmbed::RecordWithMedia {
                 uri: "at://did:plc:abc/app.bsky.feed.post/xyz".to_string(),
                 cid: "bafyreidummycid".to_string(),
                 media: Box::new(BskyEmbed::Record {
@@ -1657,10 +1784,11 @@ mod tests {
                     cid: "bafyreiothercid".to_string(),
                 }),
             }),
-            None,
-            None,
-            None,
-        );
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        });
         assert!(result.is_err());
     }
 
@@ -1673,15 +1801,16 @@ mod tests {
 
     #[test]
     fn test_build_mst_single_entry() {
-        let (_, cid) = encode_bsky_feed_post(
-            "hi",
-            "2024-01-01T00:00:00.000Z",
-            vec![],
-            None,
-            None,
-            None,
-            None,
-        )
+        let (_, cid) = encode_bsky_feed_post(FeedPostRecord {
+            text: "hi",
+            created_at_rfc3339: "2024-01-01T00:00:00.000Z",
+            facets: vec![],
+            embed: None,
+            reply: None,
+            lang: None,
+            seiran_post: None,
+            self_labels: vec![],
+        })
         .unwrap();
         let entries = vec![("app.bsky.feed.post/test123".to_string(), cid)];
         let result = build_mst(&entries);

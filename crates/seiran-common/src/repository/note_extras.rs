@@ -362,6 +362,8 @@ pub struct LocalAttachmentRow {
     /// 動画・音声は持たないことがある。
     pub width: Option<i32>,
     pub height: Option<i32>,
+    /// 投稿者が付けた NSFW 指定。
+    pub is_sensitive: bool,
 }
 
 /// 投稿ごとのローカル添付を `position` 順に返す。
@@ -375,7 +377,7 @@ pub async fn local_attachments_for_posts(
     sqlx::query_as(
         "SELECT pa.post_id,
                 rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
-                mf.mime_type, mf.width, mf.height
+                mf.mime_type, mf.width, mf.height, pa.is_sensitive
          FROM post_attachments pa
          JOIN media_files mf ON mf.id = pa.media_file_id
          JOIN storage_providers sp ON sp.id = mf.storage_provider_id
@@ -384,6 +386,20 @@ pub async fn local_attachments_for_posts(
     )
     .bind(post_ids)
     .fetch_all(pool)
+    .await
+}
+
+/// 投稿に NSFW 指定の添付が1つでもあるか。投稿単位でしか指定できない配送先（Bluesky の
+/// self-label）へ、添付ごとの指定を投稿全体の指定として伝えるのに使う。
+pub async fn post_has_sensitive_attachment(
+    pool: &PgPool,
+    post_id: i64,
+) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM post_attachments WHERE post_id = $1 AND is_sensitive)",
+    )
+    .bind(post_id)
+    .fetch_one(pool)
     .await
 }
 

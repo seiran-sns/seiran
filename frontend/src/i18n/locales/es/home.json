@@ -151,6 +151,7 @@
     "visibilityPrivate": "Privado",
     "attachmentAlt": "Imagen adjunta",
     "removeAttachmentTitle": "Quitar archivo adjunto",
+    "nsfwTooltip": "Activa NSFW para contenido como ilustraciones sexuales. La imagen se muestra difuminada al principio y quien la vea podrá mostrarla pulsando el botón para quitar el difuminado",
     "overLimitReply": "Esto excede el límite de caracteres de Bluesky.",
     "overLimitDefault": "Esto excede el límite de caracteres de Bluesky. Desactiva Bsky para publicar de todos modos.",
     "remainingCount": "{{count}} izquierda",

@@ -280,6 +280,48 @@ pub struct EmbedCandidateRow {
     pub bsky_video_size: Option<i64>,
 }
 
+/// 利用者がドライブのファイルに付けた NSFW 指定（Misskey 互換 API の `isSensitive`）を
+/// 付ける・外す。投稿の作成で添付ごとの指定が送られなかったときにだけ読まれる預け先で、
+/// 投稿済みの添付には影響しない。
+pub async fn set_drive_sensitive(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    media_file_id: i64,
+    is_sensitive: bool,
+) -> Result<(), sqlx::Error> {
+    let sql = if is_sensitive {
+        "INSERT INTO drive_file_sensitivity (actor_id, media_file_id) VALUES ($1, $2)
+         ON CONFLICT DO NOTHING"
+    } else {
+        "DELETE FROM drive_file_sensitivity WHERE actor_id = $1 AND media_file_id = $2"
+    };
+    sqlx::query(sql)
+        .bind(actor_id)
+        .bind(media_file_id)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// `ids` のうち、利用者がドライブで NSFW 指定しているもの。
+pub async fn drive_sensitive_ids(
+    pool: &sqlx::PgPool,
+    actor_id: i64,
+    ids: &[i64],
+) -> Result<Vec<i64>, sqlx::Error> {
+    if ids.is_empty() {
+        return Ok(Vec::new());
+    }
+    sqlx::query_scalar(
+        "SELECT media_file_id FROM drive_file_sensitivity
+         WHERE actor_id = $1 AND media_file_id = ANY($2)",
+    )
+    .bind(actor_id)
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
 /// `ids` の順序を保って返す。
 pub async fn embed_candidates(
     pool: &sqlx::PgPool,

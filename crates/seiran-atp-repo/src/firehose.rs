@@ -403,6 +403,8 @@ struct ParsedPostRecord {
     reply_parent_uri: Option<String>,
     /// 添付（画像・動画）。CDN URL は DID + blob CID から決定的に組み立てる。
     attachments: Vec<ParsedAttachment>,
+    /// 閲覧注意系の self-label（`record.labels`）があり、添付を NSFW 指定で保存するか。
+    attachments_sensitive: bool,
     /// 引用先の at:// URI（#116）。`app.bsky.embed.record`/`recordWithMedia` のみ対象。
     quote_uri: Option<String>,
     /// URLカード（YouTube/Spotify/x.com/一般）。GIFピッカー由来の`external`は既に
@@ -440,6 +442,7 @@ fn parse_post_record(did: &str, record: &JsonValue, cid: String) -> Option<Parse
         attachments: embed
             .map(|embed| parse_bsky_embed_attachments(embed, did))
             .unwrap_or_default(),
+        attachments_sensitive: seiran_common::atp::record_has_media_self_label(record),
         quote_uri: embed.and_then(parse_bsky_embed_quote_uri),
         link_card: embed.and_then(|embed| parse_bsky_embed_link_card(embed, did)),
     })
@@ -600,6 +603,7 @@ async fn save_new_bsky_post(
             reply_to_post_id,
             quote_of_post_id,
             attachments: parsed.attachments,
+            attachments_sensitive: parsed.attachments_sensitive,
             link_card: parsed.link_card,
             claimed_ap_object_id: sp.as_ref().and_then(|sp| sp.counterpart_post_id.clone()),
             content_warning: sp.as_ref().and_then(|sp| sp.content_warning.clone()),
@@ -725,6 +729,8 @@ struct IncomingBskyPost<'a> {
     reply_to_post_id: Option<i64>,
     quote_of_post_id: Option<i64>,
     attachments: Vec<ParsedAttachment>,
+    /// 添付を NSFW 指定で保存するか（`ParsedPostRecord::attachments_sensitive`）。
+    attachments_sensitive: bool,
     link_card: Option<ParsedLinkCard>,
     /// `seiranPost.counterpartPostId`（AP側の ap_object_id の自己申告、#237）。
     claimed_ap_object_id: Option<String>,
@@ -939,7 +945,7 @@ async fn store_bsky_post_extras(
                         url: &att.url,
                         mime_type: Some(&att.mime_type),
                         thumbnail_url: att.thumbnail_url.as_deref(),
-                        is_sensitive: false,
+                        is_sensitive: post.attachments_sensitive,
                         is_gif: att.is_gif,
                         position: position as i16,
                     },
@@ -1705,5 +1711,34 @@ mod facet_tests {
         assert_eq!(v["type"], "options_update");
         assert_eq!(v["payload"]["wantedDids"][0], "did:plc:a");
         assert_eq!(v["payload"]["wantedCollections"][2], "app.bsky.feed.repost");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn record(labels: Option<JsonValue>) -> JsonValue {
+        let mut r = serde_json::json!({
+            "text": "hi",
+            "createdAt": "2026-11-21T00:00:00.000Z",
+        });
+        if let Some(labels) = labels {
+            r["labels"] = labels;
+        }
+        r
+    }
+
+    #[test]
+    fn media_self_label_marks_attachments_sensitive() {
+        let labeled = record(Some(serde_json::json!({
+            "$type": "com.atproto.label.defs#selfLabels",
+            "values": [{"val": "porn"}],
+        })));
+        let parsed = parse_post_record("did:plc:x", &labeled, "cid".into()).unwrap();
+        assert!(parsed.attachments_sensitive);
+
+        let plain = parse_post_record("did:plc:x", &record(None), "cid".into()).unwrap();
+        assert!(!plain.attachments_sensitive);
     }
 }

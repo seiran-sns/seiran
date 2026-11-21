@@ -45,6 +45,9 @@ pub struct BskyPost {
     /// 実データで元投稿の`ap_object_id`と完全一致することを確認済み。無ければ`None`
     /// （通常のATPネイティブ投稿）。
     pub bridged_original_url: Option<String>,
+    /// 投稿者が閲覧注意系の self-label（`record.labels`）を付けているか。付いていれば
+    /// 添付すべてを NSFW 指定で保存する（`crate::atp::record_has_media_self_label`）。
+    pub is_sensitive: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -236,6 +239,7 @@ pub async fn fetch_atp_history(
                 embed,
                 facets,
                 bridged_original_url,
+                is_sensitive: crate::atp::record_has_media_self_label(record),
             });
 
             if posts.len() >= max_posts {
@@ -314,6 +318,7 @@ pub async fn fetch_single_bsky_post(
         embed,
         facets,
         bridged_original_url,
+        is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
     }))
 }
 
@@ -637,7 +642,7 @@ pub async fn upsert_bsky_post(
             for (position, att) in attachments.iter().enumerate() {
                 if let Err(e) = sqlx::query(
                     "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
-                     VALUES ($1, NULL, $2, $3, $4, false, $5, $6)
+                     VALUES ($1, NULL, $2, $3, $4, $7, $5, $6)
                      ON CONFLICT (post_id, position) DO NOTHING",
                 )
                 .bind(final_id)
@@ -646,6 +651,7 @@ pub async fn upsert_bsky_post(
                 .bind(att.thumbnail_url.as_deref())
                 .bind(att.is_gif)
                 .bind(position as i16)
+                .bind(post.is_sensitive)
                 .execute(pool)
                 .await
                 {
@@ -898,6 +904,7 @@ pub async fn search_appview_posts(
                         bridged_original_url: p["record"]["bridgyOriginalUrl"]
                             .as_str()
                             .map(str::to_string),
+                        is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
                     })
                 })
                 .collect()

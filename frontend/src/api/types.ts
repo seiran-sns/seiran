@@ -849,6 +849,8 @@ export interface DriveFile {
   /** アニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。Bsky embed選択（#227）で
    * 「静止画」「アニメGIF」のラジオボタン項目を分けるために使う。 */
   isAnimatedImage: boolean;
+  /** 投稿欄で付けた NSFW 指定（投稿時に`sensitive_attachment_ids`として送る）。 */
+  isSensitive?: boolean;
 }
 
 /**

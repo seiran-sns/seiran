@@ -38,16 +38,7 @@ pub async fn fetch_attachment_documents(
         .await
         .unwrap_or_default();
     for r in rows {
-        let mut doc = serde_json::json!({
-            "type": "Document",
-            "mediaType": r.mime_type,
-            "url": r.url,
-        });
-        // 動画・音声は寸法を持たないことがある。
-        if let (Some(w), Some(h)) = (r.width, r.height) {
-            doc["width"] = w.into();
-            doc["height"] = h.into();
-        }
+        let doc = seiran_common::ap::local_attachment_document(&r);
         att_map.entry(r.post_id).or_default().push(doc);
     }
     att_map
@@ -78,6 +69,7 @@ pub fn public_note(
         "url": note_id
     });
     if !attachments.is_empty() {
+        seiran_common::ap::apply_note_sensitive(&mut note_obj, &attachments);
         note_obj["attachment"] = serde_json::Value::Array(attachments);
     }
     note_obj

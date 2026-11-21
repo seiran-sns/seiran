@@ -10,16 +10,30 @@ use validation::{
     validate_poll_choices, validate_text_length,
 };
 
-/// 検証済みの添付ファイル ID 群を投稿に紐付ける。
+/// 検証済みの添付ファイル ID 群を投稿に紐付ける。NSFW 指定は `sensitive_ids` に従い、
+/// 省略時は投稿者がドライブで付けた指定を写す（[`CreateNoteRequest::sensitive_attachment_ids`]）。
 pub(crate) async fn attach_media_files(
     state: &AppState,
+    actor_id: i64,
     post_id: i64,
     attachment_ids: &[i64],
+    sensitive_ids: Option<&[String]>,
 ) -> Result<(), ApiError> {
+    let sensitive: Vec<i64> = match sensitive_ids {
+        Some(ids) => ids.iter().filter_map(|s| s.parse().ok()).collect(),
+        None => seiran_common::repository::media_file::drive_sensitive_ids(
+            &state.db,
+            actor_id,
+            attachment_ids,
+        )
+        .await
+        .map_err(|e| ApiError::Internal(format!("NSFW 指定の取得失敗: {}", e)))?,
+    };
     for (position, media_file_id) in attachment_ids.iter().enumerate() {
+        let is_sensitive = sensitive.contains(media_file_id);
         state
             .posts
-            .attach_media(post_id, *media_file_id, position as i16)
+            .attach_media(post_id, *media_file_id, position as i16, is_sensitive)
             .await
             .map_err(|e| ApiError::Internal(format!("添付 INSERT 失敗: {}", e)))?;
     }
@@ -814,7 +828,15 @@ async fn persist_regular_post(
         return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
     }
 
-    if let Err(e) = attach_media_files(state, post_id, &attachment_ids_i64).await {
+    if let Err(e) = attach_media_files(
+        state,
+        actor_id,
+        post_id,
+        &attachment_ids_i64,
+        req.sensitive_attachment_ids.as_deref(),
+    )
+    .await
+    {
         return e.into_response();
     }
 
