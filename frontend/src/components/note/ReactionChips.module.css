@@ -25,16 +25,18 @@
   pointer-events: none;
 }
 
-/* 「全部」「たたむ」。チップと同じ高さの行に収まるよう、チップの縦幅に合わせる。 */
+/* 「全部」「たたむ」。本文の「全部表示」・投稿ボタンと同じ青地・控えめな角丸。チップと同じ高さの
+   行に収まるよう、縦の寸法（行の高さ・上下の余白・枠の太さ）はチップに合わせる。 */
 .toggle {
   display: inline-flex;
   align-items: center;
-  padding: 2px 10px;
-  border-radius: 20px;
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--accent);
-  font-size: 0.8rem;
+  padding: 2px 12px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.85rem;
   line-height: 1.52rem;
   font-family: inherit;
   white-space: nowrap;
@@ -42,8 +44,7 @@
 }
 
 .toggle:hover {
-  background: var(--accent-deep);
-  border-color: var(--accent);
+  background: var(--accent-hover);
 }
 
 .chip {
