@@ -105,6 +105,7 @@ pub fn router(state: Arc<AppState>) -> Router {
         .route("/nodeinfo/2.1", get(nodeinfo_handler))
         .route("/inbox", post(inbox_handler))
         .route("/users/:username", get(actor_handler))
+        .route("/users/:username/inbox", post(inbox_handler))
         .route("/users/:username/outbox", get(outbox_handler))
         .route(
             "/users/:username/collections/featured",

@@ -60,7 +60,7 @@ AP には embed 概念が無いため、`save_ap_note_core` が本文（Markdown
   - `deliver/` — ローカル投稿の AP 配送。`build_*`（アクティビティJSONを組み立てる純関数）と `deliver_*`（DB取得＋署名POST）
   - `outbox.rs` / `webfinger.rs` — 過去ログ同期・WebFinger 解決
 - `seiran-federation-inbox::handlers`: HTTP層
-  - `inbox.rs` — 署名検証だけを同期で行い、実処理は `Job::InboundActivityProcess` に委譲する（受信レイテンシを抑えるため）
+  - `inbox.rs` — 署名検証だけを同期で行い、実処理は `Job::InboundActivityProcess` に委譲する（受信レイテンシを抑えるため）。受け口は `POST /inbox`（アクターが宣言する全ユーザー共通の inbox）と `POST /users/:username/inbox` の2つで、処理は同じ。後者はユーザーごとの inbox（`{アクター id}/inbox`）を前提に配送するサーバーと連合するためのもので、宛先ユーザーはパスではなくアクティビティの中身で決まる。署名の `(request-target)` は実際に POST されたパスで検証する
   - `actor.rs` / `outbox.rs` / `webfinger.rs` / `nodeinfo.rs` / `featured.rs` / `lists.rs` — 公開エンドポイント
 
 ### Inbox で処理する Activity 種別

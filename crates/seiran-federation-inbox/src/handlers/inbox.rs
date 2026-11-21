@@ -1,5 +1,5 @@
 use axum::{
-    extract::State,
+    extract::{OriginalUri, State},
     http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
@@ -12,12 +12,17 @@ use std::sync::Arc;
 
 use crate::AppState;
 
-/// AP Inbox エンドポイント。
+/// AP Inbox エンドポイント（`POST /inbox` と `POST /users/:username/inbox`）。
+///
+/// アクターが宣言する inbox は全ユーザー共通の `/inbox` だが、ユーザーごとの inbox
+/// （`{アクター id}/inbox`）を前提に配送するサーバーとも連合できるよう、そのパスでも同じ処理で
+/// 受ける（宛先ユーザーはアクティビティの中身から決まるので、パスの username は使わない）。
 ///
 /// 署名検証（低レイテンシ必須）だけをここで同期的に行い、アクティビティの実処理は
 /// すべて `Job::InboundActivityProcess` としてジョブキューへ委譲する
 /// （実処理は `seiran_common::jobs::inbound_activity_process` → Worker が担う）。
 pub async fn inbox_handler(
+    OriginalUri(uri): OriginalUri,
     headers: HeaderMap,
     State(state): State<Arc<AppState>>,
     body: axum::body::Bytes,
@@ -83,7 +88,8 @@ pub async fn inbox_handler(
         .ap_client
         .verify_signature(
             "POST",
-            "/inbox",
+            // 署名の (request-target) は送り手が実際に POST したパス
+            uri.path(),
             &header_map,
             &signature,
             signing_key.as_ref().map(|(k, p)| (k.as_str(), p.as_str())),
