@@ -145,7 +145,7 @@
     "replyPlaceholder": "Écrivez une réponse",
     "quotePlaceholder": "Ajouter un commentaire",
     "attachTitle": "Joindre une image, une vidéo ou un fichier audio",
-    "forcedPrivateNote": "🔒️ Cette réponse sera également privée car elle répond à un message privé",
+    "forcedPrivateNote": "Cette réponse sera également privée car elle répond à un message privé",
     "visibilityPublic": "Publique",
     "visibilityUnlisted": "Non répertorié",
     "visibilityPrivate": "Privé",
