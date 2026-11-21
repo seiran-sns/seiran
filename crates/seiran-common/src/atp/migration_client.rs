@@ -45,6 +45,33 @@ impl MigrationClientError {
     pub fn is_expired_token(&self) -> bool {
         matches!(self, Self::Xrpc { code, .. } if code == "ExpiredToken")
     }
+
+    /// PDS Aがトークンの権限不足で拒んだか（アプリパスワードのセッションでアカウント管理の
+    /// 操作を呼んだ等）。`refreshSession` で取り直しても権限は変わらないので、本来の
+    /// パスワードでログインし直すしかない。
+    pub fn is_insufficient_scope(&self) -> bool {
+        matches!(self, Self::Xrpc { code, message, .. }
+            if code == "InvalidToken" && message.contains("scope"))
+    }
+}
+
+/// accessJwt の `scope` クレームがアプリパスワードのものか（`com.atproto.appPass` と
+/// `com.atproto.appPassPrivileged`）。アプリパスワードのセッションでは PLC 操作の署名要求や
+/// アカウントの無効化ができないので、転入では本来のパスワードでログインしてもらう。
+/// 署名は検証しない（PDS A が発行して直接返してきたトークンを、案内のために読むだけで、
+/// 権限の判定自体は PDS A がする）。`scope` の無い・読めないトークンはアプリパスワード扱いしない。
+pub fn is_app_password_token(access_jwt: &str) -> bool {
+    use base64::Engine;
+    let Some(payload) = access_jwt.split('.').nth(1) else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
+        return false;
+    };
+    serde_json::from_slice::<serde_json::Value>(&bytes)
+        .ok()
+        .and_then(|v| v.get("scope")?.as_str().map(str::to_owned))
+        .is_some_and(|scope| scope.starts_with("com.atproto.appPass"))
 }
 
 fn xrpc_error_from_body(status: u16, body: &serde_json::Value) -> MigrationClientError {
@@ -458,6 +485,45 @@ pub async fn deactivate_account(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn jwt_with_payload(payload: serde_json::Value) -> String {
+        use base64::Engine;
+        let enc = base64::engine::general_purpose::URL_SAFE_NO_PAD;
+        format!(
+            "{}.{}.sig",
+            enc.encode(br#"{"alg":"ES256K","typ":"at+jwt"}"#),
+            enc.encode(payload.to_string())
+        )
+    }
+
+    #[test]
+    fn app_password_token_is_detected_by_scope() {
+        let app = jwt_with_payload(serde_json::json!({"scope": "com.atproto.appPass"}));
+        assert!(is_app_password_token(&app));
+        let privileged =
+            jwt_with_payload(serde_json::json!({"scope": "com.atproto.appPassPrivileged"}));
+        assert!(is_app_password_token(&privileged));
+        let full = jwt_with_payload(serde_json::json!({"scope": "com.atproto.access"}));
+        assert!(!is_app_password_token(&full));
+        let no_scope = jwt_with_payload(serde_json::json!({"sub": "did:plc:x"}));
+        assert!(!is_app_password_token(&no_scope));
+        assert!(!is_app_password_token("not-a-jwt"));
+    }
+
+    #[test]
+    fn insufficient_scope_is_detected() {
+        let e = xrpc_error_from_body(
+            400,
+            &serde_json::json!({"error": "InvalidToken", "message": "Bad token scope"}),
+        );
+        assert!(e.is_insufficient_scope());
+        assert!(!e.is_expired_token());
+        let other = xrpc_error_from_body(
+            400,
+            &serde_json::json!({"error": "InvalidToken", "message": "Token could not be verified"}),
+        );
+        assert!(!other.is_insufficient_scope());
+    }
 
     #[test]
     fn expired_token_is_detected_only_by_its_code() {

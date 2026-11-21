@@ -681,3 +681,26 @@ pub async fn replace_source_tokens(
     .fetch_optional(pool)
     .await
 }
+
+/// 移行元にログインし直して得たセッションを保存し、PLC 操作の署名要求からやり直せるように
+/// `awaiting_source_password` → `requesting_plc_signature` へ進める。状態が変わっていたら
+/// （打ち切られた等）何もせず偽を返す。
+pub async fn resume_with_new_source_session(
+    pool: &PgPool,
+    id: i64,
+    access_jwt: &str,
+    refresh_jwt: &str,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests
+         SET source_access_jwt = $2, source_refresh_jwt = $3,
+             status = 'requesting_plc_signature', updated_at = NOW()
+         WHERE id = $1 AND status = 'awaiting_source_password'",
+    )
+    .bind(id)
+    .bind(access_jwt)
+    .bind(refresh_jwt)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}

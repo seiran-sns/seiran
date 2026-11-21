@@ -167,6 +167,7 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
             required
             disabled={state.needsAuthFactorToken}
           />
+          <small style={{ color: "#a0aec0" }}>{t("auth:migrateRegister.sourcePasswordHint")}</small>
         </label>
         {state.needsAuthFactorToken && (
           <label className={styles.label}>
@@ -238,6 +239,8 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
   const [statusData, setStatusData] = useState<MigrationStatusResponse | null>(null);
   const [error, setError] = useState("");
   const [inputValue, setInputValue] = useState("");
+  const [needsAuthFactorToken, setNeedsAuthFactorToken] = useState(false);
+  const [authFactorToken, setAuthFactorToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -326,6 +329,33 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     navigate("/register", { replace: true });
   }
 
+  async function handleSourcePasswordSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.migration.submitSourcePassword(
+        stored.id,
+        stored.token,
+        inputValue,
+        needsAuthFactorToken ? authFactorToken : undefined,
+      );
+      setInputValue("");
+      setAuthFactorToken("");
+      setNeedsAuthFactorToken(false);
+      await fetchStatus();
+    } catch (err) {
+      if (err instanceof ApiError && err.code === "AUTH_FACTOR_TOKEN_REQUIRED") {
+        setNeedsAuthFactorToken(true);
+        setError(t("auth:migrateRegister.authFactorTokenRequired"));
+      } else {
+        setError(getErrorMessage(err));
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleInputSubmit(e: FormEvent) {
     e.preventDefault();
     if (statusData?.needs_input !== "plc_token") return;
@@ -372,6 +402,42 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
               autoFocus
             />
           </label>
+          <button type="submit" className={styles.button} disabled={submitting}>
+            {t("auth:migrationStatus.submitInput")}
+          </button>
+        </form>
+      )}
+
+      {statusData?.needs_input === "source_password" && (
+        <form onSubmit={handleSourcePasswordSubmit} className={styles.form}>
+          <p style={{ color: "#a0aec0", fontSize: "0.9rem" }}>
+            {t("auth:migrationStatus.sourcePasswordDescription")}
+          </p>
+          <label className={styles.label}>
+            {t("auth:migrateRegister.sourcePasswordLabel")}
+            <input
+              type="password"
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              className={styles.input}
+              autoComplete="current-password"
+              required
+              autoFocus
+            />
+          </label>
+          {needsAuthFactorToken && (
+            <label className={styles.label}>
+              {t("auth:migrateRegister.authFactorTokenLabel")}
+              <input
+                type="text"
+                value={authFactorToken}
+                onChange={(e) => setAuthFactorToken(e.target.value)}
+                className={styles.input}
+                autoComplete="one-time-code"
+                required
+              />
+            </label>
+          )}
           <button type="submit" className={styles.button} disabled={submitting}>
             {t("auth:migrationStatus.submitInput")}
           </button>

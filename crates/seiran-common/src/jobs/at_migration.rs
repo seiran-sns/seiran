@@ -15,7 +15,9 @@ use std::sync::Arc;
 use sqlx::PgPool;
 
 use crate::atp::did_resolve::resolve_stored_endpoint;
-use crate::atp::migration_client::{fetch_repo_car, list_blobs, request_plc_operation_signature};
+use crate::atp::migration_client::{
+    fetch_repo_car, is_app_password_token, list_blobs, request_plc_operation_signature,
+};
 use crate::atp::migration_session::{call_with_refresh, source_session};
 use crate::atp::mst_walk::decode_repo_records;
 use crate::queue::worker::JobContext;
@@ -229,6 +231,11 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
     }
 
     let mut session = source_session(&req);
+    // アプリパスワードのセッションでは署名要求が権限不足で拒まれ、何度やり直しても通らない。
+    // 呼ぶ前に分かるならそこで、分からなければ拒まれた時点で、本来のパスワードの入れ直し待ちにする。
+    if is_app_password_token(&session.access_jwt) {
+        return await_source_password(pool, request_id).await;
+    }
 
     let resolved = resolve_stored_endpoint(&req.source_pds_endpoint)
         .await
@@ -238,16 +245,22 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
             ))
         })?;
 
-    call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+    let result = call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
         let resolved = &resolved;
         async move { request_plc_operation_signature(resolved, &s).await }
     })
-    .await
-    .map_err(|e| {
-        JobError::Transient(format!(
-            "[MigrationRequestPlcSignature] requestPlcOperationSignature失敗: {e}"
-        ))
-    })?;
+    .await;
+    match result {
+        Ok(()) => {}
+        Err(e) if e.is_insufficient_scope() => {
+            return await_source_password(pool, request_id).await;
+        }
+        Err(e) => {
+            return Err(JobError::Transient(format!(
+                "[MigrationRequestPlcSignature] requestPlcOperationSignature失敗: {e}"
+            )));
+        }
+    }
 
     repo.set_status(request_id, "awaiting_plc_token", chrono::Utc::now())
         .await
@@ -262,6 +275,31 @@ async fn process_request_plc_signature(request_id: i64, pool: &PgPool) -> Result
         request_id
     );
 
+    Ok(())
+}
+
+/// 移行元のセッションがアプリパスワードのもので PLC 操作に署名させられないので、
+/// 本来のパスワードの入れ直し待ち（`awaiting_source_password`）にする。入力されたら
+/// `submit-source-password` がセッションを取り直し、署名要求からやり直す。
+async fn await_source_password(pool: &PgPool, request_id: i64) -> Result<(), JobError> {
+    let moved = crate::repository::at_migration::transition_status(
+        pool,
+        request_id,
+        "requesting_plc_signature",
+        "awaiting_source_password",
+    )
+    .await
+    .map_err(|e| {
+        JobError::Transient(format!(
+            "[MigrationRequestPlcSignature] ステータス更新失敗: {e}"
+        ))
+    })?;
+    if moved {
+        tracing::info!(
+            "[MigrationRequestPlcSignature] request_id={} はアプリパスワードのセッションのため、移行元のパスワードの入れ直しを待ちます",
+            request_id
+        );
+    }
     Ok(())
 }
 

@@ -72,6 +72,7 @@
   "SHORTCODE_TAKEN": "该简码已被使用",
   "SMTP_NOT_CONFIGURED": "未配置电子邮件发送。请联系管理员",
   "SMTP_TEST_RECIPIENT_REQUIRED": "请输入测试邮件的收件地址",
+  "SOURCE_APP_PASSWORD": "无法使用应用专用密码迁移。请输入登录 Bluesky 时使用的密码",
   "SOURCE_AUTH_FAILED": "登录源账号失败，请检查句柄和密码",
   "SOURCE_EMAIL_REQUIRED": "无法从源账号获取邮箱地址，请输入您自己的邮箱地址",
   "SOURCE_HANDLE_UNRESOLVABLE": "无法解析源句柄",

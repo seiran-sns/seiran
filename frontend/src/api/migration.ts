@@ -32,7 +32,7 @@ export interface MigrationStatusResponse {
   request_id: string;
   status: string;
   last_error?: string | null;
-  /** `"plc_token"` | null。フロントが表示すべき入力欄の種類。 */
+  /** `"plc_token"` | `"source_password"` | null。フロントが表示すべき入力欄の種類。 */
   needs_input?: string | null;
   retryable: boolean;
   can_abandon: boolean;
@@ -91,6 +91,15 @@ export const migration = {
   },
   status(id: string, requestToken: string) {
     return migrationRequest<MigrationStatusResponse>("GET", `/migration/${id}/status`, requestToken);
+  },
+  /** 移行元にアプリパスワードでログインしていた転入（`awaiting_source_password`）を、本来の
+   * パスワードでログインし直して続きから進める。移行元がメール2FAを要求したら
+   * `AUTH_FACTOR_TOKEN_REQUIRED` で失敗するので、コードを添えて再送する。 */
+  submitSourcePassword(id: string, requestToken: string, password: string, authFactorToken?: string) {
+    return migrationRequest<SimpleStatus>("POST", `/migration/${id}/submit-source-password`, requestToken, {
+      password,
+      auth_factor_token: authFactorToken,
+    });
   },
   retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);

@@ -72,6 +72,7 @@
   "SHORTCODE_TAKEN": "Dieser Shortcode wird bereits verwendet",
   "SMTP_NOT_CONFIGURED": "Der E-Mail-Versand ist nicht konfiguriert. Bitte wenden Sie sich an einen Administrator",
   "SMTP_TEST_RECIPIENT_REQUIRED": "Geben Sie einen Empfänger für die Test-E-Mail ein",
+  "SOURCE_APP_PASSWORD": "Mit einem App-Passwort ist der Umzug nicht möglich. Bitte geben Sie das Passwort ein, mit dem Sie sich bei Bluesky anmelden",
   "SOURCE_AUTH_FAILED": "Die Anmeldung beim Quellkonto ist fehlgeschlagen. Bitte überprüfen Sie Handle und Passwort",
   "SOURCE_EMAIL_REQUIRED": "Es konnte keine E-Mail-Adresse vom Quellkonto abgerufen werden. Bitte geben Sie Ihre eigene E-Mail-Adresse ein",
   "SOURCE_HANDLE_UNRESOLVABLE": "Das Quell-Handle konnte nicht aufgelöst werden",

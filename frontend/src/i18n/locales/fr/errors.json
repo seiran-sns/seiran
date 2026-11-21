@@ -72,6 +72,7 @@
   "SHORTCODE_TAKEN": "Ce shortcode est déjà utilisé",
   "SMTP_NOT_CONFIGURED": "L'envoi d'email n'est pas configuré. Veuillez contacter un administrateur",
   "SMTP_TEST_RECIPIENT_REQUIRED": "Saisissez un destinataire pour l'email de test",
+  "SOURCE_APP_PASSWORD": "Impossible de migrer avec un mot de passe d'application. Saisissez le mot de passe que vous utilisez pour vous connecter à Bluesky",
   "SOURCE_AUTH_FAILED": "Échec de la connexion au compte source. Vérifiez l'identifiant et le mot de passe",
   "SOURCE_EMAIL_REQUIRED": "Impossible de récupérer une adresse e-mail du compte source. Veuillez saisir votre propre adresse e-mail",
   "SOURCE_HANDLE_UNRESOLVABLE": "Impossible de résoudre l'identifiant source",

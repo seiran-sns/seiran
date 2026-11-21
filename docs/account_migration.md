@@ -10,6 +10,8 @@ PDS Aへの認証は`com.atproto.server.createSession`（ID/PW直叩き）を使
 
 メールアドレスはPDS Aの`createSession`応答（`email`/`emailConfirmed`）からそのまま取得して使う。PDS Aへのパスワード認証成功が既にアカウント所有の強い証跡であるため、seiran独自のメール実在確認（`require_email_verification`）は転入フローでは挟まない——通常registerのメール確認とは別チャネル。PDS Aのメール2FA（`authFactorToken`、ハンドル・パスワード入力直後の`createSession`に対するもの）とはさらに別物。
 
+**アプリパスワードは受け付けない**: アプリパスワードでの`createSession`が返すトークンは権限が`com.atproto.appPass`（または`com.atproto.appPassPrivileged`）に絞られ、PLC 操作の署名要求（`requestPlcOperationSignature`）やアカウントの無効化が`InvalidToken - Bad token scope`で拒まれる。`start`は accessJwt の`scope`クレームを読み（署名は検証しない。権限の判定は PDS A がするので、案内のために読むだけ）、アプリパスワードなら`SOURCE_APP_PASSWORD`を返す（`migration_client::is_app_password_token`）。入力欄の下にも「アプリパスワードではなく Bluesky にログインするときのパスワード」と案内を出す。アプリパスワードで始まってしまった転入（この判定が入る前のもの、または`scope`クレームを持たない PDS で権限不足になったもの）は、`requesting_plc_signature`のジョブがトークンの`scope`か`Bad token scope`の応答で気づいて`awaiting_source_password`にし、転入画面で本来のパスワードを入れ直してもらって続きから進める（3節）。
+
 PDS Aがメールを返さない場合（app password での`createSession`応答には`email`/`emailConfirmed`が含まれない）は、`SOURCE_EMAIL_REQUIRED`エラーを返しフロントにメール入力欄を追加表示させて再試行させる（`AUTH_FACTOR_TOKEN_REQUIRED`と同じ「エラーで欄を追加して再送」パターン）。この場合のメールは検証なしでそのまま使う。
 
 ## 2. ユーザーフロー
@@ -31,6 +33,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 | `awaiting_source_2fa` | PDS Aがメール2FAを要求、`authFactorToken`待ち | ユーザー入力待ち |
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
+| `awaiting_source_password` | 移行元にアプリパスワードでログインしていて PLC 操作に署名させられない。本来のパスワードの入れ直し待ち。入力されたら`POST /api/migration/:id/submit-source-password`が DID を識別子に`createSession`をやり直し（メール2FAを求められたら`start`と同じく`AUTH_FACTOR_TOKEN_REQUIRED`で確認コードを足して再送）、新しいセッションを保存して`requesting_plc_signature`へ戻す | ユーザー入力待ち |
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち | ユーザー入力待ち |
 | `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
 | `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
