@@ -6,6 +6,7 @@ import type { MigrationStatusResponse } from "../api/migration";
 const STATUS_LABEL_KEYS: Record<string, string> = {
   fetching_repo: "auth:migrationStatus.step.fetchingRepo",
   requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",
+  awaiting_source_password: "auth:migrationStatus.step.awaitingSourcePassword",
   awaiting_plc_token: "auth:migrationStatus.step.awaitingPlcToken",
   awaiting_dns_txt: "auth:migrationStatus.step.awaitingDnsTxt",
   submitting_plc: "auth:migrationStatus.step.submittingPlc",

@@ -409,7 +409,7 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 | `com.atproto.server.createSession` | ID/PW 認証（`create_session_with_2fa` は `authFactorToken` 対応）。`AuthFactorTokenRequired` なら `awaiting_source_2fa` へ |
 | `com.atproto.sync.getRepo` | リポジトリを CARv1 で取得（`atp::car`/`mst_walk` でデコード） |
 | `com.atproto.sync.listBlobs` / `getBlob` | blob 一覧と個別取得 |
-| `com.atproto.identity.requestPlcOperationSignature` | PDS A の登録メールへ確認コードを送らせる |
+| `com.atproto.identity.requestPlcOperationSignature` | PDS A の登録メールへ確認コードを送らせる。アプリパスワードのセッションでは `InvalidToken - Bad token scope` で拒まれるので、本来のパスワードの入れ直し待ち（`awaiting_source_password`）にする（`docs/account_migration.md` 1節） |
 | `com.atproto.identity.signPlcOperation` | 確認コードを添えて PLC 操作に署名させる。`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services` は省略時の挙動が仕様上不定なので、全部明示して渡す |
 | `com.atproto.identity.submitPlcOperation` | plc.directory へ提出。この成功が転入の不可逆境界（DID の service endpoint が seiran に切り替わる） |
 | `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート） |

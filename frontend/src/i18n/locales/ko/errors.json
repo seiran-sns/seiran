@@ -72,6 +72,7 @@
   "SHORTCODE_TAKEN": "이 단축번호는 이미 사용 중입니다.",
   "SMTP_NOT_CONFIGURED": "이메일 전송이 구성되지 않았습니다. 관리자에게 문의하세요",
   "SMTP_TEST_RECIPIENT_REQUIRED": "테스트 메일 수신 주소를 입력하세요",
+  "SOURCE_APP_PASSWORD": "앱 비밀번호로는 이전할 수 없습니다. Bluesky에 로그인할 때 쓰는 비밀번호를 입력해 주세요",
   "SOURCE_AUTH_FAILED": "원본 계정 로그인에 실패했습니다. 핸들과 비밀번호를 확인해 주세요",
   "SOURCE_EMAIL_REQUIRED": "원본 계정에서 이메일 주소를 가져올 수 없습니다. 본인의 이메일 주소를 입력해 주세요",
   "SOURCE_HANDLE_UNRESOLVABLE": "원본 핸들을 확인할 수 없습니다",

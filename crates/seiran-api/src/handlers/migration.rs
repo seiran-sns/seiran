@@ -158,6 +158,10 @@ pub async fn start(
             return Err(ApiError::BadRequest("SOURCE_AUTH_FAILED".into()));
         }
     };
+    // アプリパスワードのセッションでは PLC 操作に署名させられず、転入が途中で止まる。
+    if seiran_common::atp::migration_client::is_app_password_token(&session.access_jwt) {
+        return Err(ApiError::BadRequest("SOURCE_APP_PASSWORD".into()));
+    }
 
     // メールアドレス解決: 転入元PDSは`createSession`のパスワード認証を既に通っているため、
     // 独自のメール実在確認は不要——PDS Aに登録済みのメールをそのまま信頼して使う。
@@ -526,6 +530,7 @@ pub struct MigrationStatusResponse {
 fn needs_input_for(status: &str) -> Option<&'static str> {
     match status {
         "awaiting_plc_token" => Some("plc_token"),
+        "awaiting_source_password" => Some("source_password"),
         _ => None,
     }
 }
@@ -630,6 +635,94 @@ pub async fn retry(
         }
         _ => Err(ApiError::BadRequest("NOT_RETRYABLE".into())),
     }
+}
+
+#[derive(Deserialize)]
+pub struct SubmitSourcePasswordRequest {
+    /// 移行元に本来のパスワードでログインし直す（アプリパスワードは不可）。
+    pub password: String,
+    /// 移行元がメール2FAを要求した場合の再試行時のみ指定する（`start`と同じ）。
+    pub auth_factor_token: Option<String>,
+}
+
+/// 移行元にアプリパスワードでログインしていて PLC 操作に署名させられなかった転入
+/// （`awaiting_source_password`）を、本来のパスワードでログインし直して続きから進める。
+/// 新しいセッションを保存し、PLC 操作の署名要求（`requesting_plc_signature`）からやり直す。
+/// 移行元がメール2FAを要求したら`AUTH_FACTOR_TOKEN_REQUIRED`を返し、フロントはコードの
+/// 入力欄を足して再送する（`start`と同じ「エラーで欄を追加して再送」パターン）。
+pub async fn submit_source_password(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+    Json(req): Json<SubmitSourcePasswordRequest>,
+) -> Result<Json<MigrationStatusStub>, ApiError> {
+    use seiran_common::atp::migration_client::{
+        create_session_with_2fa, is_app_password_token, MigrationClientError,
+    };
+
+    let migration_req = authorize_migration_request(&state, id, &headers).await?;
+    if migration_req.status != "awaiting_source_password" {
+        return Err(ApiError::BadRequest("INVALID_STATE".into()));
+    }
+    if req.password.is_empty() {
+        return Err(ApiError::BadRequest("INVALID_INPUT".into()));
+    }
+    let resolved = seiran_common::atp::did_resolve::resolve_stored_endpoint(
+        &migration_req.source_pds_endpoint,
+    )
+    .await
+    .map_err(|e| {
+        tracing::warn!(
+            "[migration:submit-source-password] PDSエンドポイント検証失敗: {}",
+            e
+        );
+        ApiError::BadGateway("SOURCE_PDS_UNREACHABLE".into())
+    })?;
+
+    // 識別子は DID にする（`start`の後に移行元でハンドルを変えていても同じアカウントに入る）。
+    let session = match create_session_with_2fa(
+        &resolved,
+        &migration_req.source_did,
+        &req.password,
+        req.auth_factor_token.as_deref(),
+    )
+    .await
+    {
+        Ok(session) => session,
+        Err(MigrationClientError::AuthFactorTokenRequired) => {
+            return Err(ApiError::BadRequest("AUTH_FACTOR_TOKEN_REQUIRED".into()));
+        }
+        Err(e) => {
+            tracing::info!(
+                "[migration:submit-source-password] 移行元PDS認証失敗 (request_id={}): {}",
+                id,
+                e
+            );
+            return Err(ApiError::BadRequest("SOURCE_AUTH_FAILED".into()));
+        }
+    };
+    if session.did != migration_req.source_did {
+        return Err(ApiError::BadRequest("SOURCE_AUTH_FAILED".into()));
+    }
+    if is_app_password_token(&session.access_jwt) {
+        return Err(ApiError::BadRequest("SOURCE_APP_PASSWORD".into()));
+    }
+
+    let resumed = seiran_common::repository::at_migration::resume_with_new_source_session(
+        &state.db,
+        id,
+        &session.access_jwt,
+        &session.refresh_jwt,
+    )
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !resumed {
+        return Err(ApiError::Conflict("INVALID_STATE"));
+    }
+    state.enqueue_migration_request_plc_signature(id).await;
+    Ok(Json(MigrationStatusStub {
+        status: "requesting_plc_signature",
+    }))
 }
 
 /// `plc_submitted_at`が未設定（不可逆境界の前）のリクエストのみ打ち切れる。
