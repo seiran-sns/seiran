@@ -183,7 +183,25 @@ export const actors = {
   },
 };
 
+/** ログイン後に見る、アカウント作成後でまだ完了していない DID 転入（`GET /api/account/migration`）。 */
+export interface AccountMigration {
+  status: string;
+  blobs_imported: number;
+  blobs_given_up: number;
+  blobs_total: number;
+  /** 取れない画像等を諦める時刻（ISO 8601、`importing_blobs` の間だけ）。 */
+  blob_import_deadline: string | null;
+}
+
 export const account = {
+  /** アカウント作成後でまだ完了していない DID 転入。無ければ null。 */
+  migration() {
+    return request<AccountMigration | null>("GET", "/account/migration");
+  },
+  /** DID 転入の画像等の取り込みを打ち切る（取れていない分を諦めて、転入元の無効化へ進める）。 */
+  skipMigrationBlobs() {
+    return request<{ status: string }>("POST", "/account/migration/skip-blobs");
+  },
   withdraw(confirmHandle: string) {
     return request<void>("POST", "/account/withdraw", {
       confirm_handle: confirmHandle,

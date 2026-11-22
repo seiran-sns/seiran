@@ -17,7 +17,7 @@ import { migrationStepLabel } from "../migrationStatusLabels";
 import styles from "../Auth.module.css";
 
 /** アカウント（`users`/`actors`）が作られた後の転入の状態。 */
-const ACCOUNT_CREATED_STATUSES = ["importing_data", "deactivating_source", "completed"];
+const ACCOUNT_CREATED_STATUSES = ["importing_data", "importing_blobs", "deactivating_source", "completed"];
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
 export interface MigratePanelState {

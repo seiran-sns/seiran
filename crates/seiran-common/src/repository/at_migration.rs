@@ -41,7 +41,14 @@ pub struct AtMigrationRequestRow {
     pub input_wait_since: Option<DateTime<Utc>>,
     /// 入力待ちのまま期限が来て打ち切った時刻（`abandoned`）。利用者による打ち切りは `None`。
     pub expired_at: Option<DateTime<Utc>>,
+    /// `importing_blobs` に入った時刻から [`BLOB_IMPORT_DEADLINE_DAYS`] 日。過ぎたら残りの
+    /// blob を諦める。
+    pub blob_import_deadline: Option<DateTime<Utc>>,
 }
+
+/// `importing_blobs` に入ってから、取れない blob を諦めるまでの日数。転入元の無効化は
+/// その後なので、転入元が一時的に応答しなくても戻るのを待てる。
+pub const BLOB_IMPORT_DEADLINE_DAYS: i64 = 7;
 
 /// 入力待ちの転入へ打ち切りの警告メールを送るまでの時間。
 pub const INPUT_WAIT_WARNING_HOURS: i64 = 24;
@@ -170,13 +177,14 @@ pub trait AtMigrationRepository: Send + Sync {
 
     async fn mark_record_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
 
-    /// 未取り込みのblobを1件排他取得する。戻り値: (id, cid)。
+    /// 取り込み待ちの blob（未取り込み・諦めていない・取り直しの時刻が来た）を1件排他取得する。
+    /// 戻り値: (id, cid)。
     async fn claim_next_blob(&self, request_id: i64) -> Result<Option<(i64, String)>, sqlx::Error>;
 
     async fn mark_blob_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
 
-    /// `importing_data`中の進捗表示用。戻り値: (取り込み済み件数, 全体件数)。
-    /// レコード（投稿等）とblobの両方を合算する。
+    /// `importing_data`/`importing_blobs`中の進捗表示用。戻り値: (済んだ件数, 全体件数)。
+    /// レコード（投稿等）とblobの両方を合算し、諦めた blob も済んだ側に数える。
     async fn import_progress(&self, request_id: i64) -> Result<(i64, i64), sqlx::Error>;
 
     /// フォロー関係復元待ち（`app.bsky.graph.follow`として取り込み済み＝`imported_at`は
@@ -214,7 +222,7 @@ impl PgAtMigrationRepository {
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
      plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem,
-     agreed_tos_text, input_wait_since, expired_at";
+     agreed_tos_text, input_wait_since, expired_at, blob_import_deadline";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -453,7 +461,8 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             "UPDATE at_migration_blobs SET imported_at = imported_at
              WHERE id = (
                  SELECT id FROM at_migration_blobs
-                 WHERE request_id = $1 AND imported_at IS NULL
+                 WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL
+                   AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                  ORDER BY id LIMIT 1
                  FOR UPDATE SKIP LOCKED
              )
@@ -477,7 +486,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         let row: (i64, i64) = sqlx::query_as(
             "SELECT
                  (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_records WHERE request_id = $1)
-                 + (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_blobs WHERE request_id = $1),
+                 + (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL OR given_up_at IS NOT NULL) FROM at_migration_blobs WHERE request_id = $1),
                  (SELECT count(*) FROM at_migration_records WHERE request_id = $1)
                  + (SELECT count(*) FROM at_migration_blobs WHERE request_id = $1)",
         )
@@ -1183,4 +1192,131 @@ pub async fn claim_input_wait_mails(
     .bind(min_age_hours as i32)
     .fetch_all(pool)
     .await
+}
+
+// ─── blob の取り込み（`importing_blobs`） ───
+
+/// レコードを取り込み終えた転入を `importing_blobs` へ進め、blob を諦める期限を決める。
+/// 状態が `importing_data` でなければ何もせず `false`。
+pub async fn start_blob_import(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests
+         SET status = 'importing_blobs',
+             blob_import_deadline = NOW() + make_interval(days => $2),
+             updated_at = NOW()
+         WHERE id = $1 AND status = 'importing_data'",
+    )
+    .bind(id)
+    .bind(BLOB_IMPORT_DEADLINE_DAYS as i32)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}
+
+/// 一時的に取れなかった blob を `delay_secs` 秒後まで後回しにする（その間は他の blob を先に取る）。
+pub async fn defer_blob(
+    pool: &PgPool,
+    blob_id: i64,
+    error: &str,
+    delay_secs: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_blobs
+         SET attempts = attempts + 1, last_error = $2,
+             next_attempt_at = NOW() + make_interval(secs => $3)
+         WHERE id = $1",
+    )
+    .bind(blob_id)
+    .bind(error)
+    .bind(delay_secs as f64)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 取れない blob を諦める（転入元に無い等）。
+pub async fn give_up_blob(pool: &PgPool, blob_id: i64, reason: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = $2
+         WHERE id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(blob_id)
+    .bind(reason)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// まだ取れていない blob をすべて諦める（期限切れ・利用者の打ち切り）。諦めた件数を返す。
+pub async fn give_up_pending_blobs(
+    pool: &PgPool,
+    request_id: i64,
+    reason: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = $2
+         WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(request_id)
+    .bind(reason)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected())
+}
+
+/// まだ取れていない blob の件数と、そのうち最も早く取り直してよい時刻（`NULL` は今すぐ）。
+pub async fn pending_blobs(
+    pool: &PgPool,
+    request_id: i64,
+) -> Result<(i64, Option<DateTime<Utc>>), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*), min(COALESCE(next_attempt_at, NOW()))
+         FROM at_migration_blobs
+         WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// blob の取り込みの進み具合（ログイン後の画面の表示用）。
+#[derive(Debug, Clone, Copy, sqlx::FromRow)]
+pub struct BlobProgress {
+    pub imported: i64,
+    pub given_up: i64,
+    pub total: i64,
+}
+
+pub async fn blob_progress(pool: &PgPool, request_id: i64) -> Result<BlobProgress, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) AS imported,
+                count(*) FILTER (WHERE given_up_at IS NOT NULL) AS given_up,
+                count(*) AS total
+         FROM at_migration_blobs WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// ユーザーの、アカウント作成後でまだ完了していない転入（ログイン後の画面の表示・打ち切り用）。
+pub async fn incomplete_for_user(
+    pool: &PgPool,
+    user_id: i64,
+) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
+    sqlx::query_as::<_, AtMigrationRequestRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SELECT_COLUMNS} FROM at_migration_requests
+         WHERE user_id = $1 AND status NOT IN ('completed', 'abandoned')"
+    )))
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// blob の一時的な失敗の回数。
+pub async fn blob_attempts(pool: &PgPool, blob_id: i64) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar("SELECT attempts FROM at_migration_blobs WHERE id = $1")
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await
 }

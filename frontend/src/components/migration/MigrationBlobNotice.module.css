@@ -1,0 +1,39 @@
+.notice {
+  margin: 8px;
+  padding: 12px 16px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 0.9rem;
+}
+
+.text {
+  margin: 0 0 4px;
+}
+
+.sub {
+  margin: 0 0 8px;
+  color: var(--text-dim);
+  font-size: 0.85rem;
+}
+
+.error {
+  margin: 0 0 8px;
+  color: var(--danger);
+}
+
+.button {
+  padding: 4px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-strong);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

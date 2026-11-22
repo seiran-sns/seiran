@@ -146,5 +146,12 @@
     "empty": "没有待处理的关注请求。",
     "acceptButton": "批准",
     "rejectButton": "拒绝"
+  },
+  "migrationBlobs": {
+    "progress": "正在导入从 Bluesky 迁移来的图片等媒体（{{done}} / {{total}}）。在此期间你可以照常使用账号。",
+    "deadline": "在 {{time}} 之前未能导入的部分将被放弃，迁移随即完成。",
+    "skip": "停止导入",
+    "skipConfirm": "要放弃尚未导入的图片等媒体并完成迁移吗？被放弃的图片最终将无法在过去的帖子中显示。",
+    "deactivating": "正在停用原账号…"
   }
 }

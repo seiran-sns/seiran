@@ -540,6 +540,7 @@ fn is_job_driven_status(status: &str) -> bool {
             | "requesting_plc_signature"
             | "awaiting_dns_txt"
             | "importing_data"
+            | "importing_blobs"
             | "deactivating_source"
     )
 }
@@ -560,16 +561,17 @@ pub async fn get_status(
             .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     }
 
-    let import_progress = if migration_req.status == "importing_data" {
-        let repo = PgAtMigrationRepository::new(state.db.clone());
-        let (done, total) = repo
-            .import_progress(id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        Some((done, total))
-    } else {
-        None
-    };
+    let import_progress =
+        if migration_req.status == "importing_data" || migration_req.status == "importing_blobs" {
+            let repo = PgAtMigrationRepository::new(state.db.clone());
+            let (done, total) = repo
+                .import_progress(id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+            Some((done, total))
+        } else {
+            None
+        };
 
     Ok(Json(MigrationStatusResponse {
         request_id: id.to_string(),
@@ -625,6 +627,12 @@ pub async fn retry(
             state.enqueue_migration_import_process(id).await;
             Ok(Json(MigrationStatusStub {
                 status: "importing_data",
+            }))
+        }
+        "importing_blobs" => {
+            state.enqueue_migration_import_process(id).await;
+            Ok(Json(MigrationStatusStub {
+                status: "importing_blobs",
             }))
         }
         "deactivating_source" => {
@@ -845,4 +853,80 @@ pub(crate) async fn create_resume_link(
         "https://{}/register/migrate?resume={}",
         state.local_domain, token
     ))
+}
+
+/// ログイン後に見る、アカウント作成後でまだ完了していない転入の状態（blob の取り込み中の
+/// 案内と打ち切りボタン用）。
+#[derive(Serialize)]
+pub struct AccountMigrationResponse {
+    pub status: String,
+    pub blobs_imported: i64,
+    pub blobs_given_up: i64,
+    pub blobs_total: i64,
+    /// 取れない blob を諦める時刻（`importing_blobs` の間だけ）。
+    pub blob_import_deadline: Option<chrono::DateTime<chrono::Utc>>,
+}
+
+/// `GET /api/account/migration` — ログイン中のユーザーの、アカウント作成後でまだ完了して
+/// いない転入。無ければ `null`。転入トークンではなく JWT で認可する（別の端末からでも見られる）。
+pub async fn account_migration(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Option<AccountMigrationResponse>>, ApiError> {
+    let auth_user = crate::middleware::extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let Some(req) = migration_repo::incomplete_for_user(&state.db, auth_user.user_id)
+        .await
+        .map_err(internal)?
+    else {
+        return Ok(Json(None));
+    };
+    let progress = migration_repo::blob_progress(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    Ok(Json(Some(AccountMigrationResponse {
+        blob_import_deadline: (req.status == "importing_blobs")
+            .then_some(req.blob_import_deadline)
+            .flatten(),
+        status: req.status,
+        blobs_imported: progress.imported,
+        blobs_given_up: progress.given_up,
+        blobs_total: progress.total,
+    })))
+}
+
+/// `POST /api/account/migration/skip-blobs` — 転入元からの blob の取り込みを利用者が打ち切る。
+/// まだ取れていない blob をすべて諦め、転入元の無効化へ進める（`importing_blobs` の間だけ）。
+/// 諦めた画像は、Bluesky の CDN のキャッシュが切れると過去の投稿に表示されなくなる。
+pub async fn skip_blobs(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<MigrationStatusStub>, ApiError> {
+    let auth_user = crate::middleware::extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let req = migration_repo::incomplete_for_user(&state.db, auth_user.user_id)
+        .await
+        .map_err(internal)?
+        .filter(|r| r.status == "importing_blobs")
+        .ok_or(ApiError::Conflict("INVALID_STATE"))?;
+    migration_repo::give_up_pending_blobs(&state.db, req.id, "利用者が打ち切り")
+        .await
+        .map_err(internal)?;
+    // 取り直し待ちで眠っているジョブを待たずに、すぐ無効化へ進める。
+    state.enqueue_migration_import_process(req.id).await;
+    Ok(Json(MigrationStatusStub {
+        status: "importing_blobs",
+    }))
 }

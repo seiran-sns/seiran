@@ -210,7 +210,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 **自己再 enqueue 型**: 大量の対象を1件ずつ処理し、進捗を DB に反映しつつキャンセル可能にするパターン。対象を DB テーブル（状態列つき）に置き、ジョブは「未処理を1件処理して自分を再度積む」を繰り返し、対象が尽きるかリクエストが `running` でなくなったら止まる。レート制限等で一時的に進めないときは、エラーで WorkerEngine のバックオフに任せず、`enqueue_retry` で一定時間後に自分を積み直す（バックオフは DB 接続エラー等の本当の失敗用。`FollowImportProcess` は5分間隔）。
 - `FollowImportProcess`: `follow_import_items` の `pending` を処理する。各行はカンマ区切りの1列目を識別子として読む（Misskey のフォローエクスポート `id,withReplies` 対応）。
 - `EmojiImportProcess`: `preparing` なら ZIP の meta.json を `emoji_import_items` に展開して `running` に進め、`running` なら `pending` を15秒ぶん取り込んでから積み直す（1件ずつ積み直すと、取り込みのたびに ZIP の目次を読み直すことになるため）。1件ごとの失敗（画像が壊れている等）は行の結果として記録して先へ進み、ジョブのエラーにはしない。
-- `MigrationImportProcess`: 未取り込みのレコード → blob の順に実体化し、尽きたら `deactivating_source` に進めて `MigrationDeactivateSource` と `MigrationImportFollows` を積む。
+- `MigrationImportProcess`: `importing_data` では未取り込みのレコードを実体化し、尽きたら `importing_blobs` に進めて `MigrationImportFollows` を積む。`importing_blobs` では blob を取得・保存し、一時的に取れない blob は後回しにする（取り直し待ちしか無ければ `enqueue_retry` でその時刻に積み直す）。取り終えるか期限（7日）・利用者の打ち切りで諦めたら `deactivating_source` に進めて `MigrationDeactivateSource` を積む（`docs/account_migration.md` 3節）。
 - `MigrationImportFollows`: `status` を見ず、未反映の `app.bsky.graph.follow` 行の有無だけで続けるか決める（転入完了を待たない結果整合処理。レート制限も適用しない）。
 
 フォロー作成の実処理は `follow_exec::execute_follow`（`AppState` 非依存）で、API ハンドラ（`AppState::follow_exec_config()`）とジョブ（`JobContext::follow_exec`）が共有する。ターゲット文字列の種別判定は `follow_target::classify_follow_target`。既にフォロー済みでも成功を返し、`FollowOutcome.already_following` で区別する（インポートの進捗表示が「成功」と「既存」を分けて数える）。

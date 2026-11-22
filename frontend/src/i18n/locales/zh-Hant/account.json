@@ -146,5 +146,12 @@
     "empty": "沒有待處理的追蹤請求。",
     "acceptButton": "批准",
     "rejectButton": "拒絕"
+  },
+  "migrationBlobs": {
+    "progress": "正在匯入從 Bluesky 遷移來的圖片等媒體（{{done}} / {{total}}）。在此期間你可以照常使用帳號。",
+    "deadline": "在 {{time}} 之前未能匯入的部分將被放棄，遷移隨即完成。",
+    "skip": "停止匯入",
+    "skipConfirm": "要放棄尚未匯入的圖片等媒體並完成遷移嗎？被放棄的圖片最終將無法在過去的貼文中顯示。",
+    "deactivating": "正在停用原帳號…"
   }
 }

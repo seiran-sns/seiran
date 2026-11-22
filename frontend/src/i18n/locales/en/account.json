@@ -146,5 +146,12 @@
     "empty": "No pending follow requests.",
     "acceptButton": "Accept",
     "rejectButton": "Reject"
+  },
+  "migrationBlobs": {
+    "progress": "Importing images and other media from your migrated Bluesky account ({{done}} / {{total}}). You can keep using your account in the meantime.",
+    "deadline": "Anything not imported by {{time}} will be skipped, and the migration will be completed.",
+    "skip": "Stop importing",
+    "skipConfirm": "Skip the images and media that haven't been imported yet and complete the migration? Skipped images will eventually stop showing on your past posts.",
+    "deactivating": "Deactivating your previous account…"
   }
 }

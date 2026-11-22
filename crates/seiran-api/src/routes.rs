@@ -303,6 +303,14 @@ fn auth_account_routes() -> Router<AppState> {
         .route("/api/migration/start", post(handlers::migration::start))
         .route("/api/migration/resume", post(handlers::migration::resume))
         .route(
+            "/api/account/migration",
+            get(handlers::migration::account_migration),
+        )
+        .route(
+            "/api/account/migration/skip-blobs",
+            post(handlers::migration::skip_blobs),
+        )
+        .route(
             "/api/migration/:id/submit-plc-token",
             post(handlers::migration::submit_plc_token),
         )

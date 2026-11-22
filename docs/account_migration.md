@@ -23,8 +23,8 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 3. PDS Aのリポジトリ取得（自動、待機表示のみ）
 4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
 5. `signPlcOperation`で署名済みの PLC 操作を得て保存し、`_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
-6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス。`submit-plc-token`成功時にlocalStorageのmigration_token/idをクリアせず残しておき、`/api/migration/:id/status`のポーリングを引き続き行うことで、`importing_data`中の取り込み件数/全体件数（`import_done`/`import_total`）を表示する。完了検知時にクリアする）
-7. 完了、通常のSNS画面へ
+6. 投稿等のレコードの取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス。`submit-plc-token`成功時にlocalStorageのmigration_token/idをクリアせず残しておき、`/api/migration/:id/status`のポーリングを引き続き行うことで、`importing_data`中の取り込み件数/全体件数（`import_done`/`import_total`）を表示する。この画面を出るときにクリアする）
+7. レコードを取り込み終えたら通常のSNS画面へ。画像等（blob）は裏で取り込み続け、その間は中央ペインの上に進み具合・諦める期限・「取り込みを打ち切る」ボタンを出す（`MigrationBlobNotice`、`GET /api/account/migration`・`POST /api/account/migration/skip-blobs`、JWT で認可）。取り終えるか諦めたら転入元を無効化して完了
 
 途中で画面を離れても、次のどちらかで続きに戻れる（4節「途中の転入への復帰」）。
 
@@ -46,7 +46,8 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち。コードは PDS A 側で15分で切れるので、転入画面の「確認コードを送り直す」（`POST /api/migration/:id/resend-plc-token`）で`requesting_plc_signature`へ戻して送り直せる | ユーザー入力待ち |
 | `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
 | `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
-| `importing_data` | ステージング済みレコード/blobの実体化中 | `Job::MigrationImportProcess`（自己再enqueue） |
+| `importing_data` | ステージング済みレコードの実体化中。利用者はこの間だけ取り込み中の画面に固定される | `Job::MigrationImportProcess`（自己再enqueue） |
+| `importing_blobs` | blob を転入元から取得して保存している。アカウントは使える。転入元に無い blob（404・`BlobNotFound`）は諦め、一時的に取れない blob は失敗のたびに間隔を倍にして（1分〜30分）後回しにし、他を先に取る。`blob_import_deadline`（この状態に入ってから7日）を過ぎたら残りを諦める。利用者も「取り込みを打ち切る」で残りを諦められる | `Job::MigrationImportProcess`（自己再enqueue。取り直し待ちの blob しか無ければ、その時刻に`enqueue_retry`で自分を積み直す） |
 | `deactivating_source` | PDS A側旧アカウントの無効化中（ベストエフォート。成否は`source_deactivated_at`/`source_deactivate_error`に残す）。送り先は refreshJwt の`aud`が示す entryway（bsky.social 等。PDS 経由だと PLC 送信後は必ず`BadJwtSignature`になる。`docs/protocols.md`） | `Job::MigrationDeactivateSource` |
 | `completed` | 転入完了 | — |
 | `failed` | `submitting_plc`到達前の失敗。リトライ／別DIDで再開／新規DID立ち上げへ切替のいずれも可 | ユーザー選択待ち |
@@ -55,7 +56,9 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 `awaiting_dns_txt` を置くのは、PLC 送信で DID のハンドルが seiran 側に切り替わった時点で Relay/AppView が解決しにくるため（新規アカウントと同じ理由、`docs/protocols.md` 3節）。署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、メールのワンタイムトークンの期限（15分）とは無関係に待てる。plc.directory が操作を拒んだ（4xx。転入元で別の操作が入った等）場合は `failed`、通信の失敗なら `awaiting_dns_txt` に戻して送り直す。Cloudflare が未設定なら待たずに送る（`submit-plc-token` の中で確定まで終わる）。
 
-`Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`deactivating_source`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
+blob の取り込みを`importing_data`から分けたのは、転入元が`getBlob`に応答しないときに、取り込みが終わらないまま利用者がアカウントを使えなくなるのを避けるため（blob が無くても投稿の閲覧や新規投稿はできる。困るのは、Bluesky の CDN のキャッシュが切れたときに過去の画像が表示されなくなることだけ）。一時的な失敗をワーカーのリトライに任せると5回で破棄され、取り込みが止まるので、ジョブは失敗した blob を後回しにして自分で積み直す。転入元の無効化を blob の後にするのは、無効化された転入元は`getBlob`に応答しなくなると考えられるため。期限の7日は、転入元が一時的に止まっても戻るのを待てる長さ。
+
+`Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`importing_blobs`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
 
 ## 4. 不可逆境界（`submitPlcOperation`）
 

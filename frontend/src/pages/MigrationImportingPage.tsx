@@ -10,16 +10,17 @@ import styles from "./Auth.module.css";
 const POLL_INTERVAL_MS = 3000;
 
 /**
- * ログイン済み（JWT取得済み）だが`migration_status`が`completed`でないアカウントに表示する
- * 専用画面。`App.tsx::AppRoutes`が`user.migration_status`を見て、`SuspendedAccountPage`と
- * 同型で他の全ルートをバイパスしてこれだけを表示する。
+ * ログイン済み（JWT取得済み）だが投稿等のレコードの取り込み中（`migration_status`が
+ * `importing_data`）のアカウントに表示する専用画面。`App.tsx::AppRoutes`が
+ * `user.migration_status`を見て、`SuspendedAccountPage`と同型で他の全ルートをバイパスして
+ * これだけを表示する。画像等（blob）の取り込み（`importing_blobs`）以降は通常の画面に戻る。
  *
  * `submit-plc-token`成功時点でJWTは既に発行済みのため、`GET /api/auth/me`を
- * ポーリングして`migration_status`が消える（=completedになる）のを待つのが本体だが、
+ * ポーリングして`migration_status`が`importing_data`でなくなるのを待つのが本体だが、
  * `MigratePanel`がクリアせず残した`localStorage`のmigration_token/idがまだ使えるため
  * （`docs/account_migration.md`参照）、`/api/migration/:id/status`も並行してポーリングし
  * `importing_data`中の取り込み件数/全体件数を表示する（`MigratePanel`の状態画面と同じ表示）。
- * 完了を検知した時点でこのlocalStorageをクリアする。
+ * この画面を出る時点でこのlocalStorageをクリアする。
  */
 export default function MigrationImportingPage() {
   const { t } = useTranslation();
@@ -60,7 +61,8 @@ export default function MigrationImportingPage() {
       api.auth
         .me()
         .then((freshUser) => {
-          if (!freshUser.migration_status) clearStoredMigrationRequest();
+          // レコードを取り込み終えたらこの画面を出る（画像等は通常の画面で裏で取り込む）。
+          if (freshUser.migration_status !== "importing_data") clearStoredMigrationRequest();
           login(freshUser.token, freshUser);
         })
         .catch(() => {

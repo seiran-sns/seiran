@@ -11,6 +11,7 @@ import TwemojiEmoji from "../common/TwemojiEmoji";
 import PostComposer from "../note/PostComposer";
 import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
+import MigrationBlobNotice from "../migration/MigrationBlobNotice";
 import styles from "./AppShell.module.css";
 
 interface AppShellProps {
@@ -69,7 +70,10 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
         />
       </div>
 
-      <main className={styles.center}>{center}</main>
+      <main className={styles.center}>
+        <MigrationBlobNotice />
+        {center}
+      </main>
 
       <aside className={styles.right}>
         <div className={styles.rightScroll}>{right}</div>

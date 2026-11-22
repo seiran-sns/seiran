@@ -109,8 +109,10 @@ function AppRoutes() {
   }
 
   // 既存DID転入フロー（`docs/account_migration.md`）: JWT取得済み（submit-plc-token成功後）
-  // だがデータ取り込みが未完了の間は、is_suspendedと同型で他の全画面をバイパスする。
-  if (user?.migration_status && user.migration_status !== "completed") {
+  // だが投稿等のレコードの取り込みが未完了の間は、is_suspendedと同型で他の全画面をバイパスする。
+  // 画像等（blob）の取り込み（`importing_blobs`）以降はアカウントを使えるので通常の画面に戻し、
+  // `AppShell`の`MigrationBlobNotice`で進み具合と打ち切りボタンを出す。
+  if (user?.migration_status === "importing_data") {
     return (
       <Suspense fallback={null}>
         <MigrationImportingPage />

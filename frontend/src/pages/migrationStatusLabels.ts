@@ -11,6 +11,7 @@ const STATUS_LABEL_KEYS: Record<string, string> = {
   awaiting_dns_txt: "auth:migrationStatus.step.awaitingDnsTxt",
   submitting_plc: "auth:migrationStatus.step.submittingPlc",
   importing_data: "auth:migrationStatus.step.importingData",
+  importing_blobs: "auth:migrationStatus.step.importingBlobs",
   deactivating_source: "auth:migrationStatus.step.deactivatingSource",
   completed: "auth:migrationStatus.step.completed",
   failed: "auth:migrationStatus.step.failed",

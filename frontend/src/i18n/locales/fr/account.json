@@ -146,5 +146,12 @@
     "empty": "Aucune demande d'abonnement en attente.",
     "acceptButton": "Accepter",
     "rejectButton": "Refuser"
+  },
+  "migrationBlobs": {
+    "progress": "Importation des images et autres médias de votre compte Bluesky migré ({{done}} / {{total}}). Vous pouvez continuer à utiliser votre compte en attendant.",
+    "deadline": "Ce qui n'aura pas été importé avant {{time}} sera ignoré, et la migration sera terminée.",
+    "skip": "Arrêter l'importation",
+    "skipConfirm": "Ignorer les images et médias pas encore importés et terminer la migration ? Les images ignorées finiront par ne plus s'afficher dans vos anciennes publications.",
+    "deactivating": "Désactivation de votre ancien compte…"
   }
 }

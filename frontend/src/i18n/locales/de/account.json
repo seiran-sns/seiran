@@ -146,5 +146,12 @@
     "empty": "Keine ausstehenden Follow-Anfragen.",
     "acceptButton": "Annehmen",
     "rejectButton": "Ablehnen"
+  },
+  "migrationBlobs": {
+    "progress": "Bilder und andere Medien deines umgezogenen Bluesky-Kontos werden importiert ({{done}} / {{total}}). Du kannst dein Konto währenddessen weiter nutzen.",
+    "deadline": "Was bis {{time}} nicht importiert ist, wird übersprungen, und der Umzug wird abgeschlossen.",
+    "skip": "Import abbrechen",
+    "skipConfirm": "Die noch nicht importierten Bilder und Medien überspringen und den Umzug abschließen? Übersprungene Bilder werden in deinen früheren Beiträgen irgendwann nicht mehr angezeigt.",
+    "deactivating": "Dein bisheriges Konto wird deaktiviert…"
   }
 }

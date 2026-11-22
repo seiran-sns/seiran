@@ -1116,6 +1116,7 @@ async fn resume_running_migrations(state: &AppState) {
         ("fetching_repo", "getRepo取得"),
         ("requesting_plc_signature", "PLC署名リクエスト"),
         ("importing_data", "データ取り込み"),
+        ("importing_blobs", "画像等の取り込み"),
         ("deactivating_source", "移行元アカウント無効化"),
     ] {
         let request_ids = match repo.list_by_statuses(&[status]).await {
@@ -1145,7 +1146,9 @@ async fn resume_running_migrations(state: &AppState) {
                         .enqueue_migration_request_plc_signature(request_id)
                         .await
                 }
-                "importing_data" => state.enqueue_migration_import_process(request_id).await,
+                "importing_data" | "importing_blobs" => {
+                    state.enqueue_migration_import_process(request_id).await
+                }
                 "deactivating_source" => {
                     state.enqueue_migration_deactivate_source(request_id).await
                 }

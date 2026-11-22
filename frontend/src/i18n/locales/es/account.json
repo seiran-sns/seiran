@@ -146,5 +146,12 @@
     "empty": "No hay solicitudes de seguimiento pendientes.",
     "acceptButton": "Aceptar",
     "rejectButton": "Rechazar"
+  },
+  "migrationBlobs": {
+    "progress": "Importando las imágenes y otros archivos de tu cuenta de Bluesky migrada ({{done}} / {{total}}). Mientras tanto, puedes seguir usando tu cuenta.",
+    "deadline": "Lo que no se haya importado antes de {{time}} se omitirá y la migración se completará.",
+    "skip": "Detener la importación",
+    "skipConfirm": "¿Omitir las imágenes y archivos que aún no se han importado y completar la migración? Las imágenes omitidas acabarán dejando de mostrarse en tus publicaciones anteriores.",
+    "deactivating": "Desactivando tu cuenta anterior…"
   }
 }

@@ -306,12 +306,36 @@ async fn await_source_password(pool: &PgPool, request_id: i64) -> Result<(), Job
 /// `process_import`が返す「unlock後にやるべきこと」（`jobs::follow_import`と同じ設計）。
 enum ImportNextAction {
     Continue,
+    /// 取り直してよい blob が今は無い。この時間の後に自分を積み直す。
+    RetryAfter(std::time::Duration),
     Stop,
 }
 
-/// `Job::MigrationImportProcess` — 自己再enqueue型。`at_migration_records`→
-/// `at_migration_blobs`の順に未取り込み分を1件ずつ実体化し、尽きたら
-/// `deactivating_source`へ進める。`follow_import`と同じ`request_id`単位advisory lock。
+/// 一時的に取れなかった blob を後回しにする時間。失敗を重ねるたびに倍にし、上限で止める
+/// （転入元が止まっている間、毎回すべての blob を叩き続けないため）。
+fn blob_retry_delay_secs(attempts: i32) -> i64 {
+    const BASE_SECS: i64 = 60;
+    const MAX_SECS: i64 = 30 * 60;
+    BASE_SECS
+        .saturating_mul(1i64 << attempts.clamp(0, 10))
+        .min(MAX_SECS)
+}
+
+/// 転入元に無い blob（取り直しても取れない）。それ以外の失敗は転入元が戻れば取れうるので、
+/// 期限まで取り直す。
+fn is_missing_blob(e: &crate::atp::migration_client::MigrationClientError) -> bool {
+    matches!(
+        e,
+        crate::atp::migration_client::MigrationClientError::Xrpc { status, code, .. }
+            if *status == 404 || code == "BlobNotFound"
+    )
+}
+
+/// `Job::MigrationImportProcess` — 自己再enqueue型。`importing_data`では
+/// `at_migration_records`を、`importing_blobs`では`at_migration_blobs`を1件ずつ実体化し、
+/// 尽きたら次の状態へ進める。取り直しを待つ blob しか残っていなければ、その時刻に
+/// 自分を積み直す（ワーカーのリトライに任せると5回で破棄され、取り込みが止まる）。
+/// `follow_import`と同じ`request_id`単位advisory lock。
 pub async fn handle_import_process(request_id: i64, ctx: Arc<JobContext>) -> Result<(), JobError> {
     let Some(pool) = ctx.db_pool.as_ref() else {
         return Err(JobError::Permanent(
@@ -350,6 +374,20 @@ pub async fn handle_import_process(request_id: i64, ctx: Arc<JobContext>) -> Res
             }
             Ok(())
         }
+        ImportNextAction::RetryAfter(delay) => ctx
+            .queue
+            .enqueue_retry(
+                crate::traits::Job::MigrationImportProcess { request_id },
+                crate::queue::worker::priority::LOW,
+                0,
+                delay,
+            )
+            .await
+            .map_err(|e| {
+                JobError::Transient(format!(
+                    "[MigrationImportProcess] 取り直しの再投入失敗: {e}"
+                ))
+            }),
         ImportNextAction::Stop => Ok(()),
     }
 }
@@ -371,7 +409,7 @@ async fn process_import(
         return Ok(ImportNextAction::Stop);
     };
 
-    if req.status != "importing_data" {
+    if req.status != "importing_data" && req.status != "importing_blobs" {
         tracing::info!(
             "[MigrationImportProcess] request_id={} は status={} のため終了",
             request_id,
@@ -397,15 +435,29 @@ async fn process_import(
         now,
     };
 
-    // ① atp_migration_records: 未取り込み分を1件ずつ実体化（posts or atp_records）
+    if req.status == "importing_data" {
+        return import_next_record(&ic, &repo, ctx).await;
+    }
+    import_next_blob(&ic, &repo, ctx).await
+}
+
+/// `importing_data`: 未取り込みのレコードを1件実体化する（posts or atp_records）。尽きたら
+/// `importing_blobs` へ進め、利用者を取り込み中の画面から出す（blob はアカウントを使うのに
+/// 要らないので、裏で取り続ける）。フォロー関係の復元もここで始める。
+async fn import_next_record(
+    ic: &ImportContext<'_>,
+    repo: &PgAtMigrationRepository,
+    ctx: &JobContext,
+) -> Result<ImportNextAction, JobError> {
+    let request_id = ic.req.id;
     if let Some((id, collection, rkey, _cid, bytes)) =
         repo.claim_next_record(request_id).await.map_err(|e| {
             JobError::Transient(format!("[MigrationImportProcess] レコード取得失敗: {e}"))
         })?
     {
         // CIDは`commit_generic_record`/`commit_post_record`が再計算する（内容一致のはず）
-        import_staged_record(&ic, id, collection, rkey, &bytes).await?;
-        repo.mark_record_imported(id, now).await.map_err(|e| {
+        import_staged_record(ic, id, collection, rkey, &bytes).await?;
+        repo.mark_record_imported(id, ic.now).await.map_err(|e| {
             JobError::Transient(format!(
                 "[MigrationImportProcess] レコード取込済みマーク失敗: {e}"
             ))
@@ -413,23 +465,90 @@ async fn process_import(
         return Ok(ImportNextAction::Continue);
     }
 
-    // ② at_migration_blobs: 未取り込み分を1件ずつPDS Aから取得しseiranのストレージへ保存
-    if let Some((id, cid)) = repo
-        .claim_next_blob(request_id)
+    crate::repository::at_migration::start_blob_import(ic.pool, request_id)
         .await
-        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] blob取得失敗: {e}")))?
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationImportProcess] ステータス更新失敗: {e}"))
+        })?;
+    // フォロー関係の復元（`follows`テーブルへの反映）は`at_migration_requests.status`とは
+    // 独立した結果整合処理として並行して進める（リモートアクター解決に時間がかかっても
+    // 転入完了自体をブロックしないため）。
+    if let Err(e) = ctx
+        .queue
+        .enqueue(
+            crate::traits::Job::MigrationImportFollows { request_id },
+            crate::queue::worker::priority::LOW,
+        )
+        .await
     {
-        let bytes = fetch_source_blob(pool, &req, &cid).await?;
+        tracing::error!(
+            "[MigrationImportProcess] MigrationImportFollows enqueue失敗 (request_id={}): {}",
+            request_id,
+            e
+        );
+    }
+    tracing::info!(
+        "[MigrationImportProcess] request_id={} レコードの取り込み完了、blob の取り込みへ",
+        request_id
+    );
+    Ok(ImportNextAction::Continue)
+}
+
+/// `importing_blobs`: 取り込み待ちの blob を1件、転入元から取得して seiran のストレージへ
+/// 保存する。転入元に無い blob は諦め、一時的に取れない blob は後回しにして他を先に取る。
+/// 期限（`blob_import_deadline`）を過ぎたら残りを諦める。取り終えるか諦めたら、転入元の
+/// 無効化へ進める。
+async fn import_next_blob(
+    ic: &ImportContext<'_>,
+    repo: &PgAtMigrationRepository,
+    ctx: &JobContext,
+) -> Result<ImportNextAction, JobError> {
+    use crate::repository::at_migration as migration_repo;
+    let request_id = ic.req.id;
+    let db_err = |e: sqlx::Error| JobError::Transient(format!("[MigrationImportProcess] {e}"));
+
+    if ic.req.blob_import_deadline.is_some_and(|d| d <= ic.now) {
+        let n = migration_repo::give_up_pending_blobs(ic.pool, request_id, "期限切れ")
+            .await
+            .map_err(db_err)?;
+        if n > 0 {
+            tracing::warn!(
+                "[MigrationImportProcess] request_id={} 期限までに取れなかった blob {} 件を諦めました",
+                request_id,
+                n
+            );
+        }
+        return finish_import(request_id, repo, ctx, ic.now).await;
+    }
+
+    if let Some((id, cid)) = repo.claim_next_blob(request_id).await.map_err(db_err)? {
+        let bytes = match fetch_source_blob(ic.pool, ic.req, &cid).await {
+            Ok(bytes) => bytes,
+            Err(e) if is_missing_blob(&e) => {
+                tracing::warn!(
+                    "[MigrationImportProcess] request_id={} 転入元に無い blob を諦めます (cid={}): {}",
+                    request_id,
+                    cid,
+                    e
+                );
+                migration_repo::give_up_blob(ic.pool, id, &e.to_string())
+                    .await
+                    .map_err(db_err)?;
+                return Ok(ImportNextAction::Continue);
+            }
+            Err(e) => {
+                defer_blob(ic.pool, id, &format!("getBlob失敗: {e}")).await?;
+                return Ok(ImportNextAction::Continue);
+            }
+        };
         let encryption_key = ctx.encryption_key.clone().ok_or_else(|| {
             JobError::Transient("[MigrationImportProcess] encryption_key 未設定".to_string())
         })?;
-        import_one_blob(pool, encryption_key, actor_id, &cid, &bytes)
-            .await
-            .map_err(|e| {
-                JobError::Transient(format!("[MigrationImportProcess] blob保存失敗: {e}"))
-            })?;
-
-        repo.mark_blob_imported(id, now).await.map_err(|e| {
+        if let Err(e) = import_one_blob(ic.pool, encryption_key, ic.actor_id, &cid, &bytes).await {
+            defer_blob(ic.pool, id, &format!("blob保存失敗: {e}")).await?;
+            return Ok(ImportNextAction::Continue);
+        }
+        repo.mark_blob_imported(id, ic.now).await.map_err(|e| {
             JobError::Transient(format!(
                 "[MigrationImportProcess] blob取込済みマーク失敗: {e}"
             ))
@@ -437,7 +556,39 @@ async fn process_import(
         return Ok(ImportNextAction::Continue);
     }
 
-    finish_import(request_id, &repo, ctx, now).await
+    let (pending, next_at) = migration_repo::pending_blobs(ic.pool, request_id)
+        .await
+        .map_err(db_err)?;
+    if pending == 0 {
+        return finish_import(request_id, repo, ctx, ic.now).await;
+    }
+    // 取り直しの時刻が来た blob が無い。最も早いもの（期限がそれより早ければ期限）まで待つ。
+    let wake_at = match (next_at, ic.req.blob_import_deadline) {
+        (Some(n), Some(d)) => n.min(d),
+        (n, d) => n.or(d).unwrap_or(ic.now),
+    };
+    let delay = (wake_at - chrono::Utc::now())
+        .to_std()
+        .unwrap_or_default()
+        .max(std::time::Duration::from_secs(5));
+    Ok(ImportNextAction::RetryAfter(delay))
+}
+
+/// 一時的に取れなかった blob を、失敗の回数に応じた時間だけ後回しにする。
+async fn defer_blob(pool: &PgPool, blob_id: i64, error: &str) -> Result<(), JobError> {
+    let attempts: i32 = crate::repository::at_migration::blob_attempts(pool, blob_id)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] {e}")))?;
+    let delay = blob_retry_delay_secs(attempts);
+    tracing::warn!(
+        "[MigrationImportProcess] blob id={} を {} 秒後に取り直します: {}",
+        blob_id,
+        delay,
+        error
+    );
+    crate::repository::at_migration::defer_blob(pool, blob_id, error, delay)
+        .await
+        .map_err(|e| JobError::Transient(format!("[MigrationImportProcess] {e}")))
 }
 
 /// レコード取り込み1件分の共通文脈。
@@ -628,28 +779,20 @@ async fn fetch_source_blob(
     pool: &PgPool,
     req: &crate::repository::AtMigrationRequestRow,
     cid: &str,
-) -> Result<Vec<u8>, JobError> {
+) -> Result<Vec<u8>, crate::atp::migration_client::MigrationClientError> {
     let mut session = source_session(req);
     let resolved = crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint)
         .await
-        .map_err(|e| {
-            JobError::Transient(format!(
-                "[MigrationImportProcess] PDSエンドポイント検証失敗: {e}"
-            ))
-        })?;
+        .map_err(|e| crate::atp::migration_client::MigrationClientError::Resolve(e.to_string()))?;
     call_with_refresh(pool, req.id, &resolved, &mut session, |s| {
         let resolved = &resolved;
         async move { crate::atp::migration_client::fetch_blob(resolved, &s, cid).await }
     })
     .await
-    .map_err(|e| {
-        JobError::Transient(format!(
-            "[MigrationImportProcess] getBlob失敗 (cid={cid}): {e}"
-        ))
-    })
 }
 
-/// レコード・blob とも取り込み終えたら、移行元アカウント無効化とフォロー復元へ進める。
+/// blob を取り終えるか諦めたら、転入元アカウントの無効化へ進める（無効化された転入元は
+/// getBlob に応答しなくなるため、blob が済むまで待つ）。
 async fn finish_import(
     request_id: i64,
     repo: &PgAtMigrationRepository,
@@ -675,25 +818,8 @@ async fn finish_import(
             e
         );
     }
-    // フォロー関係の復元（`follows`テーブルへの反映）は`at_migration_requests.status`とは
-    // 独立した結果整合処理として並行して進める。deactivating_source/completedへの遷移を
-    // 待たない（リモートアクター解決に時間がかかっても転入完了自体をブロックしないため）。
-    if let Err(e) = ctx
-        .queue
-        .enqueue(
-            crate::traits::Job::MigrationImportFollows { request_id },
-            crate::queue::worker::priority::LOW,
-        )
-        .await
-    {
-        tracing::error!(
-            "[MigrationImportProcess] MigrationImportFollows enqueue失敗 (request_id={}): {}",
-            request_id,
-            e
-        );
-    }
     tracing::info!(
-        "[MigrationImportProcess] request_id={} データ取り込み完了",
+        "[MigrationImportProcess] request_id={} blob の取り込み完了、転入元の無効化へ",
         request_id
     );
     Ok(ImportNextAction::Stop)
@@ -875,7 +1001,7 @@ async fn deactivate_source_at(
 ///
 /// advisory lockのキーは`-request_id`（負数）を使う。`handle_import_process`等の
 /// 他の転入ジョブ群は同一`request_id`（正数）をキーに使っており、このジョブは
-/// `MigrationImportProcess`のstep③からそれらと同時に起動されるため、同じキーだと
+/// `MigrationImportProcess`がレコードを取り込み終えた時点でそれらと同時に起動されるため、同じキーだと
 /// 片方が`try_acquire`に失敗して黙って終了してしまう（advisory lockはジョブ種別を
 /// 区別しないグローバルなキー空間のため）。
 pub async fn handle_import_follows(request_id: i64, ctx: Arc<JobContext>) -> Result<(), JobError> {
@@ -916,6 +1042,16 @@ pub async fn handle_import_follows(request_id: i64, ctx: Arc<JobContext>) -> Res
             }
             Ok(())
         }
+        ImportNextAction::RetryAfter(delay) => ctx
+            .queue
+            .enqueue_retry(
+                crate::traits::Job::MigrationImportFollows { request_id },
+                crate::queue::worker::priority::LOW,
+                0,
+                delay,
+            )
+            .await
+            .map_err(|e| JobError::Transient(format!("[MigrationImportFollows] 再投入失敗: {e}"))),
         ImportNextAction::Stop => Ok(()),
     }
 }
