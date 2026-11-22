@@ -317,6 +317,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
   - `request_token_hash`: 匿名段階の認可トークンの SHA-256（生値は1回だけ返す）。
   - `plc_submitted_at`: 不可逆境界のマーカー。`new_signing_key_pem`（転入後の repo 署名鍵）と `new_rotation_key_pem`（専用ローテーションキー）はこの成功と同時に保存する（後のアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id` の確定とは別ステップ）。
 - `at_migration_records`: 取得した生レコード1件＝1行（`request_id, collection, rkey` の UNIQUE）。`bytes` は DAG-CBOR のまま。`imported_at` は `posts`/`atp_records` への実体化の完了。`app.bsky.graph.follow` だけは `follow_materialized_at` で `follows` への反映を別に追跡する（ATP リポジトリへの複製と seiran の社会グラフへの反映は別の処理だから）。
+  - `source_deactivated_at` / `source_deactivate_error`: 転入元アカウントの無効化（`deactivateAccount`、ベストエフォート）の結果。成功なら日時が入り、失敗なら理由だけが入る（どちらでも転入は `completed` になる）。この列を足す前に完了した転入はどちらも NULL。
 - `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。
 - `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。
 
