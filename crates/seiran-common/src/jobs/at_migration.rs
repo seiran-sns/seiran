@@ -796,21 +796,24 @@ pub async fn handle_deactivate_source(
     }
 
     let mut session = source_session(&req);
-    // PDS 経由だと PLC 送信後は必ず BadJwtSignature になるので、entryway へ直接送る
-    // （`account_management_endpoint`）。
+    // PDS 経由だと PLC 送信後は必ず BadJwtSignature になるので、まず entryway へ直接送る
+    // （`account_management_endpoint`）。entryway で失敗し、送り先が保存済みの PDS と
+    // 違うなら、PDS へ一度だけ送り直す（XRPC を受けないホストの did:web を
+    // サービス DID にしている自前 PDS 向け）。
     let endpoint = crate::atp::migration_client::account_management_endpoint(
         req.source_refresh_jwt.as_deref(),
         &req.source_pds_endpoint,
     );
-    let outcome = match crate::atp::did_resolve::resolve_stored_endpoint(&endpoint).await {
-        Ok(resolved) => call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
-            let resolved = &resolved;
-            async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
-        })
-        .await
-        .map_err(|e| format!("deactivateAccount失敗: {e}")),
-        Err(e) => Err(format!("PDSエンドポイント検証失敗: {e}")),
-    };
+    let mut outcome = deactivate_source_at(pool, request_id, &endpoint, &mut session).await;
+    if outcome.is_err() && endpoint != req.source_pds_endpoint {
+        tracing::warn!(
+            "[MigrationDeactivateSource] entryway での無効化に失敗、PDS へ送り直す（request_id={}）: {}",
+            request_id,
+            outcome.as_ref().err().map(String::as_str).unwrap_or_default()
+        );
+        outcome =
+            deactivate_source_at(pool, request_id, &req.source_pds_endpoint, &mut session).await;
+    }
     if let Err(e) = &outcome {
         tracing::error!(
             "[MigrationDeactivateSource] {}（続行、request_id={}）",
@@ -844,6 +847,24 @@ pub async fn handle_deactivate_source(
         request_id
     );
     Ok(())
+}
+
+/// `endpoint` へ `deactivateAccount` を送る（ExpiredToken なら同じ送り先で取り直して1回だけ再試行）。
+async fn deactivate_source_at(
+    pool: &PgPool,
+    request_id: i64,
+    endpoint: &str,
+    session: &mut crate::atp::migration_client::AtpSession,
+) -> Result<(), String> {
+    let resolved = crate::atp::did_resolve::resolve_stored_endpoint(endpoint)
+        .await
+        .map_err(|e| format!("PDSエンドポイント検証失敗（{endpoint}）: {e}"))?;
+    call_with_refresh(pool, request_id, &resolved, session, |s| {
+        let resolved = &resolved;
+        async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
+    })
+    .await
+    .map_err(|e| format!("deactivateAccount失敗（{endpoint}）: {e}"))
 }
 
 /// `Job::MigrationImportFollows` — 自己再enqueue型。取り込み済み`app.bsky.graph.follow`
