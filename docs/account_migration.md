@@ -63,6 +63,8 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 - **打ち切り**: 以後は転入元から何も取らない（取り直しをやめ、まだ取れていない blob を諦める。`import_aborted_at`）。手元のスナップショットのレコードは取り込んでから完了へ進む。再開はできない。諦めた画像は、Bluesky の CDN のキャッシュが切れると過去の投稿に表示されなくなる
 - **転入元の無効化を blob の後にする**のは、無効化された転入元は`getBlob`・`getRepo`に応答しなくなると考えられるため
 
+**止まったジョブの積み直し**: ジョブが進める状態のうち`fetching_repo`・`requesting_plc_signature`・`deactivating_source`は、3分以上更新が無ければ API ロールの定期処理（3分ごと、`requeue_stalled_migration_jobs`）がジョブを積み直す。ジョブが何かの理由で消えても、サーバーの再起動や利用者のリトライを待たずに進めるため。止まっているかどうかは経過時間でなくロックが見分ける: 取得に時間がかかっているだけなら進行中のジョブが`request_id`の advisory lock を握っているので、積み直したジョブは何もせずに終わる（`deactivating_source`のジョブはロックを使わないが、二重に動いても同じ結果になる）。取り込み（`importing_data`/`importing_blobs`）は、ジョブが自分を積み直しながら進むので、外から積むと連鎖が増えうるため対象にしない。次のジョブは、自分のロックを放してから積む（握ったまま積むと、すぐに拾われた次のジョブが同じロックを取れずに何もせず終わる）。
+
 `Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`importing_blobs`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
 
 ## 4. 不可逆境界（`submitPlcOperation`）

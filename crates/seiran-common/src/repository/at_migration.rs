@@ -1432,3 +1432,21 @@ pub async fn blob_attempts(pool: &PgPool, blob_id: i64) -> Result<i32, sqlx::Err
         .fetch_one(pool)
         .await
 }
+
+/// ジョブが進める状態（取り込み以外）のまま `older_than_secs` 秒以上更新の無い転入の
+/// (id, status)。ジョブが何かの理由で消えていても、積み直せば進むようにするため。
+/// 取り込み（`importing_data`/`importing_blobs`）は、ジョブが自分を積み直しながら進むので
+/// 外から積むと連鎖が増えうるため含めない。
+pub async fn list_stalled_job_migrations(
+    pool: &PgPool,
+    older_than_secs: i64,
+) -> Result<Vec<(i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, status::text FROM at_migration_requests
+         WHERE status IN ('fetching_repo', 'requesting_plc_signature', 'deactivating_source')
+           AND updated_at < NOW() - make_interval(secs => $1)",
+    )
+    .bind(older_than_secs as f64)
+    .fetch_all(pool)
+    .await
+}
