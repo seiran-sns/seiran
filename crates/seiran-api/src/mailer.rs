@@ -2,12 +2,18 @@
 //!
 //! SMTP 設定は DB の `site_settings` テーブルから取得する。
 //! キー: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_from`, `smtp_tls`
+//!
+//! 件名・本文は `locales/<lang>/mail.json` から引く（`crate::mail_i18n`）。どの関数も送る言語を
+//! 引数に取り、言語の決め方は呼び出し側が `mail_i18n::request_language` /
+//! `mail_i18n::stored_language` で決める。
 
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
 use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::collections::HashMap;
 use std::time::Duration;
+
+use crate::mail_i18n::text;
 
 #[derive(Debug, thiserror::Error)]
 pub enum MailError {
@@ -104,262 +110,236 @@ pub async fn test_smtp_connection(settings: &HashMap<String, String>) -> Result<
     }
 }
 
-/// 管理画面のテスト送信。設定どおりの差出人から `to` へ短い本文を送る。
-pub async fn send_test_email(
-    settings: &HashMap<String, String>,
+/// `to` へ件名・本文だけのプレーンテキストのメールを送る。
+async fn send_plain(
+    transport: &AsyncSmtpTransport<Tokio1Executor>,
+    from: &str,
     to: &str,
+    subject: String,
+    body: String,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport_with_timeout(settings, Some(TEST_TIMEOUT))?;
-
     let email = Message::builder()
         .from(from.parse()?)
         .to(to.trim().parse()?)
-        .subject("seiran — テストメール")
+        .subject(subject)
         .header(ContentType::TEXT_PLAIN)
-        .body("seiran の管理画面から送信したテストメールです。このメールが届いていれば、SMTP 設定でメールを送信できます。".to_string())?;
-
+        .body(body)?;
     transport.send(email).await?;
     Ok(())
+}
+
+/// 言語ファイルの `{key}.subject` / `{key}.body` で組み立てたメールを送る。
+async fn send_message(
+    settings: &HashMap<String, String>,
+    language: &str,
+    to: &str,
+    key: &str,
+    vars: &[(&str, &str)],
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+    send_plain(
+        &transport,
+        &from,
+        to,
+        text(language, &format!("{key}.subject"), vars),
+        text(language, &format!("{key}.body"), vars),
+    )
+    .await
+}
+
+/// 管理画面のテスト送信。設定どおりの差出人から `to` へ短い本文を送る。
+pub async fn send_test_email(
+    settings: &HashMap<String, String>,
+    language: &str,
+    to: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport_with_timeout(settings, Some(TEST_TIMEOUT))?;
+    send_plain(
+        &transport,
+        &from,
+        to,
+        text(language, "test.subject", &[]),
+        text(language, "test.body", &[]),
+    )
+    .await
 }
 
 pub async fn send_verification_email(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     verify_url: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran へようこそ。\n\n以下のリンクをクリックしてメールアドレスを確認してください:\n\n{}\n\nこのリンクは 24 時間有効です。\n\n心当たりがない場合は無視してください。",
-        verify_url
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — メールアドレスの確認")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
+    send_message(
+        settings,
+        language,
+        to,
+        "verifyEmail",
+        &[("url", verify_url)],
+    )
+    .await
 }
 
 pub async fn send_email_change_confirmation(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     confirm_url: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran — メールアドレス変更のリクエストを受け付けました。\n\n以下のリンクをクリックしてこのメールアドレスへの変更を確定してください:\n\n{}\n\nこのリンクは 24 時間有効です。\n\n心当たりがない場合は無視してください。",
-        confirm_url
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — メールアドレス変更の確認")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
+    send_message(
+        settings,
+        language,
+        to,
+        "emailChange",
+        &[("url", confirm_url)],
+    )
+    .await
 }
 
 /// TOTP（#65）: 認証アプリ・リカバリーコードを両方失ったユーザー向けの強制解除メール。
 pub async fn send_totp_disable_email(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     disable_url: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran — 二段階認証（TOTP）の解除リクエストを受け付けました。\n\n以下のリンクをクリックすると、このアカウントの二段階認証を無効化できます:\n\n{}\n\nこのリンクは 1 時間有効です。\n\n心当たりがない場合はこのメールを無視してください（リンクを踏まない限り二段階認証は解除されません）。",
-        disable_url
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — 二段階認証の解除リクエスト")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
+    send_message(
+        settings,
+        language,
+        to,
+        "totpDisable",
+        &[("url", disable_url)],
+    )
+    .await
 }
 
 pub async fn send_password_reset_email(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     reset_url: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran — パスワードリセットのリクエストを受け付けました。\n\n以下のリンクをクリックしてパスワードを再設定してください:\n\n{}\n\nこのリンクは 1 時間有効です。\n\n心当たりがない場合は無視してください。",
-        reset_url
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — パスワードのリセット")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
+    send_message(
+        settings,
+        language,
+        to,
+        "passwordReset",
+        &[("url", reset_url)],
+    )
+    .await
 }
 
 /// `com.atproto.server.createSession`（ATPセッション作成）の`authFactorToken`確認コード。
 pub async fn send_atp_session_2fa_code(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     code: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran — ログイン確認コードです。\n\nAT Protocolクライアント（Bluesky公式アプリ等）でのログインを完了するには、\n以下のコードを入力してください:\n\n{}\n\nこのコードは15分間有効です。\n\n心当たりがない場合はこのメールを無視してください。",
-        code
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — ログイン確認コード")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
+    send_message(settings, language, to, "atpLoginCode", &[("code", code)]).await
 }
 
 /// `com.atproto.identity.requestPlcOperationSignature`のPLCオペレーション署名確認コード。
 pub async fn send_plc_operation_signature_code(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     code: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-
-    let body = format!(
-        "seiran — DIDの管理情報（他サーバーへの引っ越し等）を変更するリクエストを受け付けました。\n\n以下のコードを、操作を行っているクライアントに入力してください:\n\n{}\n\nこのコードは15分間有効です。\n\n心当たりがない場合はこのメールを無視してください（コードを入力しない限りDIDの情報は変更されません）。",
-        code
-    );
-
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — DID管理情報の変更確認コード")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-
-    transport.send(email).await?;
-    Ok(())
-}
-
-/// DID 転入の入力待ちの種類ごとの、案内メールで伝える「次にやること」。
-fn migration_input_wait_action(status: &str) -> &'static str {
-    match status {
-        "awaiting_user_confirmation" => {
-            "確認コードの入力は済んでいます。転入画面で最終確認をしてください。転入すると元のサーバー（bsky.social 等）ではログインできなくなり、ハンドルが変わります。内容を確かめて「転入する」を押すと転入が確定します。"
-        }
-        "awaiting_plc_token" => {
-            "転入元（Bluesky 等）から届いた確認コードを、転入画面に入力してください。コードは届いてから15分で切れますが、転入画面の「確認コードを送り直す」で取り直せます。"
-        }
-        "awaiting_source_password" => {
-            "転入元にアプリパスワードでログインしていたため、転入に必要な操作ができませんでした。転入画面で、転入元にログインするときのパスワード（アプリパスワードではない方）を入力してください。"
-        }
-        _ => {
-            "転入の途中でエラーが起き、止まっています。転入画面で、リトライするか、中断して別のアカウントや通常の新規登録でやり直すかを選んでください。"
-        }
-    }
-}
-
-/// DID 転入の案内メールで共通の、続きへ戻る方法。
-fn migration_resume_instructions(username: &str, resume_url: &str) -> String {
-    format!(
-        "次のリンクから転入画面へ戻れます（一度だけ使えます）:\n\n{resume_url}\n\nリンクを使ったあとや別の端末からは、ログイン画面でユーザー名「{username}」と、転入を始めたときに決めたパスワードを入力しても戻れます。"
+    send_message(
+        settings,
+        language,
+        to,
+        "plcOperationCode",
+        &[("code", code)],
     )
+    .await
+}
+
+/// DID 転入の入力待ちの種類ごとの、案内メールで伝える「次にやること」の文言キー。
+fn migration_input_wait_action_key(status: &str) -> &'static str {
+    match status {
+        "awaiting_user_confirmation" => "migration.action.awaitingUserConfirmation",
+        "awaiting_plc_token" => "migration.action.awaitingPlcToken",
+        "awaiting_source_password" => "migration.action.awaitingSourcePassword",
+        _ => "migration.action.error",
+    }
 }
 
 fn format_deadline(deadline: chrono::DateTime<chrono::Utc>) -> String {
     deadline.format("%Y-%m-%d %H:%M UTC").to_string()
 }
 
+/// DID 転入の入力待ちの案内・警告メールの中身（宛先と、本文に差し込む値）。
+pub struct MigrationInputWaitMail<'a> {
+    pub language: &'a str,
+    pub to: &'a str,
+    /// `at_migration_requests.status`（入力待ちの種類）。
+    pub status: &'a str,
+    pub username: &'a str,
+    pub resume_url: &'a str,
+    pub deadline: chrono::DateTime<chrono::Utc>,
+}
+
+/// DID 転入の入力待ちの案内（`key` が `migration.inputWait`、入力待ちに入った時点で送る）と
+/// 打ち切りの警告（`migration.expiryWarning`、入力待ちのまま24時間たった時点で送る）。
+async fn send_migration_input_wait_mail(
+    settings: &HashMap<String, String>,
+    mail: &MigrationInputWaitMail<'_>,
+    key: &str,
+) -> Result<(), MailError> {
+    let lang = mail.language;
+    let action = text(lang, migration_input_wait_action_key(mail.status), &[]);
+    let resume = text(
+        lang,
+        "migration.resume",
+        &[("url", mail.resume_url), ("username", mail.username)],
+    );
+    let deadline = format_deadline(mail.deadline);
+    send_message(
+        settings,
+        lang,
+        mail.to,
+        key,
+        &[
+            ("username", mail.username),
+            ("action", &action),
+            ("resume", &resume),
+            ("deadline", &deadline),
+        ],
+    )
+    .await
+}
+
 /// DID 転入の入力待ちの案内（入力待ちに入った時点で送る）。
 pub async fn send_migration_input_wait_notice(
     settings: &HashMap<String, String>,
-    to: &str,
-    status: &str,
-    username: &str,
-    resume_url: &str,
-    deadline: chrono::DateTime<chrono::Utc>,
+    mail: &MigrationInputWaitMail<'_>,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-    let body = format!(
-        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、あなたの入力を待っています。\n\n{action}\n\n{resume}\n\n{deadline} までに続きを進めないと、転入は取り消され、確保しているユーザー名「{username}」は解放されます。\n\n心当たりがない場合はこのメールを無視してください。",
-        action = migration_input_wait_action(status),
-        resume = migration_resume_instructions(username, resume_url),
-        deadline = format_deadline(deadline),
-    );
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — Bluesky からの転入: 入力をお待ちしています")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-    transport.send(email).await?;
-    Ok(())
+    send_migration_input_wait_mail(settings, mail, "migration.inputWait").await
 }
 
 /// DID 転入の打ち切りの警告（入力待ちのまま24時間たった時点で送る）。
 pub async fn send_migration_expiry_warning(
     settings: &HashMap<String, String>,
-    to: &str,
-    status: &str,
-    username: &str,
-    resume_url: &str,
-    deadline: chrono::DateTime<chrono::Utc>,
+    mail: &MigrationInputWaitMail<'_>,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-    let body = format!(
-        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、{deadline} に取り消されます。\n\n続ける場合は、それまでに次の操作をしてください。\n\n{action}\n\n{resume}\n\n取り消されると、確保しているユーザー名「{username}」は解放されます。転入をやめる場合は、このメールを無視してかまいません。",
-        action = migration_input_wait_action(status),
-        resume = migration_resume_instructions(username, resume_url),
-        deadline = format_deadline(deadline),
-    );
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — Bluesky からの転入はまもなく取り消されます")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-    transport.send(email).await?;
-    Ok(())
+    send_migration_input_wait_mail(settings, mail, "migration.expiryWarning").await
 }
 
 /// DID 転入を期限切れで取り消した通知。
 pub async fn send_migration_expired(
     settings: &HashMap<String, String>,
+    language: &str,
     to: &str,
     username: &str,
 ) -> Result<(), MailError> {
-    let (transport, from) = build_transport(settings)?;
-    let body = format!(
-        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、入力が無いまま期限が過ぎたため取り消しました。確保していたユーザー名「{username}」は解放されています。\n\n転入元のアカウントは何も変わっていません。転入する場合は、もう一度最初から始めてください。"
-    );
-    let email = Message::builder()
-        .from(from.parse()?)
-        .to(to.parse()?)
-        .subject("seiran — Bluesky からの転入を取り消しました")
-        .header(ContentType::TEXT_PLAIN)
-        .body(body)?;
-    transport.send(email).await?;
-    Ok(())
+    send_message(
+        settings,
+        language,
+        to,
+        "migration.expired",
+        &[("username", username)],
+    )
+    .await
 }

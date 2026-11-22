@@ -31,6 +31,7 @@ async fn migration_with_blobs(pool: &sqlx::PgPool, cids: &[&str]) -> i64 {
             password_hash: "hash",
             email: Some(&format!("{username}@integration-test.invalid")),
             agreed_tos_text: None,
+            language: "ko",
         },
         chrono::Utc::now(),
     )

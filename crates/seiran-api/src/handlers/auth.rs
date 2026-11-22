@@ -209,6 +209,9 @@ async fn fetch_avatar_url(state: &AppState, actor_id: i64) -> Option<String> {
 pub struct LoginRequest {
     pub identifier: String, // メールアドレス OR ユーザーネーム
     pub password: String,
+    /// 画面に出ている表示言語。途中の転入へ戻ったとき、以後の案内メールをこの言語で送る
+    /// （`at_migration_requests.language`）。無い・非対応なら `Accept-Language` から決める。
+    pub language: Option<String>,
 }
 
 /// 登録リクエストの形式検証（パスワード長・ユーザー名の書式・予約語）。
@@ -598,6 +601,7 @@ pub struct TotpRequiredResponse {
 async fn login_to_migration(
     state: &AppState,
     req: &LoginRequest,
+    headers: &HeaderMap,
 ) -> Result<Json<LoginResponse>, ApiError> {
     use seiran_common::repository::at_migration as migration_repo;
     let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
@@ -616,7 +620,8 @@ async fn login_to_migration(
             return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
         }
         // 照合の間に完了・打ち切りされていたら、通常のログイン失敗と同じに扱う。
-        return match crate::handlers::migration::reissue_session(state, m.id).await? {
+        let language = crate::mail_i18n::request_language(req.language.as_deref(), headers);
+        return match crate::handlers::migration::reissue_session(state, m.id, language).await? {
             Some(session) => Ok(Json(LoginResponse::MigrationResume(
                 MigrationResumeResponse {
                     migration_resume: session,
@@ -641,6 +646,7 @@ async fn login_to_migration(
 pub async fn login(
     State(state): State<AppState>,
     ip: ClientIp,
+    headers: HeaderMap,
     Json(req): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, ApiError> {
     // Turnstile は課さない。同じ ID/PW を受け付ける ATP の createSession には Turnstile を
@@ -674,7 +680,7 @@ pub async fn login(
                 None,
             )
             .await?;
-            return login_to_migration(&state, &req).await;
+            return login_to_migration(&state, &req, &headers).await;
         }
     };
     let user_id = row.id;
@@ -760,6 +766,9 @@ pub async fn me(
 #[derive(Deserialize)]
 pub struct RequestPasswordResetRequest {
     pub email: String,
+    /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
+    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    pub language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -788,6 +797,7 @@ pub struct ResetPasswordRequest {
 /// ユーザーが存在しない場合も同一レスポンスを返す（ユーザー存在確認攻撃を防ぐ）。
 pub async fn request_password_reset(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<RequestPasswordResetRequest>,
 ) -> Result<Json<MessageResponse>, ApiError> {
     let email = req.email.trim().to_lowercase();
@@ -837,7 +847,10 @@ pub async fn request_password_reset(
                 state.local_domain, token
             );
             let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
-            if let Err(e) = send_password_reset_email(&smtp_settings, &email, &reset_url).await {
+            let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+            if let Err(e) =
+                send_password_reset_email(&smtp_settings, language, &email, &reset_url).await
+            {
                 tracing::error!(
                     "[request-password-reset] メール送信失敗（処理は継続）: {}",
                     e

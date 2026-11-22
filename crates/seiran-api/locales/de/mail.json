@@ -1,0 +1,51 @@
+{
+  "test": {
+    "subject": "seiran — Test-E-Mail",
+    "body": "Dies ist eine Test-E-Mail aus dem Verwaltungsbereich von seiran. Wenn du sie erhalten hast, können mit den SMTP-Einstellungen E-Mails versendet werden."
+  },
+  "verifyEmail": {
+    "subject": "seiran — E-Mail-Adresse bestätigen",
+    "body": "Willkommen bei seiran.\n\nKlicke auf den folgenden Link, um deine E-Mail-Adresse zu bestätigen:\n\n{{url}}\n\nDieser Link ist 24 Stunden gültig.\n\nWenn du das nicht angefordert hast, kannst du diese E-Mail ignorieren."
+  },
+  "emailChange": {
+    "subject": "seiran — Neue E-Mail-Adresse bestätigen",
+    "body": "seiran — Wir haben eine Anfrage zur Änderung deiner E-Mail-Adresse erhalten.\n\nKlicke auf den folgenden Link, um die Änderung auf diese E-Mail-Adresse zu bestätigen:\n\n{{url}}\n\nDieser Link ist 24 Stunden gültig.\n\nWenn du das nicht angefordert hast, kannst du diese E-Mail ignorieren."
+  },
+  "totpDisable": {
+    "subject": "seiran — Anfrage zum Deaktivieren der Zwei-Faktor-Authentifizierung",
+    "body": "seiran — Wir haben eine Anfrage zum Deaktivieren der Zwei-Faktor-Authentifizierung (TOTP) erhalten.\n\nÜber den folgenden Link kannst du die Zwei-Faktor-Authentifizierung für dieses Konto deaktivieren:\n\n{{url}}\n\nDieser Link ist 1 Stunde gültig.\n\nWenn du das nicht angefordert hast, ignoriere diese E-Mail (die Zwei-Faktor-Authentifizierung bleibt aktiv, solange der Link nicht geöffnet wird)."
+  },
+  "passwordReset": {
+    "subject": "seiran — Passwort zurücksetzen",
+    "body": "seiran — Wir haben eine Anfrage zum Zurücksetzen deines Passworts erhalten.\n\nKlicke auf den folgenden Link, um ein neues Passwort festzulegen:\n\n{{url}}\n\nDieser Link ist 1 Stunde gültig.\n\nWenn du das nicht angefordert hast, kannst du diese E-Mail ignorieren."
+  },
+  "atpLoginCode": {
+    "subject": "seiran — Bestätigungscode für die Anmeldung",
+    "body": "seiran — Hier ist dein Bestätigungscode für die Anmeldung.\n\nUm die Anmeldung in deinem AT-Protocol-Client (z. B. der offiziellen Bluesky-App) abzuschließen,\ngib den folgenden Code ein:\n\n{{code}}\n\nDieser Code ist 15 Minuten gültig.\n\nWenn du dich nicht anmelden wolltest, kannst du diese E-Mail ignorieren."
+  },
+  "plcOperationCode": {
+    "subject": "seiran — Bestätigungscode zum Ändern deiner DID-Informationen",
+    "body": "seiran — Wir haben eine Anfrage zur Änderung der Verwaltungsinformationen deiner DID erhalten (z. B. für einen Umzug auf einen anderen Server).\n\nGib den folgenden Code in dem Client ein, den du gerade verwendest:\n\n{{code}}\n\nDieser Code ist 15 Minuten gültig.\n\nWenn du das nicht angefordert hast, ignoriere diese E-Mail (deine DID-Informationen ändern sich nur, wenn der Code eingegeben wird)."
+  },
+  "migration": {
+    "action": {
+      "awaitingUserConfirmation": "Du hast den Bestätigungscode bereits eingegeben. Bitte führe auf der Umzugsseite die abschließende Prüfung durch. Nach dem Umzug kannst du dich nicht mehr auf deinem ursprünglichen Server (z. B. bsky.social) anmelden, und dein Handle ändert sich. Prüfe die Angaben und klicke auf „Umziehen“, um den Umzug abzuschließen.",
+      "awaitingPlcToken": "Gib auf der Umzugsseite den Bestätigungscode ein, den dir dein ursprünglicher Server (z. B. Bluesky) geschickt hat. Der Code läuft 15 Minuten nach dem Eingang ab, aber du kannst über „Code erneut senden“ auf der Umzugsseite einen neuen anfordern.",
+      "awaitingSourcePassword": "Du warst auf deinem ursprünglichen Server mit einem App-Passwort angemeldet, daher konnten die für den Umzug nötigen Schritte nicht ausgeführt werden. Gib auf der Umzugsseite das Passwort ein, mit dem du dich auf deinem ursprünglichen Server anmeldest (nicht das App-Passwort).",
+      "error": "Beim Umzug ist ein Fehler aufgetreten, und er wurde angehalten. Wähle auf der Umzugsseite, ob du es erneut versuchen oder abbrechen und mit einem anderen Konto oder einer normalen Registrierung neu beginnen möchtest."
+    },
+    "resume": "Über diesen Link kehrst du zur Umzugsseite zurück (er kann nur einmal verwendet werden):\n\n{{url}}\n\nNachdem du den Link verwendet hast oder auf einem anderen Gerät kannst du auch zurückkehren, indem du auf der Anmeldeseite den Benutzernamen „{{username}}“ und das Passwort eingibst, das du zu Beginn des Umzugs festgelegt hast.",
+    "inputWait": {
+      "subject": "seiran — Umzug von Bluesky: Wir warten auf deine Eingabe",
+      "body": "Dein Umzug von Bluesky zu seiran (Benutzername „{{username}}“) wartet auf deine Eingabe.\n\n{{action}}\n\n{{resume}}\n\nWenn du nicht bis {{deadline}} fortfährst, wird der Umzug abgebrochen und der für dich reservierte Benutzername „{{username}}“ freigegeben.\n\nWenn du das nicht angefordert hast, kannst du diese E-Mail ignorieren."
+    },
+    "expiryWarning": {
+      "subject": "seiran — Dein Umzug von Bluesky wird bald abgebrochen",
+      "body": "Dein Umzug von Bluesky zu seiran (Benutzername „{{username}}“) wird am {{deadline}} abgebrochen.\n\nWenn du fortfahren möchtest, erledige bis dahin Folgendes.\n\n{{action}}\n\n{{resume}}\n\nNach dem Abbruch wird der für dich reservierte Benutzername „{{username}}“ freigegeben. Wenn du nicht mehr umziehen möchtest, kannst du diese E-Mail ignorieren."
+    },
+    "expired": {
+      "subject": "seiran — Dein Umzug von Bluesky wurde abgebrochen",
+      "body": "Dein Umzug von Bluesky zu seiran (Benutzername „{{username}}“) wurde abgebrochen, weil die Frist ohne Eingabe abgelaufen ist. Der für dich reservierte Benutzername „{{username}}“ wurde freigegeben.\n\nAn deinem ursprünglichen Konto hat sich nichts geändert. Wenn du umziehen möchtest, beginne bitte noch einmal von vorn."
+    }
+  }
+}

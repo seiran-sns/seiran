@@ -7,6 +7,15 @@ export function getToken(): string | null {
   return localStorage.getItem("seiran_token");
 }
 
+/**
+ * メールを発生させる API に送る `language`。画面に実際に出ている表示言語（localStorage の
+ * 明示選択 → `navigator.languages` の順で表示言語へ丸めた結果、対応外ならフォールバックの
+ * `en`）を送り、サーバーはその言語でメールを書く。
+ */
+export function mailLanguage(): string {
+  return i18n.resolvedLanguage ?? i18n.language ?? "en";
+}
+
 function authHeaders(): Record<string, string> {
   const token = getToken();
   return token ? { Authorization: `Bearer ${token}` } : {};

@@ -1,0 +1,51 @@
+{
+  "test": {
+    "subject": "seiran — Correo de prueba",
+    "body": "Este es un correo de prueba enviado desde el panel de administración de seiran. Si lo has recibido, la configuración SMTP puede enviar correos."
+  },
+  "verifyEmail": {
+    "subject": "seiran — Confirma tu dirección de correo",
+    "body": "Te damos la bienvenida a seiran.\n\nHaz clic en el siguiente enlace para confirmar tu dirección de correo:\n\n{{url}}\n\nEste enlace es válido durante 24 horas.\n\nSi no has sido tú, puedes ignorar este correo."
+  },
+  "emailChange": {
+    "subject": "seiran — Confirma tu nueva dirección de correo",
+    "body": "seiran — Hemos recibido una solicitud para cambiar tu dirección de correo.\n\nHaz clic en el siguiente enlace para confirmar el cambio a esta dirección:\n\n{{url}}\n\nEste enlace es válido durante 24 horas.\n\nSi no has sido tú, puedes ignorar este correo."
+  },
+  "totpDisable": {
+    "subject": "seiran — Solicitud para desactivar la verificación en dos pasos",
+    "body": "seiran — Hemos recibido una solicitud para desactivar la verificación en dos pasos (TOTP).\n\nHaz clic en el siguiente enlace para desactivar la verificación en dos pasos de esta cuenta:\n\n{{url}}\n\nEste enlace es válido durante 1 hora.\n\nSi no has sido tú, ignora este correo (la verificación en dos pasos no se desactiva a menos que se abra el enlace)."
+  },
+  "passwordReset": {
+    "subject": "seiran — Restablece tu contraseña",
+    "body": "seiran — Hemos recibido una solicitud para restablecer tu contraseña.\n\nHaz clic en el siguiente enlace para establecer una nueva contraseña:\n\n{{url}}\n\nEste enlace es válido durante 1 hora.\n\nSi no has sido tú, puedes ignorar este correo."
+  },
+  "atpLoginCode": {
+    "subject": "seiran — Código de confirmación de inicio de sesión",
+    "body": "seiran — Este es tu código de confirmación de inicio de sesión.\n\nPara terminar de iniciar sesión en tu cliente de AT Protocol (como la app oficial de Bluesky),\nintroduce el siguiente código:\n\n{{code}}\n\nEste código es válido durante 15 minutos.\n\nSi no has intentado iniciar sesión, puedes ignorar este correo."
+  },
+  "plcOperationCode": {
+    "subject": "seiran — Código de confirmación para cambiar la información de tu DID",
+    "body": "seiran — Hemos recibido una solicitud para cambiar la información de gestión de tu DID (por ejemplo, para mudarte a otro servidor).\n\nIntroduce el siguiente código en el cliente que estás usando:\n\n{{code}}\n\nEste código es válido durante 15 minutos.\n\nSi no has sido tú, ignora este correo (la información de tu DID no cambiará a menos que se introduzca el código)."
+  },
+  "migration": {
+    "action": {
+      "awaitingUserConfirmation": "Ya has introducido el código de confirmación. Haz la comprobación final en la pantalla de migración. Después de migrar ya no podrás iniciar sesión en tu servidor original (como bsky.social) y tu handle cambiará. Revisa los detalles y pulsa «Migrar» para completar la migración.",
+      "awaitingPlcToken": "Introduce en la pantalla de migración el código de confirmación que te envió tu servidor original (como Bluesky). El código caduca 15 minutos después de llegar, pero puedes obtener uno nuevo con «Reenviar el código» en la pantalla de migración.",
+      "awaitingSourcePassword": "Iniciaste sesión en tu servidor original con una contraseña de aplicación, por lo que no se pudieron realizar los pasos necesarios para la migración. En la pantalla de migración, introduce la contraseña con la que inicias sesión en tu servidor original (no una contraseña de aplicación).",
+      "error": "Se produjo un error durante la migración y se ha detenido. En la pantalla de migración, elige si quieres reintentarlo o cancelarlo y empezar de nuevo con otra cuenta o con un registro normal."
+    },
+    "resume": "Puedes volver a la pantalla de migración con este enlace (solo se puede usar una vez):\n\n{{url}}\n\nDespués de usar el enlace, o desde otro dispositivo, también puedes volver introduciendo en la pantalla de inicio de sesión el nombre de usuario «{{username}}» y la contraseña que elegiste al empezar la migración.",
+    "inputWait": {
+      "subject": "seiran — Migración desde Bluesky: esperando tu respuesta",
+      "body": "Tu migración de Bluesky a seiran (nombre de usuario «{{username}}») está esperando tu respuesta.\n\n{{action}}\n\n{{resume}}\n\nSi no continúas antes del {{deadline}}, la migración se cancelará y se liberará el nombre de usuario «{{username}}» que tienes reservado.\n\nSi no has sido tú, puedes ignorar este correo."
+    },
+    "expiryWarning": {
+      "subject": "seiran — Tu migración desde Bluesky se cancelará pronto",
+      "body": "Tu migración de Bluesky a seiran (nombre de usuario «{{username}}») se cancelará el {{deadline}}.\n\nSi quieres continuar, haz lo siguiente antes de esa fecha.\n\n{{action}}\n\n{{resume}}\n\nSi se cancela, se liberará el nombre de usuario «{{username}}» que tienes reservado. Si ya no quieres migrar, puedes ignorar este correo."
+    },
+    "expired": {
+      "subject": "seiran — Se ha cancelado tu migración desde Bluesky",
+      "body": "Tu migración de Bluesky a seiran (nombre de usuario «{{username}}») se ha cancelado porque venció el plazo sin recibir respuesta. Se ha liberado el nombre de usuario «{{username}}» que tenías reservado.\n\nTu cuenta original no ha cambiado en nada. Si quieres migrar, vuelve a empezar desde el principio."
+    }
+  }
+}

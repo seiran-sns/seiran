@@ -171,8 +171,14 @@ pub async fn xrpc_request_plc_operation_signature(
         .into_response();
     }
 
-    if let Err(e) =
-        crate::mailer::send_plc_operation_signature_code(&smtp_settings, &login.email, &code).await
+    let language = super::server::atp_mail_language(&state, login.id, &headers).await;
+    if let Err(e) = crate::mailer::send_plc_operation_signature_code(
+        &smtp_settings,
+        language,
+        &login.email,
+        &code,
+    )
+    .await
     {
         tracing::error!("[requestPlcOperationSignature] コード送信失敗: {}", e);
         // 送信自体に失敗した場合、ユーザーは届くはずのないコードの入力を永遠に求められる

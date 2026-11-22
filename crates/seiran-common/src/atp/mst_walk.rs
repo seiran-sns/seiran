@@ -45,6 +45,63 @@ fn optional_link(
     }
 }
 
+/// 解読した MST ノード。`entries` はキー順で、`left` は全エントリより小さいキーの部分木。
+struct DecodedNode {
+    left: Option<Cid>,
+    entries: Vec<DecodedEntry>,
+}
+
+struct DecodedEntry {
+    /// 前のエントリとの共通 prefix を復元したフルキー。
+    key: Vec<u8>,
+    /// レコード本体の CID。
+    value: Cid,
+    /// このエントリと次のエントリの間のキーの部分木。
+    right: Option<Cid>,
+}
+
+fn decode_node(bytes: &[u8]) -> Result<DecodedNode, CarError> {
+    let node: Ipld =
+        serde_ipld_dagcbor::from_slice(bytes).map_err(|e| CarError::Node(e.to_string()))?;
+    let map = ipld_map(&node, "MSTノード")?;
+    let left = optional_link(map, "l")?;
+
+    let Some(Ipld::List(raw_entries)) = map.get("e") else {
+        return Err(CarError::Node("eフィールドがありません".into()));
+    };
+
+    let mut entries = Vec::with_capacity(raw_entries.len());
+    let mut prev_key: &[u8] = &[];
+    for entry in raw_entries {
+        let entry_map = ipld_map(entry, "MSTエントリ")?;
+
+        let p = match entry_map.get("p") {
+            Some(Ipld::Integer(n)) if *n >= 0 => *n as usize,
+            _ => return Err(CarError::Node("pフィールドが不正です".into())),
+        };
+        let k_suffix = match entry_map.get("k") {
+            Some(Ipld::Bytes(b)) => b,
+            _ => return Err(CarError::Node("kフィールドが不正です".into())),
+        };
+        if p > prev_key.len() {
+            return Err(CarError::Node(
+                "pが直前キーの長さを超えています（不正なMST）".into(),
+            ));
+        }
+        let mut key = prev_key[..p].to_vec();
+        key.extend_from_slice(k_suffix);
+
+        let value = match entry_map.get("v") {
+            Some(Ipld::Link(c)) => *c,
+            _ => return Err(CarError::Node("vフィールドが不正です".into())),
+        };
+        let right = optional_link(entry_map, "t")?;
+        entries.push(DecodedEntry { key, value, right });
+        prev_key = &entries.last().expect("直前に push 済み").key;
+    }
+    Ok(DecodedNode { left, entries })
+}
+
 /// ルートCIDから全リーフを深さ優先（キー順）で列挙する。
 pub fn walk_mst(root: Cid, blocks: &HashMap<Cid, Vec<u8>>) -> Result<Vec<MstLeaf>, CarError> {
     let mut leaves = Vec::new();
@@ -64,63 +121,79 @@ fn walk_node(
     let bytes = blocks
         .get(&cid)
         .ok_or_else(|| CarError::MissingBlock(cid.to_string()))?;
-    let node: Ipld =
-        serde_ipld_dagcbor::from_slice(bytes).map_err(|e| CarError::Node(e.to_string()))?;
-    let map = ipld_map(&node, "MSTノード")?;
+    let node = decode_node(bytes)?;
 
     // 左端のサブツリー（layer最左、全キーより小さい）を先に辿る。
-    if let Some(left) = optional_link(map, "l")? {
+    if let Some(left) = node.left {
         walk_node(left, blocks, leaves, depth + 1)?;
     }
 
-    let Some(Ipld::List(entries)) = map.get("e") else {
-        return Err(CarError::Node("eフィールドがありません".into()));
-    };
-
-    let mut prev_key: Vec<u8> = Vec::new();
-    for entry in entries {
-        let entry_map = ipld_map(entry, "MSTエントリ")?;
-
-        let p = match entry_map.get("p") {
-            Some(Ipld::Integer(n)) if *n >= 0 => *n as usize,
-            _ => return Err(CarError::Node("pフィールドが不正です".into())),
-        };
-        let k_suffix = match entry_map.get("k") {
-            Some(Ipld::Bytes(b)) => b.clone(),
-            _ => return Err(CarError::Node("kフィールドが不正です".into())),
-        };
-        if p > prev_key.len() {
-            return Err(CarError::Node(
-                "pが直前キーの長さを超えています（不正なMST）".into(),
-            ));
-        }
-
-        let mut full_key = prev_key[..p].to_vec();
-        full_key.extend_from_slice(&k_suffix);
-        prev_key = full_key.clone();
-
-        let v_cid = match entry_map.get("v") {
-            Some(Ipld::Link(c)) => *c,
-            _ => return Err(CarError::Node("vフィールドが不正です".into())),
-        };
-        let key = String::from_utf8(full_key).map_err(|_| CarError::InvalidKey)?;
+    for entry in node.entries {
+        let key = String::from_utf8(entry.key).map_err(|_| CarError::InvalidKey)?;
         let record_bytes = blocks
-            .get(&v_cid)
-            .ok_or_else(|| CarError::MissingBlock(v_cid.to_string()))?
+            .get(&entry.value)
+            .ok_or_else(|| CarError::MissingBlock(entry.value.to_string()))?
             .clone();
         leaves.push(MstLeaf {
             key,
-            cid: v_cid,
+            cid: entry.value,
             bytes: record_bytes,
         });
 
         // このエントリの右側（次エントリより小さい範囲）のサブツリー。
-        if let Some(right) = optional_link(entry_map, "t")? {
+        if let Some(right) = entry.right {
             walk_node(right, blocks, leaves, depth + 1)?;
         }
     }
 
     Ok(())
+}
+
+/// [`mst_path_step`] の結果。
+#[derive(Debug, PartialEq, Eq)]
+pub enum MstPathStep {
+    /// このノードに `key` のエントリがある（値はレコード本体の CID）。
+    Found(Cid),
+    /// `key` があるとすればこの部分木の中。
+    Descend(Cid),
+    /// `key` はこの MST に無い（このノードまでの経路が無いことの証明になる）。
+    Absent,
+}
+
+/// MST ノード1つ（`node_bytes`）を見て、`key` へ向かう次の一歩を返す。ルートから
+/// `Descend` を辿って通ったノードと、`Found` ならレコード本体を集めると、
+/// `com.atproto.sync.getRecord` が返す証明（参照実装の `MST.cidsForPath`）になる。
+/// ノードのブロックは1段ずつ取得すればよいので、リポジトリ全体を読まずに済む。
+pub fn mst_path_step(node_bytes: &[u8], key: &str) -> Result<MstPathStep, CarError> {
+    let node = decode_node(node_bytes)?;
+    let key = key.as_bytes();
+    // `key` 以上で最初のエントリ。その直前の部分木に `key` より小さく直前のエントリより
+    // 大きいキーが入っている。
+    let index = node
+        .entries
+        .iter()
+        .position(|e| e.key.as_slice() >= key)
+        .unwrap_or(node.entries.len());
+    if let Some(entry) = node.entries.get(index) {
+        if entry.key == key {
+            return Ok(MstPathStep::Found(entry.value));
+        }
+    }
+    let subtree = match index {
+        0 => node.left,
+        i => node.entries[i - 1].right,
+    };
+    Ok(subtree.map_or(MstPathStep::Absent, MstPathStep::Descend))
+}
+
+/// commit ブロックから MST ルート（`data`）の CID を取り出す。
+pub fn commit_data_root(commit_bytes: &[u8]) -> Result<Cid, CarError> {
+    let commit: Ipld =
+        serde_ipld_dagcbor::from_slice(commit_bytes).map_err(|e| CarError::Node(e.to_string()))?;
+    match ipld_map(&commit, "commit")?.get("data") {
+        Some(Ipld::Link(cid)) => Ok(*cid),
+        _ => Err(CarError::Node("commitにdataフィールドがありません".into())),
+    }
 }
 
 /// リーフの `key`（"collection/rkey"）を分割する。
@@ -153,13 +226,7 @@ pub fn decode_repo_records(car_bytes: &[u8]) -> Result<Vec<DecodedRecord>, CarEr
     let commit_bytes = blocks
         .get(&root)
         .ok_or_else(|| CarError::MissingBlock(root.to_string()))?;
-    let commit: Ipld =
-        serde_ipld_dagcbor::from_slice(commit_bytes).map_err(|e| CarError::Node(e.to_string()))?;
-    let commit_map = ipld_map(&commit, "commit")?;
-    let mst_root = match commit_map.get("data") {
-        Some(Ipld::Link(cid)) => *cid,
-        _ => return Err(CarError::Node("commitにdataフィールドがありません".into())),
-    };
+    let mst_root = commit_data_root(commit_bytes)?;
 
     let leaves = walk_mst(mst_root, &blocks)?;
     leaves
@@ -303,6 +370,59 @@ mod tests {
             assert!(!record.collection.is_empty());
             assert!(!record.rkey.is_empty());
         }
+    }
+
+    /// ルートから `mst_path_step` を辿り、通ったノードと行き着いた結果を返す。
+    fn path_to(root: Cid, blocks: &HashMap<Cid, Vec<u8>>, key: &str) -> (Vec<Cid>, MstPathStep) {
+        let mut nodes = vec![root];
+        loop {
+            let step = mst_path_step(&blocks[nodes.last().unwrap()], key).unwrap();
+            match step {
+                MstPathStep::Descend(child) => nodes.push(child),
+                other => return (nodes, other),
+            }
+        }
+    }
+
+    #[test]
+    fn path_step_finds_every_key_and_proves_absence() {
+        // 200件あれば複数の層ができる（キーの SHA-256 の先頭の0ビットで層が決まる）。
+        let mut entries: Vec<(String, Cid)> = (0..200)
+            .map(|i| (format!("app.bsky.feed.post/k{i:04}"), record_cid(i)))
+            .collect();
+        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
+        let (root, blocks) = build_mst(&entries).unwrap();
+        let blocks: HashMap<Cid, Vec<u8>> = blocks.into_iter().collect();
+
+        let mut deepest = 0;
+        for (key, cid) in &entries {
+            let (nodes, step) = path_to(root, &blocks, key);
+            assert_eq!(step, MstPathStep::Found(*cid), "{key}");
+            deepest = deepest.max(nodes.len());
+        }
+        assert!(deepest > 1, "テストの木が1層しかない");
+
+        for missing in [
+            "app.bsky.feed.post/k0000a",
+            "app.bsky.feed.post/a",
+            "app.bsky.feed.post/z",
+            "app.bsky.actor.profile/self",
+            "zzz/last",
+        ] {
+            let (nodes, step) = path_to(root, &blocks, missing);
+            assert_eq!(step, MstPathStep::Absent, "{missing}");
+            assert_eq!(nodes[0], root);
+        }
+    }
+
+    #[test]
+    fn path_step_on_empty_tree_is_absent() {
+        let (root, blocks) = build_mst(&[]).unwrap();
+        let blocks: HashMap<Cid, Vec<u8>> = blocks.into_iter().collect();
+        assert_eq!(
+            mst_path_step(&blocks[&root], "app.bsky.feed.post/x").unwrap(),
+            MstPathStep::Absent
+        );
     }
 
     #[test]

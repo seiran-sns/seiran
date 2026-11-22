@@ -329,6 +329,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。`attempts`/`next_attempt_at` は一時的な失敗の回数と次に取り直してよい時刻（それまで他の blob を先に取る）、`given_up_at` は諦めた時刻（転入元に無い・利用者の打ち切り）、`last_error` はその理由。
 - `at_migration_requests.repo_refetched_at`: PLC 提出後にリポジトリを取り直し、スナップショットより後の変更を取り込み対象に反映した時刻（打ち切りで取り直しをやめた場合も入る）。`repo_refetch_attempts`/`repo_refetch_next_at`/`repo_refetch_error` は取り直しの一時的な失敗の回数・次に試してよい時刻・理由。`import_aborted_at` は利用者が取り込みを打ち切った時刻。`import_next_run_at` は取り込みのジョブが次に動く予定の時刻（続きを積むときだけ書く。予定を過ぎても動いていない連鎖を定期処理が積み直す。`docs/account_migration.md` 3節）。
 - `at_migration_requests.input_wait_since`: 利用者の入力・選択待ち（`awaiting_user_confirmation`・`awaiting_source_password`・`awaiting_plc_token`・`failed`）に入った時刻。入力待ちでなければ NULL。`input_wait_mail_stage` はこの入力待ちで送った案内メールの段階（0: 未送信、1: 入力待ちの案内、2: 打ち切りの警告）。`expired_at` は入力待ちのまま期限が来て打ち切った時刻（利用者による打ち切りは NULL）。期限と案内の流れは `docs/account_migration.md` 4節。
+- `at_migration_requests.language`: 案内メール（入力待ちの案内・打ち切りの警告・取り消しの通知）を送る言語（表示言語の8言語のどれか）。`start` のときの画面の言語で、ログイン・再開リンクで戻るとそのときの言語に置き換わる。NULL は記録しない版のサーバーが始めた転入で、英語で送る。
 - `at_migration_resume_tokens`: 案内メールの再開リンクのトークン（`token_hash` は SHA-256）。使い捨てで、`expires_at` は打ち切りの時刻。
 - `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。
 

@@ -9,9 +9,11 @@ use axum::{
 use serde::Deserialize;
 use tokio::sync::broadcast;
 
+use seiran_common::atp::mst_walk::{commit_data_root, mst_path_step, MstPathStep};
 use seiran_common::atp::{
-    build_commit_frame, build_identity_frame, cid_from_str, encode_car, CommitEvtOp,
+    build_commit_frame, build_identity_frame, cid_from_str, encode_car, Cid, CommitEvtOp,
 };
+use seiran_common::repository::actor::Actor;
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -250,29 +252,43 @@ fn repo_status(withdrawn: bool, did_moved_out: bool) -> (bool, Option<&'static s
     }
 }
 
+/// XRPC 標準形式（`{"error", "message"}`、400）のエラー応答。
+fn xrpc_error(error: &str, message: String) -> axum::response::Response {
+    (
+        StatusCode::BAD_REQUEST,
+        axum::Json(serde_json::json!({ "error": error, "message": message })),
+    )
+        .into_response()
+}
+
+/// この PDS がリポジトリを持つローカルアクター。ローカルのリポジトリを持たない DID
+/// （リモートアクター等）は XRPC 標準どおり `RepoNotFound`。
+async fn find_local_repo_actor(
+    state: &AppState,
+    did: &str,
+    method: &str,
+) -> Result<Actor, axum::response::Response> {
+    match state.actors.find_by_did(did).await {
+        Ok(Some(a)) if a.user_id.is_some() && a.at_repo_cid.is_some() => Ok(a),
+        Ok(_) => Err(xrpc_error(
+            "RepoNotFound",
+            format!("Could not find repo for DID: {did}"),
+        )),
+        Err(e) => {
+            Err(ApiError::Internal(format!("[{method}] アクター取得失敗: {}", e)).into_response())
+        }
+    }
+}
+
 /// `com.atproto.sync.getRepoStatus` — この PDS が持つリポジトリの稼働状態を返す。
-/// Relay などが `#account` を取りこぼしたときの確認に使う。ローカルのリポジトリを
-/// 持たない DID（リモートアクター等）は XRPC 標準どおり `RepoNotFound`。
+/// Relay などが `#account` を取りこぼしたときの確認に使う。
 pub async fn xrpc_get_repo_status(
     Query(params): Query<GetRepoStatusParams>,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let actor = match state.actors.find_by_did(&params.did).await {
-        Ok(Some(a)) if a.user_id.is_some() && a.at_repo_cid.is_some() => a,
-        Ok(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                axum::Json(serde_json::json!({
-                    "error": "RepoNotFound",
-                    "message": format!("Could not find repo for DID: {}", params.did),
-                })),
-            )
-                .into_response();
-        }
-        Err(e) => {
-            return ApiError::Internal(format!("[getRepoStatus] アクター取得失敗: {}", e))
-                .into_response();
-        }
+    let actor = match find_local_repo_actor(&state, &params.did, "getRepoStatus").await {
+        Ok(a) => a,
+        Err(resp) => return resp,
     };
     let (active, status) = repo_status(
         actor.withdrawn_at.is_some(),
@@ -288,6 +304,111 @@ pub async fn xrpc_get_repo_status(
         }
     }
     axum::Json(body).into_response()
+}
+
+#[derive(Deserialize)]
+pub struct GetRecordParams {
+    pub did: String,
+    pub collection: String,
+    pub rkey: String,
+}
+
+/// 中身を返せないアカウントの状態を XRPC のエラー名に写す（参照実装の
+/// `assertRepoAvailability` と同じ名前）。退会は参照実装ではアカウントごと消えるので
+/// `RepoNotFound`、凍結は `RepoTakendown`、DID 転出は `RepoDeactivated`。
+fn unavailable_repo_error(actor: &Actor) -> Option<&'static str> {
+    if actor.withdrawn_at.is_some() {
+        Some("RepoNotFound")
+    } else if actor.suspended_at.is_some() {
+        Some("RepoTakendown")
+    } else if actor.did_moved_out_at.is_some() {
+        Some("RepoDeactivated")
+    } else {
+        None
+    }
+}
+
+/// `com.atproto.sync.getRecord` — レコード1件を、署名付きコミットからそのレコードまでの
+/// MST の経路のブロックと一緒に CAR で返す（root はコミットの CID）。取得した側は DID の
+/// 署名鍵でコミットを検証し、経路を辿ってレコードの正しさを確かめられる。レコードが無い
+/// ときも、無いことを示す経路（コミットと、キーが入るはずの部分木までのノード）を返す。
+pub async fn xrpc_get_record(
+    Query(params): Query<GetRecordParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match find_local_repo_actor(&state, &params.did, "sync.getRecord").await {
+        Ok(a) => a,
+        Err(resp) => return resp,
+    };
+    if let Some(error) = unavailable_repo_error(&actor) {
+        let message = match error {
+            "RepoNotFound" => format!("Could not find repo for DID: {}", params.did),
+            "RepoTakendown" => format!("Repo has been takendown: {}", params.did),
+            _ => format!("Repo has been deactivated: {}", params.did),
+        };
+        return xrpc_error(error, message);
+    }
+    let key = format!("{}/{}", params.collection, params.rkey);
+    let commit_cid_str = actor
+        .at_repo_cid
+        .as_deref()
+        .expect("find_local_repo_actor で確認済み");
+    match record_proof_blocks(&state, actor.id, commit_cid_str, &key).await {
+        Ok((commit_cid, blocks)) => match encode_car(&commit_cid, &blocks) {
+            Ok(car_bytes) => (
+                StatusCode::OK,
+                [(header::CONTENT_TYPE, "application/vnd.ipld.car")],
+                car_bytes,
+            )
+                .into_response(),
+            Err(e) => {
+                ApiError::Internal(format!("[sync.getRecord] CAR 生成失敗: {}", e)).into_response()
+            }
+        },
+        Err(e) => ApiError::Internal(format!("[sync.getRecord] {}", e)).into_response(),
+    }
+}
+
+/// コミット・`key` までの MST のノード・（あれば）レコード本体のブロックを、この順で集める。
+/// ノードは1段ずつ取得するので、読むブロックは木の深さ程度で済む。
+async fn record_proof_blocks(
+    state: &AppState,
+    actor_id: i64,
+    commit_cid_str: &str,
+    key: &str,
+) -> Result<(Cid, Vec<(Cid, Vec<u8>)>), String> {
+    use seiran_common::atp::car::MAX_MST_DEPTH;
+    let block = |cid: Cid| async move {
+        seiran_common::repository::atp::block_bytes(
+            &state.db,
+            actor_id,
+            &seiran_common::atp::cid_to_string(&cid),
+        )
+        .await
+        .map_err(|e| format!("ブロック取得失敗 {cid}: {e}"))?
+        .ok_or_else(|| format!("ブロックがありません {cid}"))
+    };
+
+    let commit_cid =
+        cid_from_str(commit_cid_str).map_err(|e| format!("commit CID パース失敗: {e}"))?;
+    let commit_bytes = block(commit_cid).await?;
+    let mut node_cid = commit_data_root(&commit_bytes).map_err(|e| e.to_string())?;
+    let mut blocks = vec![(commit_cid, commit_bytes)];
+
+    for _ in 0..=MAX_MST_DEPTH {
+        let node_bytes = block(node_cid).await?;
+        let step = mst_path_step(&node_bytes, key).map_err(|e| e.to_string())?;
+        blocks.push((node_cid, node_bytes));
+        match step {
+            MstPathStep::Descend(child) => node_cid = child,
+            MstPathStep::Found(record_cid) => {
+                blocks.push((record_cid, block(record_cid).await?));
+                return Ok((commit_cid, blocks));
+            }
+            MstPathStep::Absent => return Ok((commit_cid, blocks)),
+        }
+    }
+    Err(format!("MST が深すぎます（{MAX_MST_DEPTH} 段超）"))
 }
 
 #[derive(Deserialize)]

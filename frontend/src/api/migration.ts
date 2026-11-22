@@ -4,7 +4,7 @@
 // 別経路: `X-Migration-Token`ヘッダで認可する。トークンはこのモジュールを呼ぶ側
 // （ページコンポーネント）がlocalStorage等で保持する。
 
-import { throwIfError, parseJsonBody } from "./core";
+import { throwIfError, parseJsonBody, mailLanguage } from "./core";
 import type { AuthResponse } from "./types";
 
 const BASE = "/api";
@@ -91,11 +91,17 @@ async function migrationRequest<T>(
 
 export const migration = {
   start(params: MigrationStartParams) {
-    return migrationRequest<MigrationStartResponse>("POST", "/migration/start", undefined, params);
+    return migrationRequest<MigrationStartResponse>("POST", "/migration/start", undefined, {
+      ...params,
+      language: mailLanguage(),
+    });
   },
   /** 案内メールの再開リンクのトークンで、途中の転入へ戻る（使い捨て）。 */
   resume(token: string) {
-    return migrationRequest<MigrationSession>("POST", "/migration/resume", undefined, { token });
+    return migrationRequest<MigrationSession>("POST", "/migration/resume", undefined, {
+      token,
+      language: mailLanguage(),
+    });
   },
   submitPlcToken(id: string, requestToken: string, plcToken: string) {
     return migrationRequest<SubmitPlcTokenResponse>(

@@ -1,4 +1,4 @@
-import { cursorParams, request } from "./core";
+import { cursorParams, mailLanguage, request } from "./core";
 import type { ActorSuggestion, AlsoKnownAsItem, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, ProfileFeedItem, RawNote, RawProfileFeedItem, RemoteFollowSummaryResponse, UserProfile } from "./types";
 import { normalizeNote, normalizeProfileFeedItem } from "./types";
 import { credentialJson, registrationOptions } from "./webauthn";
@@ -269,6 +269,7 @@ export const account = {
   requestEmailChange(newEmail: string) {
     return request<void>("POST", "/account/email/request-change", {
       new_email: newEmail,
+      language: mailLanguage(),
     });
   },
   /** 確認メールのリンク（`/verify-email-change?token=...`）を踏んだ際にトークンを確定する（#59）。 */

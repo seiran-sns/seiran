@@ -1,5 +1,6 @@
 use axum::{
     extract::{Query, State},
+    http::HeaderMap,
     Json,
 };
 use serde::{Deserialize, Serialize};
@@ -17,6 +18,9 @@ pub struct VerifyEmailRequest {
     pub email: String,
     /// Cloudflare Turnstile widgetが返すトークン。サイト鍵/秘密鍵が設定済みの場合は必須。
     pub turnstile_token: Option<String>,
+    /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
+    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    pub language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -39,6 +43,7 @@ pub struct VerifyTokenResponse {
 pub async fn request_email_verification(
     State(state): State<AppState>,
     ip: ClientIp,
+    headers: HeaderMap,
     Json(payload): Json<VerifyEmailRequest>,
 ) -> Result<Json<VerifyEmailResponse>, ApiError> {
     ensure_registration_open(&state).await?;
@@ -76,7 +81,8 @@ pub async fn request_email_verification(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    send_verification_email(&smtp_settings, &email, &verify_url)
+    let language = crate::mail_i18n::request_language(payload.language.as_deref(), &headers);
+    send_verification_email(&smtp_settings, language, &email, &verify_url)
         .await
         .map_err(|e| {
             tracing::error!("[verify-email] メール送信失敗: {}", e);

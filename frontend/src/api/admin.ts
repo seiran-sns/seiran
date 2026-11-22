@@ -1,4 +1,4 @@
-import { request, uploadFormData } from "./core";
+import { mailLanguage, request, uploadFormData } from "./core";
 import type { AdminReport, AdminUser, AuthIpBlock, DeniedHostsResponse, CustomEmoji, EmojiImportStatus, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
 
 export const admin = {
@@ -155,7 +155,10 @@ export const admin = {
   },
   /** 入力中の SMTP 設定で `to` へテストメールを送る。 */
   sendSmtpTestEmail(body: SmtpTestRequest & { to: string }) {
-    return request<SmtpTestResult>("POST", "/admin/site-settings/smtp-test-email", body);
+    return request<SmtpTestResult>("POST", "/admin/site-settings/smtp-test-email", {
+      ...body,
+      language: mailLanguage(),
+    });
   },
 
   /** 管理画面のウィジェットで得たトークンを Siteverify にかける（Secret Key 省略・空なら保存済みの値）。 */

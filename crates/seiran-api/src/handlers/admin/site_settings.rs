@@ -585,6 +585,8 @@ pub struct SmtpTestRequest {
     pub smtp_from: Option<String>,
     /// テスト送信の宛先。接続確認では使わない。
     pub to: Option<String>,
+    /// テスト送信の言語（管理画面の表示言語）。無い・非対応なら `Accept-Language` から決める。
+    pub language: Option<String>,
 }
 
 /// SMTP サーバーの応答はそのまま管理者に見せたいので、失敗も 200 で返し、
@@ -671,6 +673,7 @@ pub async fn test_smtp_connection(
 /// POST /api/admin/site-settings/smtp-test-email
 pub async fn send_smtp_test_email(
     State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
     Json(req): Json<SmtpTestRequest>,
 ) -> Result<Json<SmtpTestResponse>, ApiError> {
     let to = req
@@ -681,7 +684,8 @@ pub async fn send_smtp_test_email(
         .ok_or_else(|| ApiError::BadRequest("SMTP_TEST_RECIPIENT_REQUIRED".to_string()))?
         .to_string();
     let settings = smtp_settings_for_test(&state, &req).await?;
-    let result = crate::mailer::send_test_email(&settings, &to).await;
+    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let result = crate::mailer::send_test_email(&settings, language, &to).await;
     Ok(Json(SmtpTestResponse::from_result(result)))
 }
 

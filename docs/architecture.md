@@ -406,3 +406,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 - **「開く」**（`handlers/open_target.rs`）は薄いオーケストレーション層で、Bsky は `seiran-common::atp`、AP Actor は `target_resolve`、AP 投稿は受信 Create ジョブを再利用する。外部の ActivityStreams 文書の取得はメディアプロキシと同じ検証（DNS 固定・非公開IP拒否・リダイレクト再検証）を通す。フロントの `OpenTargetDialog` は QR を同期認識し、重い OCR Worker は読み取り開始後に動的 import する。
 - **通報**は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bsky を統一し、管理画面の「通報」タブで台帳閲覧・クローズ・内部コメント・凍結/投稿削除・リモート転送を行う（転送の仕様は `docs/protocols.md`「通報配送」）。
 - **Snowflake ID** はブラウザで精度を失わないよう、API では文字列で受け渡す。
+- **メールの言語**（`seiran-api/src/mail_i18n.rs`）: 件名・本文は `crates/seiran-api/locales/{言語}/mail.json` に表示言語の8言語分を置き、`include_str!` でバイナリへ埋め込む。形式はフロントの `i18n/locales` と同じ（入れ子のキー、`{{name}}` の差し込み）で、ユーザー製の言語ファイルを配るときにフロントと同じ形で扱えるようにしている。全言語のキーと差し込み名の一致は単体テストが検査し、欠けたキーは英語で補う。送る言語は次のとおり決める。
+  - ブラウザの操作が契機のメール（登録のメール確認・メール変更・2FA解除・パスワードリセット・管理画面のテスト送信）: リクエストの `language`（フロントの `mailLanguage()` が送る、画面に出ている表示言語）→ `Accept-Language` を表示言語へ丸めた値 → `en`。中国語の丸めはフロントの `normalizeDetectedLanguage` と同じ。
+  - ATP クライアントの操作が契機のメール（`createSession` のログイン確認コード・`requestPlcOperationSignature` の確認コード）: クライアントは画面の言語を送ってこないので、`users.language_preference` → `Accept-Language` → `en`。
+  - 定期処理から後で送るメール（DID 転入の案内・警告・取り消し）: 保存した `at_migration_requests.language`（NULL なら `en`。`docs/account_migration.md` 4節）。ログイン済みユーザーへ非同期に送るメールを足すときは `users.language_preference`（NULL なら `en`）を使う。

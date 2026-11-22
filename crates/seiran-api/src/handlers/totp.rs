@@ -320,6 +320,9 @@ pub async fn totp_verify(
 #[derive(Deserialize)]
 pub struct TotpRequestDisableEmailRequest {
     pub pending_token: String,
+    /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
+    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    pub language: Option<String>,
 }
 
 /// `POST /api/auth/totp/request-disable-email`
@@ -327,6 +330,7 @@ pub struct TotpRequestDisableEmailRequest {
 /// の所有で証明済みのため、登録メールアドレス宛に強制解除ワンタイムリンクを送る。
 pub async fn totp_request_disable_email(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<TotpRequestDisableEmailRequest>,
 ) -> Result<Json<()>, ApiError> {
     let user_id = state
@@ -358,7 +362,8 @@ pub async fn totp_request_disable_email(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    send_totp_disable_email(&smtp_settings, &email, &disable_url)
+    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    send_totp_disable_email(&smtp_settings, language, &email, &disable_url)
         .await
         .map_err(|e| {
             tracing::error!("[totp-request-disable] メール送信失敗: {}", e);
