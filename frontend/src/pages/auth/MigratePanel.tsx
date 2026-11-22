@@ -517,7 +517,10 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
 
   return (
     <>
-      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+      {/* 最終確認はパネル自身の見出し（「転入の最終確認」）が説明するので、段階の表示は出さない。 */}
+      {statusData?.needs_input !== "confirm" && (
+        <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+      )}
       {statusData?.expired && <p className={styles.error}>{t("auth:migrationStatus.expired")}</p>}
       {statusData?.expires_at && (
         <p style={{ textAlign: "center", color: "#a0aec0", fontSize: "0.85rem", marginBottom: "1rem" }}>
@@ -658,9 +661,6 @@ function MigrateConfirmPanel({ sourceHandle, newHandle, submitting, onConfirm }:
       <p style={warningStyle}>{t("auth:migrationStatus.confirm.loginDisabled")}</p>
       <p style={warningStyle}>
         {t("auth:migrationStatus.confirm.handleChange", { from: sourceHandle, to: newHandle })}
-      </p>
-      <p style={{ color: "#a0aec0", fontSize: "0.85rem", margin: "0 0 0.75rem" }}>
-        {t("auth:migrationStatus.confirm.nextStep")}
       </p>
       <p style={{ textAlign: "center", margin: "0 0 0.75rem" }}>
         <button type="button" className={styles.linkButton} onClick={() => setInfoOpen(true)}>
