@@ -1078,6 +1078,10 @@ fn xrpc_routes() -> Router<AppState> {
             get(handlers::xrpc::sync::xrpc_list_blobs),
         )
         .route(
+            "/xrpc/com.atproto.sync.getRepoStatus",
+            get(handlers::xrpc::sync::xrpc_get_repo_status),
+        )
+        .route(
             "/xrpc/com.atproto.server.createSession",
             post(handlers::xrpc::server::xrpc_create_session),
         )
