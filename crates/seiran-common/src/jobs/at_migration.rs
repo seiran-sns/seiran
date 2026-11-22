@@ -796,16 +796,21 @@ pub async fn handle_deactivate_source(
     }
 
     let mut session = source_session(&req);
-    let outcome =
-        match crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint).await {
-            Ok(resolved) => call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
-                let resolved = &resolved;
-                async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
-            })
-            .await
-            .map_err(|e| format!("deactivateAccount失敗: {e}")),
-            Err(e) => Err(format!("PDSエンドポイント検証失敗: {e}")),
-        };
+    // PDS 経由だと PLC 送信後は必ず BadJwtSignature になるので、entryway へ直接送る
+    // （`account_management_endpoint`）。
+    let endpoint = crate::atp::migration_client::account_management_endpoint(
+        req.source_refresh_jwt.as_deref(),
+        &req.source_pds_endpoint,
+    );
+    let outcome = match crate::atp::did_resolve::resolve_stored_endpoint(&endpoint).await {
+        Ok(resolved) => call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+            let resolved = &resolved;
+            async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
+        })
+        .await
+        .map_err(|e| format!("deactivateAccount失敗: {e}")),
+        Err(e) => Err(format!("PDSエンドポイント検証失敗: {e}")),
+    };
     if let Err(e) = &outcome {
         tracing::error!(
             "[MigrationDeactivateSource] {}（続行、request_id={}）",
