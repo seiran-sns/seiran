@@ -704,3 +704,24 @@ pub async fn resume_with_new_source_session(
     .await?;
     Ok(res.rows_affected() == 1)
 }
+
+/// 転入元アカウントの無効化（`deactivateAccount`）の結果を残す。成功なら
+/// `source_deactivated_at` を入れて前回の失敗理由を消し、失敗なら理由だけを書く。
+pub async fn record_source_deactivation(
+    pool: &PgPool,
+    id: i64,
+    result: Result<(), &str>,
+) -> Result<(), sqlx::Error> {
+    let error = result.err();
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET source_deactivated_at = CASE WHEN $2::text IS NULL THEN NOW() ELSE source_deactivated_at END,
+             source_deactivate_error = $2
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(error)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}

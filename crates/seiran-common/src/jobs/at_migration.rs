@@ -770,8 +770,8 @@ async fn import_one_blob(
         .map_err(|e| format!("media_files INSERT失敗: {e}"))
 }
 
-/// `Job::MigrationDeactivateSource` — 単発・ベストエフォート。失敗してもログのみで
-/// `completed`へ進める（`auth.rs`の付随処理失敗時ログのみの原則と同じ）。
+/// `Job::MigrationDeactivateSource` — 単発・ベストエフォート。失敗しても`completed`へ進める。
+/// 結果は`source_deactivated_at`/`source_deactivate_error`に残す（`auth.rs`の付随処理失敗時ログのみの原則と同じ）。
 pub async fn handle_deactivate_source(
     request_id: i64,
     ctx: Arc<JobContext>,
@@ -796,28 +796,35 @@ pub async fn handle_deactivate_source(
     }
 
     let mut session = source_session(&req);
-    match crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint).await {
-        Ok(resolved) => {
-            if let Err(e) = call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
+    let outcome =
+        match crate::atp::did_resolve::resolve_stored_endpoint(&req.source_pds_endpoint).await {
+            Ok(resolved) => call_with_refresh(pool, request_id, &resolved, &mut session, |s| {
                 let resolved = &resolved;
                 async move { crate::atp::migration_client::deactivate_account(resolved, &s).await }
             })
             .await
-            {
-                tracing::error!(
-                    "[MigrationDeactivateSource] deactivateAccount失敗（続行、request_id={}）: {}",
-                    request_id,
-                    e
-                );
-            }
-        }
-        Err(e) => {
-            tracing::error!(
-                "[MigrationDeactivateSource] PDSエンドポイント検証失敗（続行、request_id={}）: {}",
-                request_id,
-                e
-            );
-        }
+            .map_err(|e| format!("deactivateAccount失敗: {e}")),
+            Err(e) => Err(format!("PDSエンドポイント検証失敗: {e}")),
+        };
+    if let Err(e) = &outcome {
+        tracing::error!(
+            "[MigrationDeactivateSource] {}（続行、request_id={}）",
+            e,
+            request_id
+        );
+    }
+    if let Err(e) = crate::repository::at_migration::record_source_deactivation(
+        pool,
+        request_id,
+        outcome.as_ref().map(|_| ()).map_err(String::as_str),
+    )
+    .await
+    {
+        tracing::error!(
+            "[MigrationDeactivateSource] 無効化結果の記録失敗（続行、request_id={}）: {}",
+            request_id,
+            e
+        );
     }
 
     repo.set_status(request_id, "completed", chrono::Utc::now())
