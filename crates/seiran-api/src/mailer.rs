@@ -262,3 +262,101 @@ pub async fn send_plc_operation_signature_code(
     transport.send(email).await?;
     Ok(())
 }
+
+/// DID 転入の入力待ちの種類ごとの、案内メールで伝える「次にやること」。
+fn migration_input_wait_action(status: &str) -> &'static str {
+    match status {
+        "awaiting_plc_token" => {
+            "転入元（Bluesky 等）から届いた確認コードを、転入画面に入力してください。コードは届いてから15分で切れますが、転入画面の「確認コードを送り直す」で取り直せます。"
+        }
+        "awaiting_source_password" => {
+            "転入元にアプリパスワードでログインしていたため、転入に必要な操作ができませんでした。転入画面で、転入元にログインするときのパスワード（アプリパスワードではない方）を入力してください。"
+        }
+        _ => {
+            "転入の途中でエラーが起き、止まっています。転入画面で、リトライするか、中断して別のアカウントや通常の新規登録でやり直すかを選んでください。"
+        }
+    }
+}
+
+/// DID 転入の案内メールで共通の、続きへ戻る方法。
+fn migration_resume_instructions(username: &str, resume_url: &str) -> String {
+    format!(
+        "次のリンクから転入画面へ戻れます（一度だけ使えます）:\n\n{resume_url}\n\nリンクを使ったあとや別の端末からは、ログイン画面でユーザー名「{username}」と、転入を始めたときに決めたパスワードを入力しても戻れます。"
+    )
+}
+
+fn format_deadline(deadline: chrono::DateTime<chrono::Utc>) -> String {
+    deadline.format("%Y-%m-%d %H:%M UTC").to_string()
+}
+
+/// DID 転入の入力待ちの案内（入力待ちに入った時点で送る）。
+pub async fn send_migration_input_wait_notice(
+    settings: &HashMap<String, String>,
+    to: &str,
+    status: &str,
+    username: &str,
+    resume_url: &str,
+    deadline: chrono::DateTime<chrono::Utc>,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+    let body = format!(
+        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、あなたの入力を待っています。\n\n{action}\n\n{resume}\n\n{deadline} までに続きを進めないと、転入は取り消され、確保しているユーザー名「{username}」は解放されます。\n\n心当たりがない場合はこのメールを無視してください。",
+        action = migration_input_wait_action(status),
+        resume = migration_resume_instructions(username, resume_url),
+        deadline = format_deadline(deadline),
+    );
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — Bluesky からの転入: 入力をお待ちしています")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+    transport.send(email).await?;
+    Ok(())
+}
+
+/// DID 転入の打ち切りの警告（入力待ちのまま24時間たった時点で送る）。
+pub async fn send_migration_expiry_warning(
+    settings: &HashMap<String, String>,
+    to: &str,
+    status: &str,
+    username: &str,
+    resume_url: &str,
+    deadline: chrono::DateTime<chrono::Utc>,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+    let body = format!(
+        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、{deadline} に取り消されます。\n\n続ける場合は、それまでに次の操作をしてください。\n\n{action}\n\n{resume}\n\n取り消されると、確保しているユーザー名「{username}」は解放されます。転入をやめる場合は、このメールを無視してかまいません。",
+        action = migration_input_wait_action(status),
+        resume = migration_resume_instructions(username, resume_url),
+        deadline = format_deadline(deadline),
+    );
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — Bluesky からの転入はまもなく取り消されます")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+    transport.send(email).await?;
+    Ok(())
+}
+
+/// DID 転入を期限切れで取り消した通知。
+pub async fn send_migration_expired(
+    settings: &HashMap<String, String>,
+    to: &str,
+    username: &str,
+) -> Result<(), MailError> {
+    let (transport, from) = build_transport(settings)?;
+    let body = format!(
+        "seiran への Bluesky からの転入（ユーザー名「{username}」）は、入力が無いまま期限が過ぎたため取り消しました。確保していたユーザー名「{username}」は解放されています。\n\n転入元のアカウントは何も変わっていません。転入する場合は、もう一度最初から始めてください。"
+    );
+    let email = Message::builder()
+        .from(from.parse()?)
+        .to(to.parse()?)
+        .subject("seiran — Bluesky からの転入を取り消しました")
+        .header(ContentType::TEXT_PLAIN)
+        .body(body)?;
+    transport.send(email).await?;
+    Ok(())
+}

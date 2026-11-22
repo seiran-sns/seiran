@@ -173,7 +173,7 @@ fn blob_cids_for_media(media: &BskyEmbed) -> Vec<Cid> {
 /// `counterpartPostId`（AP object id）は投稿作成時点でローカル生成済み・常に確定しているため、
 /// AP側（`counterpartPostId`が未確定ならUpdate(Note)で後から補完）と異なり毎回必ず同梱できる。
 /// 投稿者がまだAP側の識別子（`ap_uri`）を持たない異常系は実運用上あり得ない
-/// （ローカルアクターは登録時に`insert_local`が`ap_uri`を必ず設定する）ため、
+/// （ローカルアクターは登録時に`insert_local_actor_row`が`ap_uri`を必ず設定する）ため、
 /// 取得できなければログのみでseiranPost自体を諦める（コミット自体は失敗させない）。
 ///
 /// `posts.body`（DBの生プレーンテキスト）はドメイン省略のローカル短縮メンション（`@user`）を

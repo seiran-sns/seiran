@@ -8,8 +8,9 @@
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use axum::Json;
+use seiran_common::repository::at_migration::{self as migration_repo, INPUT_WAIT_EXPIRY_HOURS};
 use seiran_common::repository::{
-    AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository,
+    account_claims, AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository,
 };
 use seiran_common::LocalAuthProvider;
 use serde::{Deserialize, Serialize};
@@ -104,12 +105,18 @@ pub async fn start(
     if seiran_common::is_reserved_username(&req.new_username) {
         return Err(ApiError::BadRequest("USERNAME_RESERVED".into()));
     }
+    // 転入元 PDS に問い合わせる前の早期エラー。確保そのものは`create_request`が名簿へ
+    // 入れるときの主キー制約で決まる。
     let username_exists = state
         .actors
         .find_including_withdrawn_by_username_domain(&req.new_username, &state.local_domain)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    if username_exists.is_some() {
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some()
+        || account_claims::username_claimed(&state.db, &req.new_username)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if username_exists {
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
 
@@ -190,7 +197,10 @@ pub async fn start(
         .users
         .email_exists(&email)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        || account_claims::email_claimed(&state.db, &email)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     if email_exists {
         return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
@@ -226,7 +236,7 @@ pub async fn start(
         now,
     )
     .await
-    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    .map_err(|e| crate::handlers::auth::account_creation_error(e, "migration:start"))?;
 
     state.enqueue_migration_fetch_repo(request_id).await;
 
@@ -288,20 +298,7 @@ pub async fn submit_plc_token(
             "[migration:submit-plc-token] request_id={} は再入（PLC提出済み、アカウント作成のみ再試行）",
             id
         );
-        let (user_id, actor_id) =
-            materialize_account(&state, &migration_req, signing_key_pem, rotation_key_pem).await?;
-        let repo = PgAtMigrationRepository::new(state.db.clone());
-        if let Err(e) = repo
-            .confirm_account_created(id, actor_id, user_id, chrono::Utc::now())
-            .await
-        {
-            // users/actors は確定済みなのでアカウント作成自体は成立している（ログのみ）。
-            tracing::error!(
-                "[migration:submit-plc-token] at_migration_requests確定記録失敗 (request_id={}): {}",
-                id,
-                e
-            );
-        }
+        materialize_account(&state, &migration_req, signing_key_pem, rotation_key_pem).await?;
         state.enqueue_migration_import_process(id).await;
         return Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
             account_auth_response(&state, id).await?,
@@ -490,15 +487,10 @@ async fn materialize_account(
     signing_key_pem: &str,
     rotation_key_pem: &str,
 ) -> Result<(i64, i64), ApiError> {
-    let email = migration_req
-        .email
-        .as_deref()
-        .ok_or_else(|| ApiError::Internal("メールアドレス未確定".to_string()))?;
     seiran_common::did_provision::migration::materialize_local_account(
         &state.db,
         &state.local_domain,
         migration_req,
-        email,
         signing_key_pem,
         rotation_key_pem,
     )
@@ -525,6 +517,10 @@ pub struct MigrationStatusResponse {
     /// `status == "importing_data"`のときのみ`Some`（取り込み済み件数/全体件数、レコード+blob合算）。
     pub import_done: Option<i64>,
     pub import_total: Option<i64>,
+    /// 入力待ちのとき、このまま入力が無ければ打ち切られる時刻。
+    pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    /// 入力待ちのまま期限が来て打ち切られたなら真（`status == "abandoned"`）。
+    pub expired: bool,
 }
 
 fn needs_input_for(status: &str) -> Option<&'static str> {
@@ -587,6 +583,10 @@ pub async fn get_status(
             && migration_req.status != "abandoned",
         import_done: import_progress.map(|(done, _)| done),
         import_total: import_progress.map(|(_, total)| total),
+        expires_at: migration_req
+            .input_wait_since
+            .map(|since| since + chrono::Duration::hours(INPUT_WAIT_EXPIRY_HOURS)),
+        expired: migration_req.expired_at.is_some(),
     }))
 }
 
@@ -768,14 +768,9 @@ pub async fn abandon(
         ));
     }
     // PLC 送信中（`submitting_plc`）は打ち切れない。状態が読んだ時点から変わっていたら
-    // （`awaiting_dns_txt` から PLC 送信が始まった等）打ち切らない。
-    if migration_req.status == "submitting_plc"
-        || !seiran_common::repository::at_migration::transition_status(
-            &state.db,
-            id,
-            &migration_req.status,
-            "abandoned",
-        )
+    // （`awaiting_dns_txt` から PLC 送信が始まった等）打ち切らない。名前とメールの確保も
+    // 同じ文で解くので、この直後に同じ名前で登録・転入し直せる。
+    if !seiran_common::repository::at_migration::abandon(&state.db, id, &migration_req.status)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?
     {
@@ -784,4 +779,70 @@ pub async fn abandon(
     Ok(Json(MigrationStatusStub {
         status: "abandoned",
     }))
+}
+
+/// 途中の転入へ戻るための、発行し直した `X-Migration-Token`（ログインと再開リンクの応答）。
+#[derive(Serialize)]
+pub struct MigrationSession {
+    /// snowflake IDはJSの53bit整数精度を超えるため文字列で返す。
+    pub request_id: String,
+    pub request_token: String,
+}
+
+/// ログインで戻った転入の `X-Migration-Token` を発行し直す（それまでのトークンは無効になる。
+/// 古い端末の転入画面は `MIGRATION_TOKEN_INVALID` を受ける）。アカウントができていた・
+/// 打ち切られていたら `None`。
+pub(crate) async fn reissue_session(
+    state: &AppState,
+    id: i64,
+) -> Result<Option<MigrationSession>, ApiError> {
+    let (request_token, request_token_hash) = generate_request_token();
+    let reissued = migration_repo::reissue_request_token(&state.db, id, &request_token_hash)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(reissued.then(|| MigrationSession {
+        request_id: id.to_string(),
+        request_token,
+    }))
+}
+
+#[derive(Deserialize)]
+pub struct ResumeRequest {
+    /// 案内メールの再開リンク（`/register/migrate?resume=...`）に載せたトークン。
+    pub token: String,
+}
+
+/// 案内メールの再開リンクから、途中の転入へ戻る。トークンは使い捨てで、使うと
+/// `X-Migration-Token` を発行し直す。期限切れ・使用済み・PLC 提出後・打ち切り済みは
+/// `MIGRATION_RESUME_TOKEN_INVALID`（その場合もログインでは戻れる）。
+pub async fn resume(
+    State(state): State<AppState>,
+    Json(req): Json<ResumeRequest>,
+) -> Result<Json<MigrationSession>, ApiError> {
+    let token_hash = hex::encode(Sha256::digest(req.token.as_bytes()));
+    let (request_token, request_token_hash) = generate_request_token();
+    let id = migration_repo::consume_resume_token(&state.db, &token_hash, &request_token_hash)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::BadRequest(
+            "MIGRATION_RESUME_TOKEN_INVALID".into(),
+        ))?;
+    Ok(Json(MigrationSession {
+        request_id: id.to_string(),
+        request_token,
+    }))
+}
+
+/// 案内メールに載せる再開リンクを作り、トークンを保存する。期限は打ち切りの時刻。
+pub(crate) async fn create_resume_link(
+    state: &AppState,
+    request_id: i64,
+    expires_at: chrono::DateTime<chrono::Utc>,
+) -> Result<String, sqlx::Error> {
+    let (token, hash) = generate_request_token();
+    migration_repo::insert_resume_token(&state.db, request_id, &hash, expires_at).await?;
+    Ok(format!(
+        "https://{}/register/migrate?resume={}",
+        state.local_domain, token
+    ))
 }

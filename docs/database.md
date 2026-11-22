@@ -41,7 +41,8 @@ ID の採番は2系統:
 | `atp_records` / `atp_blocks` / `atp_repo_events` | ATP の非 post レコード、MST のブロックストア、`subscribeRepos` のイベントログ |
 | `post_record_blobs` / `post_record_blobs_backfill` | ローカル投稿の ATP レコードが参照する blob の `media_files` 行、その既存投稿分のバックフィル待ち |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
-| `at_migration_requests` / `at_migration_records` / `at_migration_blobs` | DID 転入の状態機械とステージング |
+| `at_migration_requests` / `at_migration_records` / `at_migration_blobs` / `at_migration_resume_tokens` | DID 転入の状態機械とステージング、再開リンク |
+| `local_username_claims` / `local_email_claims` | ローカルアカウントのユーザー名・メールアドレスの名簿（重複判定、転入中の確保） |
 | `pending_did_provisions` | 「DNS TXT 登録完了待ち」の新規ローカルアカウント（DID 発行前） |
 | `site_settings` | サイト全体の Key-Value 設定（SMTP・Jetstream カーソル等） |
 | `terms_of_service_agreements` | 利用規約同意の証跡（登録時に同意した場合のみ1行） |
@@ -310,6 +311,13 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 ### `atp_preferences`
 `getPreferences`/`putPreferences` の不透明な配列（JSONB）を `actor_id` ごとに1行（全置換）。中身は解釈せず、`users` とも同期しない。
 
+### ユーザー名・メールアドレスの名簿（`local_username_claims` / `local_email_claims`）
+ローカルアカウントのユーザー名とメールアドレスの重複を判定する唯一の場所。通常登録（`create_local_account`）と DID 転入（`start`）の両方が、使い始める時点でここへ INSERT し、重複は主キー違反で決まる（`users`/`actors` と転入リクエストをアプリ側で突き合わせると、READ COMMITTED では同時登録をすり抜ける）。実装は `repository::account_claims`。
+
+- `local_username_claims`: 主キー `username_lower`（小文字。大文字小文字違いも同じ名前とみなす）。`actor_id` はアカウントができていればそのアクター、`migration_request_id` は転入が確保した名前ならその転入。転入中は `actor_id` が NULL。退会済みのアカウントの名前も残す（名前を再利用させない）。
+- `local_email_claims`: 主キー `email`（`users.email` と同じ表記のまま）。`user_id`・`migration_request_id` は上と同じ意味。メールアドレスの変更は名簿の付け替えと `users.email` の更新を1トランザクションで行う。
+- 消えるのは、転入が打ち切られたとき（`actor_id`/`user_id` が NULL の行だけ）。違反時の制約名（`local_username_claims_pkey`/`local_email_claims_pkey`）を `USERNAME_TAKEN`/`EMAIL_ALREADY_REGISTERED` に変換する。
+
 ### 既存DID転入（`at_migration_requests` / `at_migration_records` / `at_migration_blobs`）
 フォローインポートと同じ親子テーブル＋進捗は COUNT の設計。状態遷移の詳細は `docs/account_migration.md`。
 
@@ -318,6 +326,8 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
   - `plc_submitted_at`: 不可逆境界のマーカー。`new_signing_key_pem`（転入後の repo 署名鍵）と `new_rotation_key_pem`（専用ローテーションキー）はこの成功と同時に保存する（後のアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id` の確定とは別ステップ）。
 - `at_migration_records`: 取得した生レコード1件＝1行（`request_id, collection, rkey` の UNIQUE）。`bytes` は DAG-CBOR のまま。`imported_at` は `posts`/`atp_records` への実体化の完了。`app.bsky.graph.follow` だけは `follow_materialized_at` で `follows` への反映を別に追跡する（ATP リポジトリへの複製と seiran の社会グラフへの反映は別の処理だから）。
 - `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。
+- `at_migration_requests.input_wait_since`: 利用者の入力・選択待ち（`awaiting_source_password`・`awaiting_plc_token`・`failed`）に入った時刻。入力待ちでなければ NULL。`input_wait_mail_stage` はこの入力待ちで送った案内メールの段階（0: 未送信、1: 入力待ちの案内、2: 打ち切りの警告）。`expired_at` は入力待ちのまま期限が来て打ち切った時刻（利用者による打ち切りは NULL）。期限と案内の流れは `docs/account_migration.md` 4節。
+- `at_migration_resume_tokens`: 案内メールの再開リンクのトークン（`token_hash` は SHA-256）。使い捨てで、`expires_at` は打ち切りの時刻。
 - `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。
 
 ### `pending_did_provisions`（DNS TXT 登録完了待ち）

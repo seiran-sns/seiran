@@ -100,5 +100,7 @@
   "REACTION_COOLDOWN": "Vous ne pouvez pas ajouter la même réaction aussi vite. Patientez un instant puis réessayez",
   "EMOJI_IMPORT_RUNNING": "Une importation d'émojis est déjà en cours",
   "EMOJI_IMPORT_NOT_RUNNING": "Aucune importation d'émojis en cours",
-  "ZIP_FILE_REQUIRED": "Aucun fichier ZIP fourni"
+  "ZIP_FILE_REQUIRED": "Aucun fichier ZIP fourni",
+  "MIGRATION_EXPIRED": "Cette migration a été annulée car le délai a expiré sans action de votre part. Recommencez la migration depuis le début",
+  "MIGRATION_RESUME_TOKEN_INVALID": "Ce lien ne peut pas être utilisé (déjà utilisé ou expiré). Vous pouvez revenir en saisissant sur l'écran de connexion le nom d'utilisateur et le mot de passe choisis au début de la migration"
 }

@@ -34,8 +34,38 @@ pub struct AtMigrationRequestRow {
     pub last_error: Option<String>,
     /// `start`時点で利用規約チェックボックスに同意していた場合のみ`Some`
     /// （同意した瞬間の site_settings.terms_of_service_text の文面そのもの）。
-    /// `materialize_local_account`がアカウント確定時に`terms_of_service_agreements`へコピーする。
+    /// `materialize_account`がアカウント確定時に`terms_of_service_agreements`へコピーする。
     pub agreed_tos_text: Option<String>,
+    /// 利用者の入力・選択待ち（[`INPUT_WAIT_STATUSES`]）に入った時刻。入力待ちでなければ
+    /// `None`。ここから [`INPUT_WAIT_EXPIRY_HOURS`] で打ち切る。
+    pub input_wait_since: Option<DateTime<Utc>>,
+    /// 入力待ちのまま期限が来て打ち切った時刻（`abandoned`）。利用者による打ち切りは `None`。
+    pub expired_at: Option<DateTime<Utc>>,
+}
+
+/// 入力待ちの転入へ打ち切りの警告メールを送るまでの時間。
+pub const INPUT_WAIT_WARNING_HOURS: i64 = 24;
+/// 入力待ちの転入を打ち切る（名前とメールの確保を解く）までの時間。
+pub const INPUT_WAIT_EXPIRY_HOURS: i64 = 48;
+
+/// 利用者の入力・選択を待つ状態。この状態に入った時刻から期限を数える。PLC 提出前の状態
+/// だけで、ジョブが動いている状態と DNS の公開待ち（利用者はやることを済ませている）は含めない。
+/// SQL 側（`input_wait_set` と打ち切り・案内の各文）にも同じ一覧を書いている。
+pub const INPUT_WAIT_STATUSES: [&str; 3] =
+    ["awaiting_source_password", "awaiting_plc_token", "failed"];
+
+/// 状態を `new_status`（SQL 式）へ変える UPDATE に足す SET 句。入力待ちに入ったら時刻を記録し、
+/// 同じ入力待ちのままなら据え置き、入力待ちを抜けたら消す。案内メールの段階も入り直すたびに
+/// 戻す（確認コードを送り直して `awaiting_plc_token` に入り直せば、期限も案内も新しくなる）。
+fn input_wait_set(new_status: &str) -> String {
+    format!(
+        "input_wait_since = CASE
+             WHEN {new_status}::text IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+                  AND plc_submitted_at IS NULL
+             THEN CASE WHEN status = {new_status} THEN COALESCE(input_wait_since, NOW()) ELSE NOW() END
+             ELSE NULL END,
+         input_wait_mail_stage = CASE WHEN status = {new_status} THEN input_wait_mail_stage ELSE 0 END"
+    )
 }
 
 /// CARから取り出した1レコード。`at_migration_records`へのステージング用。
@@ -101,8 +131,8 @@ pub trait AtMigrationRepository: Send + Sync {
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
-    /// ★不可逆境界そのもの。`submitPlcOperation`成功「直後」、`users`/`actors`のDB確定を
-    /// 試みる前に必ず呼ぶ。ここで`plc_submitted_at`を記録しておくことで、後続のローカル
+    /// ★不可逆境界そのもの。`submitPlcOperation`成功「直後」、`users`/`actors`のDB確定
+    /// （`materialize_account`）を試みる前に必ず呼ぶ。ここで`plc_submitted_at`を記録しておくことで、後続のローカル
     /// アカウント作成が失敗しても「PLCは既に提出済み」という事実が失われない
     /// （この記録が無いと、`actors` INSERTが失敗した際に
     /// `awaiting_plc_token`のまま停滞し、ユーザーが同じ——既に消費済みの——tokenで
@@ -112,17 +142,6 @@ pub trait AtMigrationRepository: Send + Sync {
         id: i64,
         new_signing_key_pem: &str,
         new_rotation_key_pem: &str,
-        now: DateTime<Utc>,
-    ) -> Result<(), sqlx::Error>;
-
-    /// ローカルアカウント（`users`/`actors`）のDB確定が完了した際に呼ぶ。
-    /// `mark_plc_submitted`とは別ステップ——`actor_id`/`user_id`はアカウント作成が
-    /// 成功して初めて確定するため。
-    async fn confirm_account_created(
-        &self,
-        id: i64,
-        actor_id: i64,
-        user_id: i64,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error>;
 
@@ -195,7 +214,7 @@ impl PgAtMigrationRepository {
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
      plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem,
-     agreed_tos_text";
+     agreed_tos_text, input_wait_since, expired_at";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -217,6 +236,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             email,
             agreed_tos_text,
         } = *req;
+        let mut tx = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO at_migration_requests
                 (id, status, request_token_hash, source_handle, source_pds_endpoint, source_did,
@@ -236,9 +256,27 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         .bind(email)
         .bind(agreed_tos_text)
         .bind(now)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .execute(&mut *tx)
+        .await?;
+        // 名前とメールはアカウントができるまで（打ち切りまで）この転入が確保する。
+        sqlx::query(
+            "INSERT INTO local_username_claims (username_lower, migration_request_id)
+             VALUES (LOWER($1), $2)",
+        )
+        .bind(new_username)
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+        if let Some(email) = email {
+            sqlx::query(
+                "INSERT INTO local_email_claims (email, migration_request_id) VALUES ($1, $2)",
+            )
+            .bind(email)
+            .bind(id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await
     }
 
     async fn get(&self, id: i64) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
@@ -268,10 +306,12 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         status: &str,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE at_migration_requests SET status = $1::at_migration_status, updated_at = $2
+        sqlx::query(sqlx::AssertSqlSafe(format!(
+            "UPDATE at_migration_requests
+             SET {}, status = $1::at_migration_status, updated_at = $2
              WHERE id = $3",
-        )
+            input_wait_set("$1::at_migration_status")
+        )))
         .bind(status)
         .bind(now)
         .bind(id)
@@ -287,11 +327,12 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         error: &str,
         now: DateTime<Utc>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             "UPDATE at_migration_requests
-             SET status = $1::at_migration_status, last_error = $2, updated_at = $3
+             SET {}, status = $1::at_migration_status, last_error = $2, updated_at = $3
              WHERE id = $4",
-        )
+            input_wait_set("$1::at_migration_status")
+        )))
         .bind(status)
         .bind(error)
         .bind(now)
@@ -311,32 +352,12 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         sqlx::query(
             "UPDATE at_migration_requests
              SET status = 'submitting_plc', new_signing_key_pem = $1, new_rotation_key_pem = $2,
-                 plc_submitted_at = $3, updated_at = $3
+                 plc_submitted_at = $3, updated_at = $3, input_wait_since = NULL,
+                 input_wait_mail_stage = 0
              WHERE id = $4",
         )
         .bind(new_signing_key_pem)
         .bind(new_rotation_key_pem)
-        .bind(now)
-        .bind(id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
-    }
-
-    async fn confirm_account_created(
-        &self,
-        id: i64,
-        actor_id: i64,
-        user_id: i64,
-        now: DateTime<Utc>,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE at_migration_requests
-             SET status = 'importing_data', actor_id = $1, user_id = $2, updated_at = $3
-             WHERE id = $4",
-        )
-        .bind(actor_id)
-        .bind(user_id)
         .bind(now)
         .bind(id)
         .execute(&self.pool)
@@ -554,7 +575,7 @@ pub async fn stage_plc_operation(
          SET status = 'awaiting_dns_txt', staged_plc_operation = $2,
              staged_signing_key_pem = $3, staged_rotation_key_pem = $4,
              cf_txt_record_id = NULL, txt_visible_at = NULL, last_error = NULL,
-             updated_at = NOW()
+             input_wait_since = NULL, input_wait_mail_stage = 0, updated_at = NOW()
          WHERE id = $1 AND status = 'awaiting_plc_token'",
     )
     .bind(id)
@@ -639,10 +660,12 @@ pub async fn transition_status(
     from: &str,
     to: &str,
 ) -> Result<bool, sqlx::Error> {
-    let res = sqlx::query(
-        "UPDATE at_migration_requests SET status = $3::at_migration_status, updated_at = NOW()
+    let res = sqlx::query(sqlx::AssertSqlSafe(format!(
+        "UPDATE at_migration_requests
+         SET {}, status = $3::at_migration_status, updated_at = NOW()
          WHERE id = $1 AND status = $2::at_migration_status",
-    )
+        input_wait_set("$3::at_migration_status")
+    )))
     .bind(id)
     .bind(from)
     .bind(to)
@@ -694,7 +717,8 @@ pub async fn resume_with_new_source_session(
     let res = sqlx::query(
         "UPDATE at_migration_requests
          SET source_access_jwt = $2, source_refresh_jwt = $3,
-             status = 'requesting_plc_signature', updated_at = NOW()
+             status = 'requesting_plc_signature', input_wait_since = NULL,
+             input_wait_mail_stage = 0, updated_at = NOW()
          WHERE id = $1 AND status = 'awaiting_source_password'",
     )
     .bind(id)
@@ -703,4 +727,439 @@ pub async fn resume_with_new_source_session(
     .execute(pool)
     .await?;
     Ok(res.rows_affected() == 1)
+}
+
+// ─── 名前・メールの確保と打ち切り（`docs/account_migration.md` 4節） ───
+
+/// PLC 提出前の転入を打ち切る（状態が `from` のときだけ）。名前・メールの確保と再開リンクも
+/// 同じ文で解く。打ち切ったら `true`。PLC 送信の開始（`awaiting_dns_txt` → `submitting_plc`）と
+/// 競合しても片方だけが成立する。
+pub async fn abandon(pool: &PgPool, id: i64, from: &str) -> Result<bool, sqlx::Error> {
+    let n: i64 = sqlx::query_scalar(
+        "WITH r AS (
+             UPDATE at_migration_requests
+             SET status = 'abandoned', input_wait_since = NULL, input_wait_mail_stage = 0,
+                 updated_at = NOW()
+             WHERE id = $1 AND status = $2::at_migration_status AND plc_submitted_at IS NULL
+               AND status <> 'submitting_plc'
+             RETURNING id
+         ),
+         du AS (
+             DELETE FROM local_username_claims c USING r
+             WHERE c.migration_request_id = r.id AND c.actor_id IS NULL
+         ),
+         de AS (
+             DELETE FROM local_email_claims c USING r
+             WHERE c.migration_request_id = r.id AND c.user_id IS NULL
+         ),
+         dt AS (DELETE FROM at_migration_resume_tokens t USING r WHERE t.request_id = r.id)
+         SELECT count(*) FROM r",
+    )
+    .bind(id)
+    .bind(from)
+    .fetch_one(pool)
+    .await?;
+    Ok(n == 1)
+}
+
+/// 期限切れで打ち切った転入（案内メールの宛先）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ExpiredMigration {
+    pub id: i64,
+    pub email: Option<String>,
+    pub new_username: String,
+}
+
+/// 入力待ちのまま [`INPUT_WAIT_EXPIRY_HOURS`] たった転入を打ち切り、名前・メールの確保と
+/// 再開リンクを解く。1文で行うので、利用者の入力（状態を条件にした遷移）と競合しても
+/// 片方だけが成立し、複数のプロセスが同時に実行しても同じ転入を二重に返さない。
+pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, sqlx::Error> {
+    sqlx::query_as(
+        "WITH r AS (
+             UPDATE at_migration_requests
+             SET status = 'abandoned', expired_at = NOW(), input_wait_since = NULL,
+                 input_wait_mail_stage = 0, updated_at = NOW()
+             WHERE input_wait_since < NOW() - make_interval(hours => $1)
+               AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+               AND plc_submitted_at IS NULL
+             RETURNING id, email, new_username
+         ),
+         du AS (
+             DELETE FROM local_username_claims c USING r
+             WHERE c.migration_request_id = r.id AND c.actor_id IS NULL
+         ),
+         de AS (
+             DELETE FROM local_email_claims c USING r
+             WHERE c.migration_request_id = r.id AND c.user_id IS NULL
+         ),
+         dt AS (DELETE FROM at_migration_resume_tokens t USING r WHERE t.request_id = r.id)
+         SELECT id, email, new_username FROM r",
+    )
+    .bind(INPUT_WAIT_EXPIRY_HOURS as i32)
+    .fetch_all(pool)
+    .await
+}
+
+/// 打ち切られた転入が持ったままの名前・メールの確保と、期限の過ぎた再開リンクを消す。
+/// 打ち切りの文は確保も同時に解くので通常は何も残らないが、確保を解かずに打ち切る版の
+/// サーバーと混在して動く間に取り残されたものを拾う。
+pub async fn release_stale_claims(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "DELETE FROM local_username_claims c
+         WHERE c.actor_id IS NULL AND c.migration_request_id IS NOT NULL
+           AND EXISTS (SELECT 1 FROM at_migration_requests r
+                       WHERE r.id = c.migration_request_id AND r.status = 'abandoned')",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "DELETE FROM local_email_claims c
+         WHERE c.user_id IS NULL AND c.migration_request_id IS NOT NULL
+           AND EXISTS (SELECT 1 FROM at_migration_requests r
+                       WHERE r.id = c.migration_request_id AND r.status = 'abandoned')",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("DELETE FROM at_migration_resume_tokens WHERE expires_at < NOW()")
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// PLC 送信の直前に、この転入が名前とメールを確保できているか確かめる。確保の無い転入
+/// （名簿ができる前に始まったもの）はここで確保を試みる。他のアカウントや転入が使って
+/// いれば `false`（PLC を送るとアカウントを作れないまま DID だけが移る）。
+pub async fn ensure_claims_before_submit(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO local_username_claims (username_lower, migration_request_id)
+         SELECT LOWER(new_username), id FROM at_migration_requests WHERE id = $1
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "INSERT INTO local_email_claims (email, migration_request_id)
+         SELECT email, id FROM at_migration_requests WHERE id = $1 AND email IS NOT NULL
+         ON CONFLICT DO NOTHING",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    // 名簿に載らずに作られたアカウント（名簿を知らない版のサーバーが無停止更新の間に
+    // 作ったもの）とも重ならないことを、`actors`・`users` で直接確かめる。
+    sqlx::query_scalar(
+        "SELECT EXISTS (SELECT 1 FROM local_username_claims c
+                        WHERE c.username_lower = LOWER(r.new_username)
+                          AND c.migration_request_id = r.id AND c.actor_id IS NULL)
+            AND EXISTS (SELECT 1 FROM local_email_claims c
+                        WHERE c.email = r.email
+                          AND c.migration_request_id = r.id AND c.user_id IS NULL)
+            AND NOT EXISTS (SELECT 1 FROM actors a
+                            WHERE a.actor_type = 'local'
+                              AND LOWER(a.username) = LOWER(r.new_username))
+            AND NOT EXISTS (SELECT 1 FROM users u WHERE u.email = r.email)
+         FROM at_migration_requests r WHERE r.id = $1",
+    )
+    .bind(id)
+    .fetch_one(pool)
+    .await
+}
+
+/// 転入したアカウントの確定に必要な値（`materialize_account` の入力）。
+pub struct MigratedAccount<'a> {
+    pub request_id: i64,
+    pub source_did: &'a str,
+    pub username: &'a str,
+    pub domain: &'a str,
+    pub email: &'a str,
+    pub password_hash: &'a str,
+    pub agreed_tos_text: Option<&'a str>,
+    pub signing_key_pem: &'a str,
+    pub rotation_key_pem: &'a str,
+}
+
+/// `materialize_account` の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MaterializeOutcome {
+    Created {
+        user_id: i64,
+        actor_id: i64,
+    },
+    /// 名前かメールをこの転入が確保していなかった（PLC 送信前の確認で弾くので通常は起きない）。
+    ClaimLost,
+}
+
+/// 転入したアカウントの `users`/`actors` 行を作り、名簿の確保をアカウントに付け替え、
+/// 転入を `importing_data` にする（1トランザクション）。途中で失敗しても何も残らないので、
+/// `submit-plc-token` の再入でそのままやり直せる。
+///
+/// 転入元 DID が既に `actors` にリモートキャッシュ行として存在することがある（firehose 購読や
+/// プロフィール参照で自然に発生する）。あればローカル用に変換し、無ければ新規作成する。
+pub async fn materialize_account(
+    pool: &PgPool,
+    a: &MigratedAccount<'_>,
+) -> Result<MaterializeOutcome, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let user_id: i64 = sqlx::query_scalar(
+        "INSERT INTO users (email, password_hash, role, created_at, updated_at)
+         VALUES ($1, $2, 'user', NOW(), NOW())
+         RETURNING id",
+    )
+    .bind(a.email)
+    .bind(a.password_hash)
+    .fetch_one(&mut *tx)
+    .await?;
+    if let Some(text) = a.agreed_tos_text {
+        crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
+    }
+
+    let ap_uri = format!("https://{}/users/{}", a.domain, a.username);
+    let converted: Option<i64> = sqlx::query_scalar(
+        "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
+             ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
+         WHERE at_did = $7
+         RETURNING id",
+    )
+    .bind(user_id)
+    .bind(a.username)
+    .bind(a.domain)
+    .bind(&ap_uri)
+    .bind(a.signing_key_pem)
+    .bind(a.rotation_key_pem)
+    .bind(a.source_did)
+    .fetch_optional(&mut *tx)
+    .await?;
+    let actor_id = match converted {
+        Some(id) => id,
+        None => {
+            let id = crate::generate_snowflake_id(Utc::now());
+            crate::repository::actor::insert_local_actor_row(
+                &mut tx,
+                user_id,
+                &crate::repository::actor::NewLocalActor {
+                    id,
+                    username: a.username,
+                    domain: a.domain,
+                    at_did: Some(a.source_did),
+                    at_signing_key_pem: Some(a.signing_key_pem),
+                    at_rotation_key_pem: Some(a.rotation_key_pem),
+                    birth_date: None,
+                },
+            )
+            .await?;
+            id
+        }
+    };
+
+    let username_moved = sqlx::query(
+        "UPDATE local_username_claims SET actor_id = $2
+         WHERE migration_request_id = $1 AND actor_id IS NULL AND username_lower = LOWER($3)",
+    )
+    .bind(a.request_id)
+    .bind(actor_id)
+    .bind(a.username)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    let email_moved = sqlx::query(
+        "UPDATE local_email_claims SET user_id = $2
+         WHERE migration_request_id = $1 AND user_id IS NULL AND email = $3",
+    )
+    .bind(a.request_id)
+    .bind(user_id)
+    .bind(a.email)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    if !(username_moved && email_moved) {
+        tx.rollback().await?;
+        return Ok(MaterializeOutcome::ClaimLost);
+    }
+
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET status = 'importing_data', actor_id = $2, user_id = $3, updated_at = NOW()
+         WHERE id = $1",
+    )
+    .bind(a.request_id)
+    .bind(actor_id)
+    .bind(user_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(MaterializeOutcome::Created { user_id, actor_id })
+}
+
+// ─── 途中の転入への復帰（ログイン・再開リンク） ───
+
+/// ログインで戻れる転入（アカウントがまだできていないもの）とそのパスワードハッシュ。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct ResumableMigration {
+    pub id: i64,
+    pub password_hash: String,
+}
+
+/// ログインの識別子（ユーザー名かメール）が確保している、アカウント未作成の転入。
+/// PLC 提出後にアカウント作成の前で止まった転入も含める（ここで戻れないと、ブラウザを
+/// 失った利用者がアカウント作成をやり直す手段が無い）。
+pub async fn find_resumable_by_identifier(
+    pool: &PgPool,
+    identifier: &str,
+) -> Result<Option<ResumableMigration>, sqlx::Error> {
+    let by_email = identifier.contains('@');
+    let sql = if by_email {
+        "SELECT r.id, r.password_hash
+         FROM local_email_claims c
+         JOIN at_migration_requests r ON r.id = c.migration_request_id
+         WHERE c.email = $1 AND c.user_id IS NULL AND r.user_id IS NULL
+           AND r.status NOT IN ('completed', 'abandoned')"
+    } else {
+        "SELECT r.id, r.password_hash
+         FROM local_username_claims c
+         JOIN at_migration_requests r ON r.id = c.migration_request_id
+         WHERE c.username_lower = LOWER($1) AND c.actor_id IS NULL AND r.user_id IS NULL
+           AND r.status NOT IN ('completed', 'abandoned')"
+    };
+    sqlx::query_as(sql)
+        .bind(identifier)
+        .fetch_optional(pool)
+        .await
+}
+
+/// ログインの識別子で、期限切れで打ち切られた最新の転入のパスワードハッシュ
+/// （正しいパスワードなら「期限切れで取り消された」と伝えるため）。
+pub async fn find_expired_password_hash(
+    pool: &PgPool,
+    identifier: &str,
+) -> Result<Option<String>, sqlx::Error> {
+    let sql = if identifier.contains('@') {
+        "SELECT password_hash FROM at_migration_requests
+         WHERE email = $1 AND status = 'abandoned' AND expired_at IS NOT NULL
+         ORDER BY id DESC LIMIT 1"
+    } else {
+        "SELECT password_hash FROM at_migration_requests
+         WHERE LOWER(new_username) = LOWER($1) AND status = 'abandoned' AND expired_at IS NOT NULL
+         ORDER BY id DESC LIMIT 1"
+    };
+    sqlx::query_scalar(sql)
+        .bind(identifier)
+        .fetch_optional(pool)
+        .await
+}
+
+/// ログインで戻った転入の `X-Migration-Token` を発行し直す（それまでのトークンは無効になる）。
+/// アカウントができていた・打ち切られていたら `false`。
+pub async fn reissue_request_token(
+    pool: &PgPool,
+    id: i64,
+    request_token_hash: &str,
+) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests SET request_token_hash = $2
+         WHERE id = $1 AND user_id IS NULL AND status NOT IN ('completed', 'abandoned')",
+    )
+    .bind(id)
+    .bind(request_token_hash)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}
+
+/// 案内メールに載せる再開リンクのトークンを保存する。
+pub async fn insert_resume_token(
+    pool: &PgPool,
+    request_id: i64,
+    token_hash: &str,
+    expires_at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO at_migration_resume_tokens (token_hash, request_id, expires_at)
+         VALUES ($1, $2, $3)",
+    )
+    .bind(token_hash)
+    .bind(request_id)
+    .bind(expires_at)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 再開リンクのトークンを使い、転入の `X-Migration-Token` を発行し直す（使い捨て。それまでの
+/// トークンは無効になる）。期限切れ・使用済み・PLC 提出後・打ち切り済みなら `None`。
+/// PLC 提出後を除くのは、提出後にアカウント作成の前で止まった転入では、トークンを持つ人が
+/// `submit-plc-token` の再入でアカウントを作らせ JWT まで受け取れるため（宛先のメールは
+/// 確認されていないことがある）。
+pub async fn consume_resume_token(
+    pool: &PgPool,
+    token_hash: &str,
+    request_token_hash: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "WITH t AS (
+             DELETE FROM at_migration_resume_tokens WHERE token_hash = $1
+             RETURNING request_id, expires_at
+         )
+         UPDATE at_migration_requests r SET request_token_hash = $2
+         FROM t
+         WHERE r.id = t.request_id AND t.expires_at > NOW()
+           AND r.plc_submitted_at IS NULL AND r.user_id IS NULL
+           AND r.status NOT IN ('completed', 'abandoned', 'submitting_plc')
+         RETURNING r.id",
+    )
+    .bind(token_hash)
+    .bind(request_token_hash)
+    .fetch_optional(pool)
+    .await
+}
+
+// ─── 入力待ちの案内メール ───
+
+/// 入力待ちなのに開始時刻の無い転入に、今の時刻を入れる。名簿ができる前から入力待ちだった
+/// 転入と、開始時刻を記録しない版のサーバーが入力待ちにした転入が対象で、見つけた時刻を
+/// 期限の起点にする（入力待ちに入った本来の時刻を使うと、案内も警告も無いまま打ち切られる）。
+pub async fn adopt_untracked_input_waits(pool: &PgPool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET input_wait_since = NOW(), input_wait_mail_stage = 0
+         WHERE input_wait_since IS NULL AND plc_submitted_at IS NULL
+           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')",
+    )
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 案内メールを送る入力待ちの転入。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct InputWaitMail {
+    pub id: i64,
+    pub status: String,
+    pub email: String,
+    pub new_username: String,
+    pub input_wait_since: DateTime<Utc>,
+}
+
+/// 入力待ちに入ってから `min_age_hours` 以上たち、案内の段階が `stage` 未満の転入を、
+/// 段階を `stage` に進めて返す（1文なので、複数のプロセスが同時に実行しても同じ転入を
+/// 二重に返さない）。送信に失敗しても段階は戻さない（同じメールを繰り返し送らないため）。
+pub async fn claim_input_wait_mails(
+    pool: &PgPool,
+    stage: i16,
+    min_age_hours: i64,
+) -> Result<Vec<InputWaitMail>, sqlx::Error> {
+    sqlx::query_as(
+        "UPDATE at_migration_requests
+         SET input_wait_mail_stage = $1
+         WHERE input_wait_since <= NOW() - make_interval(hours => $2)
+           AND input_wait_mail_stage < $1 AND email IS NOT NULL AND plc_submitted_at IS NULL
+           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+         RETURNING id, status::text, email, new_username, input_wait_since",
+    )
+    .bind(stage)
+    .bind(min_age_hours as i32)
+    .fetch_all(pool)
+    .await
 }

@@ -39,6 +39,16 @@ export interface MigrationStatusResponse {
   /** `status === "importing_data"`のときのみ非null（取り込み済み件数/全体件数）。 */
   import_done?: number | null;
   import_total?: number | null;
+  /** 入力待ちのとき、このまま入力が無ければ打ち切られる時刻（ISO 8601）。 */
+  expires_at?: string | null;
+  /** 入力待ちのまま期限が来て打ち切られたなら true（`status === "abandoned"`）。 */
+  expired?: boolean;
+}
+
+/** 途中の転入へ戻るための、発行し直した転入トークン（再開リンク・ログインの応答）。 */
+export interface MigrationSession {
+  request_id: string;
+  request_token: string;
 }
 
 interface SimpleStatus {
@@ -76,6 +86,10 @@ async function migrationRequest<T>(
 export const migration = {
   start(params: MigrationStartParams) {
     return migrationRequest<MigrationStartResponse>("POST", "/migration/start", undefined, params);
+  },
+  /** 案内メールの再開リンクのトークンで、途中の転入へ戻る（使い捨て）。 */
+  resume(token: string) {
+    return migrationRequest<MigrationSession>("POST", "/migration/resume", undefined, { token });
   },
   submitPlcToken(id: string, requestToken: string, plcToken: string) {
     return migrationRequest<SubmitPlcTokenResponse>(

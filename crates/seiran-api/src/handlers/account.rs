@@ -425,13 +425,16 @@ pub async fn confirm_email_change(
         return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
 
-    state
+    let changed = state
         .users
         .update_email(user_id, &new_email)
         .await
         .map_err(|e| {
             ApiError::Internal(format!("[confirm-email-change] users UPDATE 失敗: {}", e))
         })?;
+    if !changed {
+        return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
+    }
 
     Ok(Json(()))
 }
