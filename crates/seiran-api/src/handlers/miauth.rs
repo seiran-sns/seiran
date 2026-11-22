@@ -21,9 +21,13 @@ pub struct MiAuthSession {
     pub username: Option<String>,
 }
 
+/// Misskey の MiAuth 仕様では `name`/`icon`/`callback`/`permission` はすべて任意。
+/// `name` を必須にすると、送らないクライアント（Xenon 等）が axum のクエリ抽出で 400
+/// （`missing field \`name\``）になり認可画面にたどり着けない。無い場合は SPA 側が
+/// 「不明なアプリ」と表示する。
 #[derive(Deserialize)]
 pub struct MiAuthQuery {
-    pub name: String,
+    pub name: Option<String>,
     pub callback: Option<String>,
 }
 
@@ -130,13 +134,17 @@ pub async fn miauth_page(
         }
     }
 
-    let mut redirect_url = format!(
-        "/connect/{}?name={}",
-        session_id,
-        urlencoding::encode(&query.name)
-    );
+    let mut params = Vec::new();
+    if let Some(name) = query.name.as_deref().filter(|n| !n.is_empty()) {
+        params.push(format!("name={}", urlencoding::encode(name)));
+    }
     if let Some(ref cb) = query.callback {
-        redirect_url.push_str(&format!("&callback={}", urlencoding::encode(cb)));
+        params.push(format!("callback={}", urlencoding::encode(cb)));
+    }
+    let mut redirect_url = format!("/connect/{}", session_id);
+    if !params.is_empty() {
+        redirect_url.push('?');
+        redirect_url.push_str(&params.join("&"));
     }
     Redirect::to(&redirect_url).into_response()
 }
@@ -318,7 +326,50 @@ pub(crate) async fn build_check_response_user(
 
 #[cfg(test)]
 mod tests {
-    use super::{is_valid_callback, CheckResponseUser};
+    use super::{is_valid_callback, miauth_page, CheckResponseUser, MiAuthQuery};
+    use axum::{
+        extract::{Path, Query},
+        http::{header::LOCATION, StatusCode},
+        response::IntoResponse,
+    };
+
+    async fn redirect_location(name: Option<&str>, callback: Option<&str>) -> String {
+        let res = miauth_page(
+            Path("sess".to_string()),
+            Query(MiAuthQuery {
+                name: name.map(str::to_string),
+                callback: callback.map(str::to_string),
+            }),
+        )
+        .await
+        .into_response();
+        assert_eq!(res.status(), StatusCode::SEE_OTHER);
+        res.headers()[LOCATION].to_str().unwrap().to_string()
+    }
+
+    #[tokio::test]
+    async fn miauth_page_without_name() {
+        assert_eq!(redirect_location(None, None).await, "/connect/sess");
+        assert_eq!(
+            redirect_location(None, Some("xenon://cb")).await,
+            "/connect/sess?callback=xenon%3A%2F%2Fcb"
+        );
+    }
+
+    #[tokio::test]
+    async fn miauth_page_with_name() {
+        assert_eq!(
+            redirect_location(Some("My App"), Some("xenon://cb")).await,
+            "/connect/sess?name=My%20App&callback=xenon%3A%2F%2Fcb"
+        );
+    }
+
+    #[test]
+    fn miauth_query_name_is_optional() {
+        let uri: axum::http::Uri = "/miauth/sess?callback=xenon%3A%2F%2Fcb".parse().unwrap();
+        let Query(q) = Query::<MiAuthQuery>::try_from_uri(&uri).unwrap();
+        assert!(q.name.is_none());
+    }
 
     #[test]
     fn valid_callback_https() {
