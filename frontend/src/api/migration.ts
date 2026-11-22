@@ -58,9 +58,12 @@ interface SimpleStatus {
   status: string;
 }
 
-/** `submit-plc-token` の応答。その場でアカウントまで確定できたら JWT、DNS TXT の公開待ちが
- * 残ったら `{ status: "awaiting_dns_txt" }`（`/status` をポーリングし、確定後に `session` で JWT を得る）。 */
-export type SubmitPlcTokenResponse = AuthResponse | { status: "awaiting_dns_txt" };
+/** `submit-plc-token`・`confirm` の応答。アカウントまで確定できたら JWT、それ以外は次の状態
+ * （`submit-plc-token` は最終確認待ち、`confirm` は DNS TXT の公開待ち。`/status` をポーリングし、
+ * 確定後に `session` で JWT を得る）。 */
+export type SubmitPlcTokenResponse =
+  | AuthResponse
+  | { status: "awaiting_user_confirmation" | "awaiting_dns_txt" };
 
 export function isAuthResponse(res: SubmitPlcTokenResponse): res is AuthResponse {
   return "token" in res;
@@ -125,9 +128,10 @@ export const migration = {
   retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);
   },
-  /** 転入の最終確認（`awaiting_user_confirmation`）。確認コードの送付へ進める。 */
+  /** 転入の最終確認（`awaiting_user_confirmation`）。PLC 送信（不可逆）へ進める。その場で
+   * アカウントまで確定できれば JWT、DNS TXT の公開待ちが残れば `{ status: "awaiting_dns_txt" }`。 */
   confirm(id: string, requestToken: string) {
-    return migrationRequest<SimpleStatus>("POST", `/migration/${id}/confirm`, requestToken);
+    return migrationRequest<SubmitPlcTokenResponse>("POST", `/migration/${id}/confirm`, requestToken);
   },
   abandon(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/abandon`, requestToken);

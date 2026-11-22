@@ -575,8 +575,8 @@ pub struct MigrationDnsStage {
     pub txt_visible_at: Option<DateTime<Utc>>,
 }
 
-/// `awaiting_plc_token` から `awaiting_dns_txt` へ進め、署名済みの PLC 操作と新しい鍵を保存する。
-/// 状態が `awaiting_plc_token` でなければ何もせず `false`。
+/// `awaiting_plc_token` から最終確認待ち（`awaiting_user_confirmation`）へ進め、署名済みの PLC
+/// 操作と新しい鍵を保存する。状態が `awaiting_plc_token` でなければ何もせず `false`。
 pub async fn stage_plc_operation(
     pool: &PgPool,
     id: i64,
@@ -586,10 +586,10 @@ pub async fn stage_plc_operation(
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
         "UPDATE at_migration_requests
-         SET status = 'awaiting_dns_txt', staged_plc_operation = $2,
+         SET status = 'awaiting_user_confirmation', staged_plc_operation = $2,
              staged_signing_key_pem = $3, staged_rotation_key_pem = $4,
              cf_txt_record_id = NULL, txt_visible_at = NULL, last_error = NULL,
-             input_wait_since = NULL, input_wait_mail_stage = 0, updated_at = NOW()
+             input_wait_since = NOW(), input_wait_mail_stage = 0, updated_at = NOW()
          WHERE id = $1 AND status = 'awaiting_plc_token'",
     )
     .bind(id)

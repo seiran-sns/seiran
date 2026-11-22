@@ -267,7 +267,7 @@ pub async fn send_plc_operation_signature_code(
 fn migration_input_wait_action(status: &str) -> &'static str {
     match status {
         "awaiting_user_confirmation" => {
-            "転入画面で、転入の最終確認をしてください。転入すると元のサーバー（bsky.social 等）ではログインできなくなり、ハンドルが変わります。内容を確かめて「転入を進める」を押すと、転入元から確認コードのメールが届きます。"
+            "確認コードの入力は済んでいます。転入画面で最終確認をしてください。転入すると元のサーバー（bsky.social 等）ではログインできなくなり、ハンドルが変わります。内容を確かめて「転入する」を押すと転入が確定します。"
         }
         "awaiting_plc_token" => {
             "転入元（Bluesky 等）から届いた確認コードを、転入画面に入力してください。コードは届いてから15分で切れますが、転入画面の「確認コードを送り直す」で取り直せます。"

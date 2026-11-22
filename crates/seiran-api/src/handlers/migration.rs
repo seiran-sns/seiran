@@ -264,9 +264,10 @@ pub struct SubmitPlcTokenRequest {
     pub token: String,
 }
 
-/// `submit-plc-token` の応答。DNS TXT の公開を確かめてから PLC 送信へ進むため、その場で
-/// アカウントまで確定できたときだけ JWT を返し、待ちが残ったら状態だけを返す（フロントは
-/// `/status` をポーリングし、アカウントができたら `/session` で JWT を受け取る）。
+/// `submit-plc-token`・`confirm` の応答。アカウントまで確定できたときだけ JWT を返し、それ
+/// 以外は次の状態だけを返す（`submit-plc-token`は最終確認待ち、`confirm`は DNS TXT の公開待ちが
+/// 残ったとき。フロントは `/status` をポーリングし、アカウントができたら `/session` で JWT を
+/// 受け取る）。
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum SubmitPlcTokenResponse {
@@ -275,8 +276,9 @@ pub enum SubmitPlcTokenResponse {
 }
 
 /// PDS A に PLC 操作へ署名させ（`signPlcOperation`、メールのワンタイムトークンを消費する）、
-/// 署名済みの操作を保存して「DNS TXT 登録完了待ち」（`awaiting_dns_txt`）にする。PLC 送信・
-/// アカウント確定は `seiran_common::did_provision::migration` が TXT の公開を確かめてから行う。
+/// 署名済みの操作を保存して利用者の最終確認待ち（`awaiting_user_confirmation`）にする。PLC 送信・
+/// アカウント確定は、`confirm`の後に `seiran_common::did_provision::migration` が TXT の公開を
+/// 確かめてから行う。
 ///
 /// **再入可能**: PLC 送信後にアカウント作成だけが失敗した（`submitting_plc`・鍵記録済み）
 /// リクエストに対して同エンドポイントを再度叩けば、PLC 提出をやり直さず（＝使用済みtokenを
@@ -314,20 +316,14 @@ pub async fn submit_plc_token(
     if migration_req.status != "awaiting_plc_token" {
         return Err(ApiError::BadRequest("INVALID_STATE".into()));
     }
-    // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
     crate::handlers::auth::ensure_registration_open(&state).await?;
+    // 確認コードは転入元で15分・使い捨てなので、受け取ったその場で署名させて保存する。
+    // 署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、PLC 送信は
+    // 利用者の最終確認（`confirm`）まで待てる。
     stage_plc_operation(&state, &migration_req, &req.token).await?;
-
-    // 1段進め（Cloudflare 未設定ならここでアカウント確定まで終わる）、残りはバックグラウンドで進める。
-    if state.did_provisioner.advance_migration(id).await {
-        state.did_provisioner.kick_migration(id);
-        return Ok(Json(SubmitPlcTokenResponse::Pending {
-            status: "awaiting_dns_txt",
-        }));
-    }
-    Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
-        account_auth_response(&state, id).await?,
-    ))))
+    Ok(Json(SubmitPlcTokenResponse::Pending {
+        status: "awaiting_user_confirmation",
+    }))
 }
 
 /// 転入で作られたアカウントの JWT を発行する。`awaiting_dns_txt` の待ちが明けてアカウントが
@@ -403,7 +399,7 @@ fn generate_did_key(label: &str) -> Result<(String, String), ApiError> {
 }
 
 /// PDS A に、DID の鍵・ハンドル・PDS を seiran へ向け替える PLC 操作へ署名させ
-/// （`signPlcOperation`）、署名済みの操作と新しい鍵を保存して `awaiting_dns_txt` にする。
+/// （`signPlcOperation`）、署名済みの操作と新しい鍵を保存して `awaiting_user_confirmation` にする。
 async fn stage_plc_operation(
     state: &AppState,
     migration_req: &AtMigrationRequestRow,
@@ -777,30 +773,40 @@ pub async fn submit_source_password(
     }))
 }
 
-/// 利用者の最終確認（`awaiting_user_confirmation`）。元のサーバーでのログインが無効化される
-/// こと・ハンドルが変わることを確かめてもらった後に、確認コードの送付へ進める。状態が
-/// 変わっていたら（打ち切り・期限切れと競合した等）何もしない。
+/// 利用者の最終確認（`awaiting_user_confirmation`）。確認コードの入力・署名まで済んだところで、
+/// 元のサーバーでのログインが無効化されること・ハンドルが変わることを確かめてもらい、PLC 送信
+/// （★不可逆境界）へ進める。DNS TXT の公開を確かめてから送るので、その場でアカウントまで
+/// 確定できたときだけ JWT を返し、待ちが残ったら状態だけを返す（`submit-plc-token`の以前の
+/// 応答と同じ形）。状態が変わっていたら（打ち切り・期限切れと競合した等）何もしない。
 pub async fn confirm(
     State(state): State<AppState>,
     Path(id): Path<i64>,
     headers: HeaderMap,
-) -> Result<Json<MigrationStatusStub>, ApiError> {
+) -> Result<Json<SubmitPlcTokenResponse>, ApiError> {
     authorize_migration_request(&state, id, &headers).await?;
+    // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
+    crate::handlers::auth::ensure_registration_open(&state).await?;
     let moved = seiran_common::repository::at_migration::transition_status(
         &state.db,
         id,
         "awaiting_user_confirmation",
-        "requesting_plc_signature",
+        "awaiting_dns_txt",
     )
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
     if !moved {
         return Err(ApiError::Conflict("INVALID_STATE"));
     }
-    state.enqueue_migration_request_plc_signature(id).await;
-    Ok(Json(MigrationStatusStub {
-        status: "requesting_plc_signature",
-    }))
+    // 1段進め（Cloudflare 未設定ならここでアカウント確定まで終わる）、残りはバックグラウンドで進める。
+    if state.did_provisioner.advance_migration(id).await {
+        state.did_provisioner.kick_migration(id);
+        return Ok(Json(SubmitPlcTokenResponse::Pending {
+            status: "awaiting_dns_txt",
+        }));
+    }
+    Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
+        account_auth_response(&state, id).await?,
+    ))))
 }
 
 /// `plc_submitted_at`が未設定（不可逆境界の前）のリクエストのみ打ち切れる。

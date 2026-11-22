@@ -384,8 +384,17 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     setError("");
     setSubmitting(true);
     try {
-      await api.migration.confirm(stored.id, stored.token);
-      await fetchStatus();
+      const res = await api.migration.confirm(stored.id, stored.token);
+      if (!isAuthResponse(res)) {
+        // DNS TXT の公開待ち。ポーリングで待ち、アカウントができたら下の effect がログインする。
+        await fetchStatus();
+        return;
+      }
+      // アカウントができたら転入トークンは要らない（取り込みは裏で進み、状況は設定 >
+      // インポートが JWT で見る）。
+      clearStoredMigrationRequest();
+      login(res.token, res.user);
+      navigate("/", { replace: true });
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -473,7 +482,9 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     try {
       const res = await api.migration.submitPlcToken(stored.id, stored.token, inputValue);
       if (!isAuthResponse(res)) {
-        // DNS TXT の公開待ち。ポーリングで待ち、アカウントができたら下の effect がログインする。
+        // 署名まで済み、最終確認の画面へ進む（PLC 提出後にアカウント作成だけをやり直す再入の
+        // 場合だけ、その場で JWT が返る）。
+        setInputValue("");
         await fetchStatus();
         return;
       }
@@ -596,7 +607,7 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
       {/* 取りやめると転入を打ち切り（確保したユーザー名とメールも解く）、入口のフォームへ戻る。
           別のアカウントでの転入も通常の新規登録も、そこから選び直せる。 */}
       {statusData?.can_abandon && (
-        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
+        <div className={styles.form} style={{ marginTop: "1.5rem" }}>
           <button type="button" className={styles.button} onClick={handleAbandon} disabled={submitting}>
             {t("auth:migrationStatus.abandon")}
           </button>
@@ -622,9 +633,9 @@ interface MigrateConfirmPanelProps {
 }
 
 /**
- * 転入の最終確認。転入元の認証（求められればメール認証も）とリポジトリの取得が済んだところで、
- * 元のサーバーでのログインが無効化されること・ハンドルが変わることを赤く目立たせて見せ、
- * 利用者が「転入を進める」を押してから確認コードを送らせる。
+ * 転入の最終確認。確認コードの入力（転入元の署名）まで済んだところで、元のサーバーでの
+ * ログインが無効化されること・ハンドルが変わることを赤く目立たせて見せ、利用者が「転入する」を
+ * 押してから PLC 送信（不可逆）へ進める。
  */
 function MigrateConfirmPanel({ sourceHandle, newHandle, submitting, onConfirm }: MigrateConfirmPanelProps) {
   const { t } = useTranslation();
@@ -647,9 +658,6 @@ function MigrateConfirmPanel({ sourceHandle, newHandle, submitting, onConfirm }:
       <p style={warningStyle}>{t("auth:migrationStatus.confirm.loginDisabled")}</p>
       <p style={warningStyle}>
         {t("auth:migrationStatus.confirm.handleChange", { from: sourceHandle, to: newHandle })}
-      </p>
-      <p style={{ color: "#a0aec0", fontSize: "0.9rem", margin: "0 0 0.5rem" }}>
-        {t("auth:migrationStatus.confirm.relationsKept")}
       </p>
       <p style={{ color: "#a0aec0", fontSize: "0.85rem", margin: "0 0 0.75rem" }}>
         {t("auth:migrationStatus.confirm.nextStep")}
