@@ -327,6 +327,9 @@ pub async fn revoke_all_sessions(
 #[derive(Deserialize)]
 pub struct RequestEmailChangeRequest {
     pub new_email: String,
+    /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
+    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    pub language: Option<String>,
 }
 
 /// `POST /api/account/email/request-change`（#59）
@@ -378,7 +381,8 @@ pub async fn request_email_change(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    send_email_change_confirmation(&smtp_settings, &new_email, &confirm_url)
+    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    send_email_change_confirmation(&smtp_settings, language, &new_email, &confirm_url)
         .await
         .map_err(|e| {
             tracing::error!("[request-email-change] メール送信失敗: {}", e);

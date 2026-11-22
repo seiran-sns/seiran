@@ -1,0 +1,51 @@
+{
+  "test": {
+    "subject": "seiran — 測試郵件",
+    "body": "這是從 seiran 管理介面傳送的測試郵件。若您收到此郵件，表示目前的 SMTP 設定可以傳送郵件。"
+  },
+  "verifyEmail": {
+    "subject": "seiran — 確認電子郵件地址",
+    "body": "歡迎使用 seiran。\n\n請點擊下方連結以確認您的電子郵件地址：\n\n{{url}}\n\n此連結的有效期限為 24 小時。\n\n若這不是您本人的操作，請忽略此郵件。"
+  },
+  "emailChange": {
+    "subject": "seiran — 確認變更電子郵件地址",
+    "body": "seiran — 我們已收到變更電子郵件地址的請求。\n\n請點擊下方連結，確定將電子郵件地址變更為此地址：\n\n{{url}}\n\n此連結的有效期限為 24 小時。\n\n若這不是您本人的操作，請忽略此郵件。"
+  },
+  "totpDisable": {
+    "subject": "seiran — 停用兩步驟驗證的請求",
+    "body": "seiran — 我們已收到停用兩步驟驗證（TOTP）的請求。\n\n點擊下方連結即可停用此帳號的兩步驟驗證：\n\n{{url}}\n\n此連結的有效期限為 1 小時。\n\n若這不是您本人的操作，請忽略此郵件（只要不開啟連結，兩步驟驗證就不會被停用）。"
+  },
+  "passwordReset": {
+    "subject": "seiran — 重設密碼",
+    "body": "seiran — 我們已收到重設密碼的請求。\n\n請點擊下方連結重新設定密碼：\n\n{{url}}\n\n此連結的有效期限為 1 小時。\n\n若這不是您本人的操作，請忽略此郵件。"
+  },
+  "atpLoginCode": {
+    "subject": "seiran — 登入驗證碼",
+    "body": "seiran — 這是您的登入驗證碼。\n\n若要完成在 AT Protocol 用戶端（如 Bluesky 官方應用程式）上的登入，\n請輸入以下驗證碼：\n\n{{code}}\n\n此驗證碼的有效期限為 15 分鐘。\n\n若這不是您本人的操作，請忽略此郵件。"
+  },
+  "plcOperationCode": {
+    "subject": "seiran — DID 管理資訊變更驗證碼",
+    "body": "seiran — 我們已收到變更 DID 管理資訊（例如搬遷至其他伺服器）的請求。\n\n請在您正在操作的用戶端中輸入以下驗證碼：\n\n{{code}}\n\n此驗證碼的有效期限為 15 分鐘。\n\n若這不是您本人的操作，請忽略此郵件（只要不輸入驗證碼，DID 的資訊就不會變更）。"
+  },
+  "migration": {
+    "action": {
+      "awaitingUserConfirmation": "您已輸入驗證碼。請在遷移畫面進行最後確認。遷移後將無法再登入原本的伺服器（如 bsky.social），且帳號代稱會變更。確認內容後按下「遷移」即可完成遷移。",
+      "awaitingPlcToken": "請在遷移畫面輸入原伺服器（如 Bluesky）寄來的驗證碼。驗證碼會在送達後 15 分鐘失效，但可以透過遷移畫面的「重新傳送驗證碼」重新取得。",
+      "awaitingSourcePassword": "由於您是以應用程式密碼登入原伺服器，因此無法執行遷移所需的操作。請在遷移畫面輸入登入原伺服器時使用的密碼（而非應用程式密碼）。",
+      "error": "遷移過程中發生錯誤，目前已停止。請在遷移畫面選擇重試，或是中止後改用其他帳號或一般註冊重新開始。"
+    },
+    "resume": "您可以透過以下連結返回遷移畫面（僅能使用一次）：\n\n{{url}}\n\n連結使用過後或在其他裝置上，也可以在登入畫面輸入使用者名稱「{{username}}」與開始遷移時設定的密碼來返回。",
+    "inputWait": {
+      "subject": "seiran — 從 Bluesky 遷移：正在等待您的輸入",
+      "body": "您從 Bluesky 遷移至 seiran（使用者名稱「{{username}}」）的程序正在等待您的輸入。\n\n{{action}}\n\n{{resume}}\n\n若未在 {{deadline}} 前繼續，遷移將會取消，為您保留的使用者名稱「{{username}}」也會被釋出。\n\n若這不是您本人的操作，請忽略此郵件。"
+    },
+    "expiryWarning": {
+      "subject": "seiran — 從 Bluesky 的遷移即將取消",
+      "body": "您從 Bluesky 遷移至 seiran（使用者名稱「{{username}}」）的程序將於 {{deadline}} 取消。\n\n若要繼續，請在此之前完成以下操作。\n\n{{action}}\n\n{{resume}}\n\n取消後，為您保留的使用者名稱「{{username}}」將會被釋出。若您不再打算遷移，可以忽略此郵件。"
+    },
+    "expired": {
+      "subject": "seiran — 已取消從 Bluesky 的遷移",
+      "body": "您從 Bluesky 遷移至 seiran（使用者名稱「{{username}}」）的程序因超過期限仍未輸入而已取消。為您保留的使用者名稱「{{username}}」已被釋出。\n\n原伺服器上的帳號沒有任何變動。若要遷移，請從頭重新開始。"
+    }
+  }
+}

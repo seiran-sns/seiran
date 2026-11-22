@@ -39,6 +39,7 @@ async fn start_migration(
                 password_hash: "migration-password-hash",
                 email: Some(email),
                 agreed_tos_text: None,
+                language: "ko",
             },
             chrono::Utc::now(),
         )
@@ -197,7 +198,8 @@ async fn input_wait_expiry_releases_claims() {
     .await
     .unwrap();
     let expired = at_migration::expire_input_waits(&pool).await.unwrap();
-    assert!(expired.iter().any(|m| m.id == id));
+    let mine = expired.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(mine.language.as_deref(), Some("ko"));
 
     let row = repo.get(id).await.unwrap().unwrap();
     assert_eq!(row.status, "abandoned");
@@ -225,7 +227,8 @@ async fn input_wait_mails_are_claimed_once() {
     let notices = at_migration::claim_input_wait_mails(&pool, 1, 0)
         .await
         .unwrap();
-    assert!(notices.iter().any(|m| m.id == id));
+    let notice = notices.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(notice.language.as_deref(), Some("ko"));
     let again = at_migration::claim_input_wait_mails(&pool, 1, 0)
         .await
         .unwrap();
@@ -239,10 +242,18 @@ async fn input_wait_mails_are_claimed_once() {
     .execute(&pool)
     .await
     .unwrap();
+    // ログインで戻ると、以後の案内はそのときの画面の言語で送る。
+    let reissued_hash = format!("reissued{}", unique_suffix());
+    assert!(
+        at_migration::reissue_request_token(&pool, id, &reissued_hash, "fr")
+            .await
+            .unwrap()
+    );
     let warnings = at_migration::claim_input_wait_mails(&pool, 2, 24)
         .await
         .unwrap();
-    assert!(warnings.iter().any(|m| m.id == id));
+    let warning = warnings.iter().find(|m| m.id == id).unwrap();
+    assert_eq!(warning.language.as_deref(), Some("fr"));
 }
 
 /// アカウント確定で、名簿の確保がアカウントに付け替わる。

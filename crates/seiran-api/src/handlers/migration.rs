@@ -63,6 +63,9 @@ pub struct MigrationStartRequest {
     /// 利用規約同意チェックボックス。`handlers::auth::resolve_tos_agreement`参照
     /// （`register`と同じ検証・同じ`site_settings`キーを共有する）。
     pub agree_tos: Option<bool>,
+    /// 画面に出ている表示言語。入力待ちの案内メール（定期処理から後で送る）をこの言語で送るため
+    /// `at_migration_requests.language` に残す。無い・非対応なら `Accept-Language` から決める。
+    pub language: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -90,6 +93,7 @@ fn generate_request_token() -> (String, String) {
 
 pub async fn start(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<MigrationStartRequest>,
 ) -> Result<Json<MigrationStartResponse>, ApiError> {
     crate::handlers::auth::ensure_registration_open(&state).await?;
@@ -216,6 +220,7 @@ pub async fn start(
 
     let request_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
     let (request_token, request_token_hash) = generate_request_token();
+    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
     let now = chrono::Utc::now();
 
     let repo = PgAtMigrationRepository::new(state.db.clone());
@@ -238,6 +243,7 @@ pub async fn start(
             password_hash: &password_hash,
             email: Some(&email),
             agreed_tos_text: agreed_tos_text.as_deref(),
+            language,
         },
         now,
     )
@@ -858,16 +864,18 @@ pub struct MigrationSession {
 }
 
 /// ログインで戻った転入の `X-Migration-Token` を発行し直す（それまでのトークンは無効になる。
-/// 古い端末の転入画面は `MIGRATION_TOKEN_INVALID` を受ける）。アカウントができていた・
-/// 打ち切られていたら `None`。
+/// 古い端末の転入画面は `MIGRATION_TOKEN_INVALID` を受ける）。以後の案内メールは `language`
+/// で送る。アカウントができていた・打ち切られていたら `None`。
 pub(crate) async fn reissue_session(
     state: &AppState,
     id: i64,
+    language: &str,
 ) -> Result<Option<MigrationSession>, ApiError> {
     let (request_token, request_token_hash) = generate_request_token();
-    let reissued = migration_repo::reissue_request_token(&state.db, id, &request_token_hash)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let reissued =
+        migration_repo::reissue_request_token(&state.db, id, &request_token_hash, language)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(reissued.then(|| MigrationSession {
         request_id: id.to_string(),
         request_token,
@@ -878,6 +886,9 @@ pub(crate) async fn reissue_session(
 pub struct ResumeRequest {
     /// 案内メールの再開リンク（`/register/migrate?resume=...`）に載せたトークン。
     pub token: String,
+    /// 画面に出ている表示言語。以後の案内メールをこの言語で送る。無い・非対応なら
+    /// `Accept-Language` から決める。
+    pub language: Option<String>,
 }
 
 /// 案内メールの再開リンクから、途中の転入へ戻る。トークンは使い捨てで、使うと
@@ -885,16 +896,19 @@ pub struct ResumeRequest {
 /// `MIGRATION_RESUME_TOKEN_INVALID`（その場合もログインでは戻れる）。
 pub async fn resume(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(req): Json<ResumeRequest>,
 ) -> Result<Json<MigrationSession>, ApiError> {
     let token_hash = hex::encode(Sha256::digest(req.token.as_bytes()));
     let (request_token, request_token_hash) = generate_request_token();
-    let id = migration_repo::consume_resume_token(&state.db, &token_hash, &request_token_hash)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?
-        .ok_or(ApiError::BadRequest(
-            "MIGRATION_RESUME_TOKEN_INVALID".into(),
-        ))?;
+    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let id =
+        migration_repo::consume_resume_token(&state.db, &token_hash, &request_token_hash, language)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+            .ok_or(ApiError::BadRequest(
+                "MIGRATION_RESUME_TOKEN_INVALID".into(),
+            ))?;
     Ok(Json(MigrationSession {
         request_id: id.to_string(),
         request_token,

@@ -1,0 +1,51 @@
+{
+  "test": {
+    "subject": "seiran — Test email",
+    "body": "This is a test email sent from the seiran admin panel. If you received it, your SMTP settings can send email."
+  },
+  "verifyEmail": {
+    "subject": "seiran — Confirm your email address",
+    "body": "Welcome to seiran.\n\nClick the link below to confirm your email address:\n\n{{url}}\n\nThis link is valid for 24 hours.\n\nIf you didn't request this, you can ignore this email."
+  },
+  "emailChange": {
+    "subject": "seiran — Confirm your new email address",
+    "body": "seiran — We received a request to change your email address.\n\nClick the link below to confirm the change to this email address:\n\n{{url}}\n\nThis link is valid for 24 hours.\n\nIf you didn't request this, you can ignore this email."
+  },
+  "totpDisable": {
+    "subject": "seiran — Request to turn off two-factor authentication",
+    "body": "seiran — We received a request to turn off two-factor authentication (TOTP).\n\nClick the link below to turn off two-factor authentication for this account:\n\n{{url}}\n\nThis link is valid for 1 hour.\n\nIf you didn't request this, ignore this email (two-factor authentication stays on unless the link is opened)."
+  },
+  "passwordReset": {
+    "subject": "seiran — Reset your password",
+    "body": "seiran — We received a request to reset your password.\n\nClick the link below to set a new password:\n\n{{url}}\n\nThis link is valid for 1 hour.\n\nIf you didn't request this, you can ignore this email."
+  },
+  "atpLoginCode": {
+    "subject": "seiran — Sign-in confirmation code",
+    "body": "seiran — Here is your sign-in confirmation code.\n\nTo finish signing in with your AT Protocol client (such as the official Bluesky app),\nenter the following code:\n\n{{code}}\n\nThis code is valid for 15 minutes.\n\nIf you didn't try to sign in, you can ignore this email."
+  },
+  "plcOperationCode": {
+    "subject": "seiran — Confirmation code for changing your DID information",
+    "body": "seiran — We received a request to change the management information of your DID (for example, to move to another server).\n\nEnter the following code in the client you are using:\n\n{{code}}\n\nThis code is valid for 15 minutes.\n\nIf you didn't request this, ignore this email (your DID information won't change unless the code is entered)."
+  },
+  "migration": {
+    "action": {
+      "awaitingUserConfirmation": "You have already entered the confirmation code. Please do the final check on the migration screen. After migrating, you will no longer be able to sign in on your original server (such as bsky.social), and your handle will change. Review the details and press \"Migrate\" to complete the migration.",
+      "awaitingPlcToken": "Enter the confirmation code sent by your original server (such as Bluesky) on the migration screen. The code expires 15 minutes after it arrives, but you can get a new one with \"Resend the code\" on the migration screen.",
+      "awaitingSourcePassword": "You signed in to your original server with an app password, so the steps needed for the migration could not be completed. On the migration screen, enter the password you use to sign in to your original server (not an app password).",
+      "error": "An error occurred during the migration and it has stopped. On the migration screen, choose whether to retry, or to cancel and start over with a different account or a regular sign-up."
+    },
+    "resume": "You can return to the migration screen from this link (it can be used only once):\n\n{{url}}\n\nAfter using the link, or from another device, you can also return by entering the username \"{{username}}\" and the password you chose when you started the migration on the sign-in screen.",
+    "inputWait": {
+      "subject": "seiran — Migration from Bluesky: waiting for your input",
+      "body": "Your migration from Bluesky to seiran (username \"{{username}}\") is waiting for your input.\n\n{{action}}\n\n{{resume}}\n\nIf you don't continue by {{deadline}}, the migration will be canceled and the username \"{{username}}\" reserved for you will be released.\n\nIf you didn't request this, you can ignore this email."
+    },
+    "expiryWarning": {
+      "subject": "seiran — Your migration from Bluesky will be canceled soon",
+      "body": "Your migration from Bluesky to seiran (username \"{{username}}\") will be canceled at {{deadline}}.\n\nTo continue, do the following before then.\n\n{{action}}\n\n{{resume}}\n\nOnce canceled, the username \"{{username}}\" reserved for you will be released. If you no longer want to migrate, you can ignore this email."
+    },
+    "expired": {
+      "subject": "seiran — Your migration from Bluesky has been canceled",
+      "body": "Your migration from Bluesky to seiran (username \"{{username}}\") was canceled because the deadline passed without any input. The username \"{{username}}\" that was reserved for you has been released.\n\nNothing has changed on your original account. If you want to migrate, please start again from the beginning."
+    }
+  }
+}

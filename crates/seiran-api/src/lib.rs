@@ -7,6 +7,7 @@
 pub mod error;
 pub mod handlers;
 pub mod interaction_cooldown;
+pub mod mail_i18n;
 pub mod mailer;
 pub mod middleware;
 pub mod rate_limit;
@@ -1784,8 +1785,10 @@ async fn run_migration_input_wait_sweep(state: &AppState) {
                 let Some(email) = m.email.as_deref().filter(|_| smtp) else {
                     continue;
                 };
+                let language = mail_i18n::stored_language(m.language.as_deref());
                 if let Err(e) =
-                    mailer::send_migration_expired(&settings, email, &m.new_username).await
+                    mailer::send_migration_expired(&settings, language, email, &m.new_username)
+                        .await
                 {
                     tracing::warn!(
                         "[migration-sweep] 取り消し通知の送信に失敗 id={}: {}",
@@ -1826,26 +1829,18 @@ async fn run_migration_input_wait_sweep(state: &AppState) {
                         continue;
                     }
                 };
+            let mail = mailer::MigrationInputWaitMail {
+                language: mail_i18n::stored_language(m.language.as_deref()),
+                to: &m.email,
+                status: &m.status,
+                username: &m.new_username,
+                resume_url: &resume_url,
+                deadline,
+            };
             let sent = if stage == 2 {
-                mailer::send_migration_expiry_warning(
-                    &settings,
-                    &m.email,
-                    &m.status,
-                    &m.new_username,
-                    &resume_url,
-                    deadline,
-                )
-                .await
+                mailer::send_migration_expiry_warning(&settings, &mail).await
             } else {
-                mailer::send_migration_input_wait_notice(
-                    &settings,
-                    &m.email,
-                    &m.status,
-                    &m.new_username,
-                    &resume_url,
-                    deadline,
-                )
-                .await
+                mailer::send_migration_input_wait_notice(&settings, &mail).await
             };
             if let Err(e) = sent {
                 tracing::warn!(

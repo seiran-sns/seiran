@@ -1,0 +1,51 @@
+{
+  "test": {
+    "subject": "seiran — E-mail de test",
+    "body": "Ceci est un e-mail de test envoyé depuis l’interface d’administration de seiran. Si vous l’avez reçu, les paramètres SMTP permettent d’envoyer des e-mails."
+  },
+  "verifyEmail": {
+    "subject": "seiran — Confirmez votre adresse e-mail",
+    "body": "Bienvenue sur seiran.\n\nCliquez sur le lien ci-dessous pour confirmer votre adresse e-mail :\n\n{{url}}\n\nCe lien est valable 24 heures.\n\nSi vous n’êtes pas à l’origine de cette demande, vous pouvez ignorer cet e-mail."
+  },
+  "emailChange": {
+    "subject": "seiran — Confirmez votre nouvelle adresse e-mail",
+    "body": "seiran — Nous avons reçu une demande de changement de votre adresse e-mail.\n\nCliquez sur le lien ci-dessous pour confirmer le passage à cette adresse e-mail :\n\n{{url}}\n\nCe lien est valable 24 heures.\n\nSi vous n’êtes pas à l’origine de cette demande, vous pouvez ignorer cet e-mail."
+  },
+  "totpDisable": {
+    "subject": "seiran — Demande de désactivation de la double authentification",
+    "body": "seiran — Nous avons reçu une demande de désactivation de la double authentification (TOTP).\n\nCliquez sur le lien ci-dessous pour désactiver la double authentification de ce compte :\n\n{{url}}\n\nCe lien est valable 1 heure.\n\nSi vous n’êtes pas à l’origine de cette demande, ignorez cet e-mail (la double authentification reste active tant que le lien n’est pas ouvert)."
+  },
+  "passwordReset": {
+    "subject": "seiran — Réinitialisation du mot de passe",
+    "body": "seiran — Nous avons reçu une demande de réinitialisation de votre mot de passe.\n\nCliquez sur le lien ci-dessous pour définir un nouveau mot de passe :\n\n{{url}}\n\nCe lien est valable 1 heure.\n\nSi vous n’êtes pas à l’origine de cette demande, vous pouvez ignorer cet e-mail."
+  },
+  "atpLoginCode": {
+    "subject": "seiran — Code de confirmation de connexion",
+    "body": "seiran — Voici votre code de confirmation de connexion.\n\nPour terminer la connexion dans votre client AT Protocol (comme l’application officielle Bluesky),\nsaisissez le code suivant :\n\n{{code}}\n\nCe code est valable 15 minutes.\n\nSi vous n’avez pas tenté de vous connecter, vous pouvez ignorer cet e-mail."
+  },
+  "plcOperationCode": {
+    "subject": "seiran — Code de confirmation pour modifier les informations de votre DID",
+    "body": "seiran — Nous avons reçu une demande de modification des informations de gestion de votre DID (par exemple pour déménager vers un autre serveur).\n\nSaisissez le code suivant dans le client que vous utilisez :\n\n{{code}}\n\nCe code est valable 15 minutes.\n\nSi vous n’êtes pas à l’origine de cette demande, ignorez cet e-mail (les informations de votre DID ne changent pas tant que le code n’est pas saisi)."
+  },
+  "migration": {
+    "action": {
+      "awaitingUserConfirmation": "Vous avez déjà saisi le code de confirmation. Effectuez la vérification finale sur l’écran de migration. Après la migration, vous ne pourrez plus vous connecter sur votre serveur d’origine (comme bsky.social) et votre handle changera. Vérifiez les informations, puis appuyez sur « Migrer » pour finaliser la migration.",
+      "awaitingPlcToken": "Saisissez sur l’écran de migration le code de confirmation envoyé par votre serveur d’origine (comme Bluesky). Le code expire 15 minutes après sa réception, mais vous pouvez en obtenir un nouveau avec « Renvoyer le code » sur l’écran de migration.",
+      "awaitingSourcePassword": "Vous étiez connecté à votre serveur d’origine avec un mot de passe d’application, les opérations nécessaires à la migration n’ont donc pas pu être effectuées. Sur l’écran de migration, saisissez le mot de passe que vous utilisez pour vous connecter à votre serveur d’origine (et non le mot de passe d’application).",
+      "error": "Une erreur s’est produite pendant la migration, qui est maintenant à l’arrêt. Sur l’écran de migration, choisissez de réessayer, ou d’abandonner pour recommencer avec un autre compte ou une inscription classique."
+    },
+    "resume": "Vous pouvez revenir à l’écran de migration grâce à ce lien (utilisable une seule fois) :\n\n{{url}}\n\nAprès avoir utilisé le lien, ou depuis un autre appareil, vous pouvez aussi revenir en saisissant sur l’écran de connexion le nom d’utilisateur « {{username}} » et le mot de passe choisi au début de la migration.",
+    "inputWait": {
+      "subject": "seiran — Migration depuis Bluesky : en attente de votre action",
+      "body": "Votre migration de Bluesky vers seiran (nom d’utilisateur « {{username}} ») attend votre action.\n\n{{action}}\n\n{{resume}}\n\nSi vous ne poursuivez pas avant le {{deadline}}, la migration sera annulée et le nom d’utilisateur « {{username}} » réservé pour vous sera libéré.\n\nSi vous n’êtes pas à l’origine de cette demande, vous pouvez ignorer cet e-mail."
+    },
+    "expiryWarning": {
+      "subject": "seiran — Votre migration depuis Bluesky sera bientôt annulée",
+      "body": "Votre migration de Bluesky vers seiran (nom d’utilisateur « {{username}} ») sera annulée le {{deadline}}.\n\nPour continuer, effectuez l’opération suivante avant cette date.\n\n{{action}}\n\n{{resume}}\n\nUne fois la migration annulée, le nom d’utilisateur « {{username}} » réservé pour vous sera libéré. Si vous ne souhaitez plus migrer, vous pouvez ignorer cet e-mail."
+    },
+    "expired": {
+      "subject": "seiran — Votre migration depuis Bluesky a été annulée",
+      "body": "Votre migration de Bluesky vers seiran (nom d’utilisateur « {{username}} ») a été annulée, car le délai a expiré sans aucune action de votre part. Le nom d’utilisateur « {{username}} » qui vous était réservé a été libéré.\n\nVotre compte d’origine n’a pas été modifié. Si vous souhaitez migrer, recommencez depuis le début."
+    }
+  }
+}

@@ -152,9 +152,27 @@ fn auth_factor_token_required_error() -> axum::response::Response {
 /// で発行した専用アプリパスワードの両方を照合対象とする（公式Bluesky PDS準拠）。
 /// アカウント存在有無が応答の分岐やタイミングから漏れないよう、identifier解決失敗時も
 /// ダミーハッシュ照合を行ってから同一の `AuthenticationRequired` を返す。
+/// ATP クライアントからの操作で送るメールの言語。クライアントは画面の言語を送ってこないので、
+/// seiran で選んだ表示言語（`users.language_preference`）を優先し、「自動」なら
+/// `Accept-Language`（アプリが OS の言語を載せる）から決める。
+pub(crate) async fn atp_mail_language(
+    state: &AppState,
+    user_id: i64,
+    headers: &HeaderMap,
+) -> &'static str {
+    let preference = state
+        .users
+        .find_language_preference_by_user_id(user_id)
+        .await
+        .ok()
+        .flatten();
+    crate::mail_i18n::request_language(preference.as_deref(), headers)
+}
+
 pub async fn xrpc_create_session(
     State(state): State<AppState>,
     ip: ClientIp,
+    headers: HeaderMap,
     Json(req): Json<CreateSessionRequest>,
 ) -> impl IntoResponse {
     // [SEC-1] メインパスワードでの認証も受け付けるため（下記コメント参照）、
@@ -293,8 +311,10 @@ pub async fn xrpc_create_session(
                     .into_response();
                 }
                 if let Some(login) = &login_row {
+                    let language = atp_mail_language(&state, login.id, &headers).await;
                     if let Err(e) = crate::mailer::send_atp_session_2fa_code(
                         &smtp_settings,
+                        language,
                         &login.email,
                         &code,
                     )

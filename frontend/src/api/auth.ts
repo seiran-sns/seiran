@@ -1,4 +1,4 @@
-import { request } from "./core";
+import { mailLanguage, request } from "./core";
 import type { AuthResponse, LoginResult, SetupStatus, User, VerifyEmailResponse, VerifyTokenResponse } from "./types";
 import { authenticationOptions, credentialJson } from "./webauthn";
 import type { AuthenticationOptionsJson, WebAuthnEnvelope } from "./webauthn";
@@ -27,6 +27,7 @@ export const auth = {
     return request<VerifyEmailResponse>("POST", "/auth/verify-email", {
       email,
       turnstile_token: turnstileToken,
+      language: mailLanguage(),
     });
   },
   verifyEmailToken(token: string, signal?: AbortSignal) {
@@ -75,6 +76,7 @@ export const auth = {
     return request<LoginResult>("POST", "/auth/login", {
       identifier,
       password,
+      language: mailLanguage(),
     });
   },
   async loginWithPasskey() {
@@ -101,7 +103,7 @@ export const auth = {
     return request<{ message: string }>(
       "POST",
       "/auth/request-password-reset",
-      { email },
+      { email, language: mailLanguage() },
     );
   },
   verifyResetToken(token: string, signal?: AbortSignal) {
@@ -130,6 +132,7 @@ export const auth = {
     requestDisableEmail(pendingToken: string) {
       return request<void>("POST", "/auth/totp/request-disable-email", {
         pending_token: pendingToken,
+        language: mailLanguage(),
       });
     },
     /** メールのリンク（`/totp-disable?token=...`）を踏んだ際にトークンを確定する（#65）。 */

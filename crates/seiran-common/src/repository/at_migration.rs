@@ -100,6 +100,8 @@ pub struct NewMigrationRequest<'a> {
     /// 利用規約チェックボックスに同意していた場合のみ`Some`（`handlers::auth::resolve_tos_agreement`
     /// が返す、同意時点のsite_settings.terms_of_service_textの文面そのもの）。
     pub agreed_tos_text: Option<&'a str>,
+    /// 案内メールを送る言語（表示言語のどれか、`at_migration_requests.language`）。
+    pub language: &'a str,
 }
 
 #[async_trait]
@@ -248,14 +250,15 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             password_hash,
             email,
             agreed_tos_text,
+            language,
         } = *req;
         let mut tx = self.pool.begin().await?;
         sqlx::query(
             "INSERT INTO at_migration_requests
                 (id, status, request_token_hash, source_handle, source_pds_endpoint, source_did,
                  source_access_jwt, source_refresh_jwt, new_username, password_hash, email,
-                 agreed_tos_text, created_at, updated_at)
-             VALUES ($1, 'fetching_repo', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $12)",
+                 agreed_tos_text, language, created_at, updated_at)
+             VALUES ($1, 'fetching_repo', $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $13, $12, $12)",
         )
         .bind(id)
         .bind(request_token_hash)
@@ -269,6 +272,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         .bind(email)
         .bind(agreed_tos_text)
         .bind(now)
+        .bind(language)
         .execute(&mut *tx)
         .await?;
         // 名前とメールはアカウントができるまで（打ち切りまで）この転入が確保する。
@@ -803,6 +807,7 @@ pub struct ExpiredMigration {
     pub id: i64,
     pub email: Option<String>,
     pub new_username: String,
+    pub language: Option<String>,
 }
 
 /// 入力待ちのまま [`INPUT_WAIT_EXPIRY_HOURS`] たった転入を打ち切り、名前・メールの確保と
@@ -817,7 +822,7 @@ pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, 
              WHERE input_wait_since < NOW() - make_interval(hours => $1)
                AND status IN {INPUT_WAIT_STATUSES_SQL}
                AND plc_submitted_at IS NULL
-             RETURNING id, email, new_username
+             RETURNING id, email, new_username, language
          ),
          du AS (
              DELETE FROM local_username_claims c USING r
@@ -828,7 +833,7 @@ pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, 
              WHERE c.migration_request_id = r.id AND c.user_id IS NULL
          ),
          dt AS (DELETE FROM at_migration_resume_tokens t USING r WHERE t.request_id = r.id)
-         SELECT id, email, new_username FROM r"
+         SELECT id, email, new_username, language FROM r"
     )))
     .bind(INPUT_WAIT_EXPIRY_HOURS as i32)
     .fetch_all(pool)
@@ -1086,18 +1091,21 @@ pub async fn find_expired_password_hash(
 }
 
 /// ログインで戻った転入の `X-Migration-Token` を発行し直す（それまでのトークンは無効になる）。
-/// アカウントができていた・打ち切られていたら `false`。
+/// 案内メールの言語は戻ったときの画面の言語に置き換える。アカウントができていた・打ち切られて
+/// いたら `false`。
 pub async fn reissue_request_token(
     pool: &PgPool,
     id: i64,
     request_token_hash: &str,
+    language: &str,
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
-        "UPDATE at_migration_requests SET request_token_hash = $2
+        "UPDATE at_migration_requests SET request_token_hash = $2, language = $3
          WHERE id = $1 AND user_id IS NULL AND status NOT IN ('completed', 'abandoned')",
     )
     .bind(id)
     .bind(request_token_hash)
+    .bind(language)
     .execute(pool)
     .await?;
     Ok(res.rows_affected() == 1)
@@ -1123,7 +1131,8 @@ pub async fn insert_resume_token(
 }
 
 /// 再開リンクのトークンを使い、転入の `X-Migration-Token` を発行し直す（使い捨て。それまでの
-/// トークンは無効になる）。期限切れ・使用済み・PLC 提出後・打ち切り済みなら `None`。
+/// トークンは無効になる）。案内メールの言語は戻ったときの画面の言語に置き換える。
+/// 期限切れ・使用済み・PLC 提出後・打ち切り済みなら `None`。
 /// PLC 提出後を除くのは、提出後にアカウント作成の前で止まった転入では、トークンを持つ人が
 /// `submit-plc-token` の再入でアカウントを作らせ JWT まで受け取れるため（宛先のメールは
 /// 確認されていないことがある）。
@@ -1131,13 +1140,14 @@ pub async fn consume_resume_token(
     pool: &PgPool,
     token_hash: &str,
     request_token_hash: &str,
+    language: &str,
 ) -> Result<Option<i64>, sqlx::Error> {
     sqlx::query_scalar(
         "WITH t AS (
              DELETE FROM at_migration_resume_tokens WHERE token_hash = $1
              RETURNING request_id, expires_at
          )
-         UPDATE at_migration_requests r SET request_token_hash = $2
+         UPDATE at_migration_requests r SET request_token_hash = $2, language = $3
          FROM t
          WHERE r.id = t.request_id AND t.expires_at > NOW()
            AND r.plc_submitted_at IS NULL AND r.user_id IS NULL
@@ -1146,6 +1156,7 @@ pub async fn consume_resume_token(
     )
     .bind(token_hash)
     .bind(request_token_hash)
+    .bind(language)
     .fetch_optional(pool)
     .await
 }
@@ -1175,6 +1186,7 @@ pub struct InputWaitMail {
     pub email: String,
     pub new_username: String,
     pub input_wait_since: DateTime<Utc>,
+    pub language: Option<String>,
 }
 
 /// 入力待ちに入ってから `min_age_hours` 以上たち、案内の段階が `stage` 未満の転入を、
@@ -1191,7 +1203,7 @@ pub async fn claim_input_wait_mails(
          WHERE input_wait_since <= NOW() - make_interval(hours => $2)
            AND input_wait_mail_stage < $1 AND email IS NOT NULL AND plc_submitted_at IS NULL
            AND status IN {INPUT_WAIT_STATUSES_SQL}
-         RETURNING id, status::text, email, new_username, input_wait_since"
+         RETURNING id, status::text, email, new_username, input_wait_since, language"
     )))
     .bind(stage)
     .bind(min_age_hours as i32)

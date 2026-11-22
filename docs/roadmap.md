@@ -54,6 +54,7 @@
 - [x] **frontend/backend共通バージョン管理・互換性チェック** — `docs/architecture.md` 2.1節
 - [x] **PWA対応** — サイト設定からmanifestを動的生成。`docs/architecture.md`
 - [x] **国際化** — 日英中（繁/簡）韓西独仏、エラーコードの多言語化。`docs/architecture.md` 8節
+- [x] **メールの多言語化（#309）** — 送信するメールを表示言語の8言語で送る。`docs/architecture.md` 11節「メールの言語」
 - [x] **pg_bigm による本文検索** — `docs/database.md`
 - [x] **削除して編集再投稿** — 自分のポストを即削除し、内容を下書きに引き継いでコンポーザを開く。確認ガイドは `users.hidden_guides` で非表示にできる（設定画面 `/settings/guides`）。Misskey 互換は `notes/delete` → `notes/create`。`docs/ui_spec.md` 2.2b節・`docs/protocols.md` 7節
 - [x] **コード改善大会（2026-09-26）** — DRY・レースコンディション・SQL・責務分割・SSRF。規約は `docs/coding_rules.md` 2節
