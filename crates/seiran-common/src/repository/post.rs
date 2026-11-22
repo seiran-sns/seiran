@@ -315,7 +315,7 @@ pub struct PostDeliveryMeta {
     pub domain: String,
     /// `actors.actor_type`（`"local"`/`"fedi"`/`"bsky"`等）。ローカル/リモート判定は
     /// `domain == local_domain`の文字列比較ではなくこちらを使う
-    /// （`insert_local`の不変条件によりlocal⇔domain=local_domainは常に一致するが、
+    /// （`insert_local_actor_row`の不変条件によりlocal⇔domain=local_domainは常に一致するが、
     /// actor_type判定の方が環境非依存でSQL側の意味とも一致する）。
     pub actor_type: String,
     pub display_name: Option<String>,

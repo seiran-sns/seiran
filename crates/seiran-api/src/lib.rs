@@ -1686,6 +1686,114 @@ pub fn spawn_gc_tasks(state: &AppState) {
             run_atp_repo_events_car_bytes_gc(&db3).await;
         }
     });
+
+    // DID 転入の入力待ち: 案内・警告メールと、期限切れの打ち切り（`docs/account_migration.md`
+    // 4節）。各段階は1文で「自分が担当する転入」を取るので、複数のプロセスで動いても
+    // 同じメールを二重に送らない。案内はこの間隔の遅れで届く。
+    let migration_state = state.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+        loop {
+            interval.tick().await;
+            run_migration_input_wait_sweep(&migration_state).await;
+        }
+    });
+}
+
+/// DID 転入の入力待ちを1巡する。打ち切りを先に、次に警告、最後に案内の順で処理する
+/// （24時間を過ぎてから見つかった入力待ちには、案内ではなく警告だけを送るため）。
+async fn run_migration_input_wait_sweep(state: &AppState) {
+    use seiran_common::repository::at_migration::{
+        self as repo, INPUT_WAIT_EXPIRY_HOURS, INPUT_WAIT_WARNING_HOURS,
+    };
+    if let Err(e) = repo::adopt_untracked_input_waits(&state.db).await {
+        tracing::error!("[migration-sweep] 入力待ちの開始時刻の補完に失敗: {}", e);
+    }
+    let settings = state.site_settings.get_all().await.unwrap_or_default();
+    let smtp = mailer::is_smtp_configured(&settings);
+
+    match repo::expire_input_waits(&state.db).await {
+        Ok(expired) => {
+            for m in expired {
+                tracing::info!(
+                    "[migration-sweep] 入力待ちのまま期限が過ぎた転入 id={} を打ち切りました",
+                    m.id
+                );
+                let Some(email) = m.email.as_deref().filter(|_| smtp) else {
+                    continue;
+                };
+                if let Err(e) =
+                    mailer::send_migration_expired(&settings, email, &m.new_username).await
+                {
+                    tracing::warn!(
+                        "[migration-sweep] 取り消し通知の送信に失敗 id={}: {}",
+                        m.id,
+                        e
+                    );
+                }
+            }
+        }
+        Err(e) => tracing::error!("[migration-sweep] 期限切れの打ち切りに失敗: {}", e),
+    }
+    if let Err(e) = repo::release_stale_claims(&state.db).await {
+        tracing::error!("[migration-sweep] 取り残された確保の解放に失敗: {}", e);
+    }
+
+    for (stage, min_age_hours) in [(2, INPUT_WAIT_WARNING_HOURS), (1, 0)] {
+        let mails = match repo::claim_input_wait_mails(&state.db, stage, min_age_hours).await {
+            Ok(mails) => mails,
+            Err(e) => {
+                tracing::error!("[migration-sweep] 案内メールの対象の取得に失敗: {}", e);
+                continue;
+            }
+        };
+        if !smtp {
+            continue;
+        }
+        for m in mails {
+            let deadline = m.input_wait_since + chrono::Duration::hours(INPUT_WAIT_EXPIRY_HOURS);
+            let resume_url =
+                match handlers::migration::create_resume_link(state, m.id, deadline).await {
+                    Ok(url) => url,
+                    Err(e) => {
+                        tracing::error!(
+                            "[migration-sweep] 再開リンクの作成に失敗 id={}: {}",
+                            m.id,
+                            e
+                        );
+                        continue;
+                    }
+                };
+            let sent = if stage == 2 {
+                mailer::send_migration_expiry_warning(
+                    &settings,
+                    &m.email,
+                    &m.status,
+                    &m.new_username,
+                    &resume_url,
+                    deadline,
+                )
+                .await
+            } else {
+                mailer::send_migration_input_wait_notice(
+                    &settings,
+                    &m.email,
+                    &m.status,
+                    &m.new_username,
+                    &resume_url,
+                    deadline,
+                )
+                .await
+            };
+            if let Err(e) = sent {
+                tracing::warn!(
+                    "[migration-sweep] 案内メールの送信に失敗 id={}: {}",
+                    m.id,
+                    e
+                );
+            }
+        }
+    }
 }
 
 /// 孤立ファイルを最大 100 件取得し、DB → S3 の順で削除する（ベストエフォート）。

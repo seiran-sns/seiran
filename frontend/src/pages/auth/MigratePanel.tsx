@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ApiError } from "../../api/client";
 import { isAuthResponse, type MigrationStatusResponse } from "../../api/migration";
@@ -67,6 +67,22 @@ const POLL_INTERVAL_MS = 3000;
  */
 export default function MigratePanel({ state, onChange }: MigratePanelProps) {
   const [stored, setStored] = useState<StoredMigrationRequest | null>(() => loadStoredMigrationRequest());
+  const [searchParams, setSearchParams] = useSearchParams();
+  const resumeToken = searchParams.get("resume");
+
+  if (resumeToken) {
+    return (
+      <MigrateResumeView
+        token={resumeToken}
+        onResumed={(req) => {
+          storeMigrationRequest(req);
+          setStored(req);
+          setSearchParams({}, { replace: true });
+        }}
+        onDismiss={() => setSearchParams({}, { replace: true })}
+      />
+    );
+  }
 
   if (stored) {
     return (
@@ -89,6 +105,42 @@ export default function MigratePanel({ state, onChange }: MigratePanelProps) {
         setStored(req);
       }}
     />
+  );
+}
+
+interface MigrateResumeViewProps {
+  token: string;
+  onResumed: (req: StoredMigrationRequest) => void;
+  onDismiss: () => void;
+}
+
+/** 案内メールの再開リンク（`/register/migrate?resume=...`）から来たとき、転入トークンを
+ * 発行し直してもらって進行状況の表示へ移る。 */
+function MigrateResumeView({ token, onResumed, onDismiss }: MigrateResumeViewProps) {
+  const { t } = useTranslation();
+  const [error, setError] = useState("");
+  const started = useRef(false);
+
+  useEffect(() => {
+    // StrictMode の二重実行でトークン（使い捨て）を2回使わないようにする。
+    if (started.current) return;
+    started.current = true;
+    api.migration
+      .resume(token)
+      .then((res) => onResumed({ id: res.request_id, token: res.request_token }))
+      .catch((err) => setError(getErrorMessage(err)));
+  }, [token, onResumed]);
+
+  if (!error) {
+    return <p style={{ textAlign: "center", color: "#a0aec0" }}>{t("auth:migrationStatus.resuming")}</p>;
+  }
+  return (
+    <>
+      <p className={styles.error}>{error}</p>
+      <button type="button" className={styles.button} onClick={onDismiss}>
+        {t("auth:migrationStatus.backToRegister")}
+      </button>
+    </>
   );
 }
 
@@ -242,6 +294,8 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
   const [needsAuthFactorToken, setNeedsAuthFactorToken] = useState(false);
   const [authFactorToken, setAuthFactorToken] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  // 別の端末でログイン・再開リンクから戻られ、この端末の転入トークンが無効になった。
+  const [superseded, setSuperseded] = useState(false);
   const pollTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const fetchStatus = useCallback(async () => {
@@ -250,6 +304,10 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
       setStatusData(res);
       setError("");
     } catch (err) {
+      if (err instanceof ApiError && err.code === "MIGRATION_TOKEN_INVALID") {
+        setSuperseded(true);
+        return;
+      }
       setError(getErrorMessage(err));
     }
   }, [stored]);
@@ -338,7 +396,20 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     }
   }
 
-  function handleStartOver() {
+  async function handleStartOver() {
+    // 打ち切らずに離れると、確保した名前とメールが期限まで残り、同じ名前で新規登録できない。
+    if (statusData?.can_abandon) {
+      setError("");
+      setSubmitting(true);
+      try {
+        await api.migration.abandon(stored.id, stored.token);
+      } catch (err) {
+        setError(getErrorMessage(err));
+        setSubmitting(false);
+        return;
+      }
+      setSubmitting(false);
+    }
     onReset();
     navigate("/register", { replace: true });
   }
@@ -396,9 +467,28 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
 
   const stepLabel = migrationStepLabel(t, statusData);
 
+  if (superseded) {
+    return (
+      <>
+        <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>
+          {t("auth:migrationStatus.superseded")}
+        </p>
+        <button type="button" className={styles.button} onClick={onReset}>
+          {t("auth:migrationStatus.backToRegister")}
+        </button>
+      </>
+    );
+  }
+
   return (
     <>
       <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+      {statusData?.expired && <p className={styles.error}>{t("auth:migrationStatus.expired")}</p>}
+      {statusData?.expires_at && (
+        <p style={{ textAlign: "center", color: "#a0aec0", fontSize: "0.85rem", marginBottom: "1rem" }}>
+          {t("auth:migrationStatus.expiresAt", { time: new Date(statusData.expires_at).toLocaleString() })}
+        </p>
+      )}
 
       {statusData?.last_error && <p className={styles.error}>{statusData.last_error}</p>}
       {error && <p className={styles.error}>{error}</p>}

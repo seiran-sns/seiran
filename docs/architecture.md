@@ -80,7 +80,7 @@ LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、�
 
 **プロセス間の共有（`Messaging`）**: ジョブキュー・`StreamHub`（WebSocket へのリアルタイム配信）・subscribeRepos のコミットイベントの3つは、`REDIS_URL` があればすべて Redis でプロセス間につなぎ、無ければプロセス内で完結させる。プロセス内で完結するのは `all` を1つだけ動かすときに限られる（split-role では worker が取り込んだ投稿が api の WebSocket に届かず、無停止更新では止める側の未処理ジョブが消える）。`REDIS_URL` を設定したのに繋がらないときは起動しない（黙ってプロセス内に切り替えると上の取りこぼしが起きるため）。配信は `event_bus::EventBus`: 送信を1本のタスクに通して Redis の Pub/Sub へ流し（同じプロセスから出たイベントの順序を保つ）、各プロセス（自分を含む）が購読して手元の購読者へ配る。Redis への送信に失敗したイベントは手元の購読者にだけ配る。
 
-**常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリング・新規アカウントの DID 発行（「DNS TXT 登録完了待ち」の進行、`docs/protocols.md` 3節）は、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。
+**常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリング・新規アカウントの DID 発行（「DNS TXT 登録完了待ち」の進行、`docs/protocols.md` 3節）は、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。DID 転入の入力待ちの処理（案内・警告メールと期限切れの打ち切り、API ロールで1分ごと）も担当を決めず、各段階を1文の UPDATE で「自分が担当する転入」として取ることで二重送信を防ぐ（`docs/account_migration.md` 4節）。
 
 **停止（graceful shutdown）**: SIGTERM（`docker stop`）か SIGINT を受けると `Messaging::shutdown` を発火し、各部分が手持ちの処理を終えてから止まる。
 - HTTP: 新しい接続の受け付けを止め、処理中のリクエストが終わるのを待つ（`with_graceful_shutdown`）。WebSocket（Misskey 互換・Mastodon 互換のストリーミング、subscribeRepos）はハンドラが Close（1012 Service Restart）を送って閉じる。クライアントとリレーは再接続し、新しいプロセスにつながる。
@@ -166,7 +166,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 
 **Misskey 互換**: `middleware::misskey_auth_bridge` が JSON ボディかクエリの `i` から `Authorization: Bearer` を合成する（既存のヘッダーを優先）。multipart（`drive/files/create`）は対象外なので、ハンドラが multipart の `i` を読む。
 
-**DID 転入中の認可**: 転入フロー（`docs/account_migration.md`）は `submitPlcOperation` 成功までアカウントが無いので、ランダムトークンのハッシュを `at_migration_requests.request_token_hash` に保存し、生値を1回だけ返して、以降は `X-Migration-Token` で認可する。成功と同時に通常の `AuthResponse` を返す。
+**DID 転入中の認可**: 転入フロー（`docs/account_migration.md`）は `submitPlcOperation` 成功までアカウントが無いので、ランダムトークンのハッシュを `at_migration_requests.request_token_hash` に保存し、生値を1回だけ返して、以降は `X-Migration-Token` で認可する。成功と同時に通常の `AuthResponse` を返す。トークンを失った利用者のために、ログイン（アカウントが無く、識別子とパスワードがアカウント未作成の転入と一致したとき）と案内メールの再開リンク（`POST /api/migration/resume`）がトークンを発行し直す（それまでのトークンは無効になる。`docs/account_migration.md` 4節「途中の転入への復帰」）。
 
 **転出元 API の認可**: `com.atproto.identity.*`/`server.checkAccountStatus`/`deactivateAccount` は ATP の accessJwt（`verify_atp_access_token`）で認可し、トークンの DID のアカウントだけを操作する（本文の DID は信用しない）。PLC 操作と `deactivateAccount` はメインパスワードでログインしたセッション（JWT の `privileged`）に限る（アプリパスワードを渡した第三者に DID を乗っ取らせないため）。DID 転出済み（`did_moved_out_at`）のアカウントは、書き込み系ハンドラ（投稿・リアクション・リポスト・フォロー・リスト・DM）が `require_not_did_moved_out()` を明示的に呼んで拒否する（凍結の判定と違い自動ではない）。読み取りは影響しない。
 

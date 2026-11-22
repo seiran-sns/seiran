@@ -12,6 +12,7 @@ pub struct Page {
     pub since_id: Option<i64>,
 }
 
+pub mod account_claims;
 pub mod actor;
 pub mod actor_search;
 pub mod also_known_as;
@@ -139,7 +140,4 @@ pub use storage_provider::{
     StorageProviderRepository, UpdateStorageProvider,
 };
 pub use totp::{PgTotpRepository, TotpRepository};
-pub use user::{
-    create_local_account, insert_local_user, AdminUserRow, LoginRow, PgUserRepository,
-    UserRepository,
-};
+pub use user::{create_local_account, AdminUserRow, LoginRow, PgUserRepository, UserRepository};

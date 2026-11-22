@@ -301,6 +301,7 @@ fn auth_account_routes() -> Router<AppState> {
         )
         .route("/api/auth/register", post(handlers::auth::register))
         .route("/api/migration/start", post(handlers::migration::start))
+        .route("/api/migration/resume", post(handlers::migration::resume))
         .route(
             "/api/migration/:id/submit-plc-token",
             post(handlers::migration::submit_plc_token),

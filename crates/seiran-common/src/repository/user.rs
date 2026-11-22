@@ -5,8 +5,9 @@ use sqlx::PgPool;
 /// 新規ローカルアカウント（users 行＋ローカル actors 行）を1トランザクションで作成し、
 /// users.id を返す。別々に挿入すると、同名ユーザーの同時登録で actors 側だけが一意制約違反に
 /// なった際に actor の無い users 行が残り、そのメールアドレスは以後登録もログインもできなく
-/// なる。ユーザー名の一意制約違反はそのまま`sqlx::Error::Database`として返す
-/// （呼び出し側で`USERNAME_TAKEN`等へ変換する）。
+/// なる。ユーザー名・メールアドレスは名簿（`account_claims`）にも同じトランザクションで
+/// 入れ、転入中の名前・メールと重なれば主キー違反になる。一意制約違反はそのまま
+/// `sqlx::Error::Database`として返す（呼び出し側で`USERNAME_TAKEN`等へ変換する）。
 ///
 /// `agreed_tos_text`は登録画面の利用規約同意チェックボックスがONだった場合のみ`Some`
 /// （`terms_of_service_agreements`への証跡記録も同じトランザクションに含める）。
@@ -31,38 +32,17 @@ pub async fn create_local_account(
     .fetch_one(&mut *tx)
     .await?;
     crate::repository::actor::insert_local_actor_row(&mut tx, user_id, actor).await?;
+    crate::repository::account_claims::insert_account_claims(
+        &mut tx,
+        actor.username,
+        actor.id,
+        email,
+        user_id,
+    )
+    .await?;
     if let Some(p) = pending_did {
         crate::repository::did_provision::insert_pending_row(&mut tx, actor.id, p).await?;
     }
-    if let Some(text) = agreed_tos_text {
-        crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
-    }
-    tx.commit().await?;
-    Ok(user_id)
-}
-
-/// `users`行のみを（同意証跡があれば同じトランザクションで）作成する。既存DID転入フロー
-/// （`materialize_local_account`）専用: そちらは`actors`行の作成/変換が転入元DIDの既存
-/// リモートキャッシュ有無で分岐する別ステップのため、`create_local_account`（users+actors
-/// 同時作成）とは分けている。
-pub async fn insert_local_user(
-    pool: &PgPool,
-    email: &str,
-    password_hash: &str,
-    role: &str,
-    agreed_tos_text: Option<&str>,
-) -> Result<i64, sqlx::Error> {
-    let mut tx = pool.begin().await?;
-    let user_id: i64 = sqlx::query_scalar(
-        "INSERT INTO users (email, password_hash, role, created_at, updated_at)
-         VALUES ($1, $2, $3::user_role, NOW(), NOW())
-         RETURNING id",
-    )
-    .bind(email)
-    .bind(password_hash)
-    .bind(role)
-    .fetch_one(&mut *tx)
-    .await?;
     if let Some(text) = agreed_tos_text {
         crate::repository::terms_of_service::record_agreement_tx(&mut tx, user_id, text).await?;
     }
@@ -153,8 +133,9 @@ pub trait UserRepository: Send + Sync {
     /// リセット以外の明示的な一括失効操作）。
     async fn revoke_all_tokens(&self, user_id: i64) -> Result<(), sqlx::Error>;
 
-    /// メールアドレスを更新する（設定画面からのメールアドレス変更確定用）。
-    async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error>;
+    /// メールアドレスを更新する（設定画面からのメールアドレス変更確定用）。新しいアドレスが
+    /// 他のアカウントか転入中のものなら何も変えずに `false`（`account_claims::change_email`）。
+    async fn update_email(&self, user_id: i64, email: &str) -> Result<bool, sqlx::Error>;
 
     /// 管理画面のユーザー一覧をカーソルページネーションで返す（ID昇順）。
     /// `q` は表示名/ユーザー名/メールアドレスの部分一致絞り込み（`None`/空文字なら絞り込み無し）。
@@ -340,13 +321,8 @@ impl UserRepository for PgUserRepository {
             .map(|_| ())
     }
 
-    async fn update_email(&self, user_id: i64, email: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users SET email = $1, updated_at = NOW() WHERE id = $2")
-            .bind(email)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+    async fn update_email(&self, user_id: i64, email: &str) -> Result<bool, sqlx::Error> {
+        crate::repository::account_claims::change_email(&self.pool, user_id, email).await
     }
 
     async fn list_for_admin(

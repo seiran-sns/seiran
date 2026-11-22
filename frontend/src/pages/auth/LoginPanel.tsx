@@ -1,8 +1,9 @@
 import { FormEvent, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api, getErrorMessage, isTotpRequired } from "../../api/client";
+import { api, getErrorMessage, isMigrationResume, isTotpRequired } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
+import { storeMigrationRequest } from "../migrationStorage";
 import styles from "../Auth.module.css";
 
 /**
@@ -52,6 +53,13 @@ export default function LoginPanel() {
       const res = await api.auth.login(identifier, password);
       if (isTotpRequired(res)) {
         setPendingToken(res.pending_token);
+      } else if (isMigrationResume(res)) {
+        // 希望したユーザー名と転入用のパスワードで入った、途中の DID 転入。転入画面で続きから進める。
+        storeMigrationRequest({
+          id: res.migration_resume.request_id,
+          token: res.migration_resume.request_token,
+        });
+        navigate("/register/migrate");
       } else {
         finishLogin(res);
       }

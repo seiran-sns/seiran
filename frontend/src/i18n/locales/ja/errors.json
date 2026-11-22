@@ -100,5 +100,7 @@
   "REACTION_COOLDOWN": "同じリアクションを続けて付けることはできません。少し待ってから再試行してください",
   "EMOJI_IMPORT_RUNNING": "既に実行中の絵文字インポートがあります",
   "EMOJI_IMPORT_NOT_RUNNING": "実行中の絵文字インポートはありません",
-  "ZIP_FILE_REQUIRED": "ZIPファイルが含まれていません"
+  "ZIP_FILE_REQUIRED": "ZIPファイルが含まれていません",
+  "MIGRATION_EXPIRED": "この移行は、入力が無いまま期限が過ぎたため取り消されました。もう一度最初から移行を始めてください",
+  "MIGRATION_RESUME_TOKEN_INVALID": "このリンクは使えません（使用済みか期限切れです）。ログイン画面で、移行を始めたときのユーザー名とパスワードを入力すると戻れます"
 }

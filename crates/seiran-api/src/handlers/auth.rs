@@ -3,7 +3,7 @@ use axum::{
     http::HeaderMap,
     Json,
 };
-use seiran_common::repository::NewLocalActor;
+use seiran_common::repository::{account_claims, NewLocalActor};
 use serde::{Deserialize, Serialize};
 
 use seiran_common::did_provision::PreparedDid;
@@ -333,15 +333,20 @@ pub(crate) async fn resolve_tos_agreement(
     Ok(Some(text))
 }
 
-/// メールアドレス・ユーザー名が未使用であることを確認する（利用者向けの早期エラー用。
-/// 同時登録の最終的な排他は`create_local_account`の一意制約が担う）。
+/// メールアドレス・ユーザー名が未使用（転入中の確保を含む）であることを確認する
+/// （利用者向けの早期エラー用。同時登録の最終的な排他は`create_local_account`が名簿へ
+/// 入れるときの主キー制約が担う）。
 async fn ensure_account_available(
     state: &AppState,
     email: &str,
     username: &str,
 ) -> Result<(), ApiError> {
     let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
-    if state.users.email_exists(email).await.map_err(internal)? {
+    if state.users.email_exists(email).await.map_err(internal)?
+        || account_claims::email_claimed(&state.db, email)
+            .await
+            .map_err(internal)?
+    {
         return Err(ApiError::Conflict("EMAIL_ALREADY_REGISTERED"));
     }
     if state
@@ -350,6 +355,9 @@ async fn ensure_account_available(
         .await
         .map_err(internal)?
         .is_some()
+        || account_claims::username_claimed(&state.db, username)
+            .await
+            .map_err(internal)?
     {
         return Err(ApiError::Conflict("USERNAME_TAKEN"));
     }
@@ -471,8 +479,12 @@ async fn register_account(
 pub(crate) fn account_creation_error(e: sqlx::Error, tag: &str) -> ApiError {
     if let sqlx::Error::Database(db) = &e {
         match db.constraint() {
-            Some("users_email_key") => return ApiError::Conflict("EMAIL_ALREADY_REGISTERED"),
-            Some("actors_ap_uri_key") => return ApiError::Conflict("USERNAME_TAKEN"),
+            Some("users_email_key") | Some(account_claims::EMAIL_CLAIM_CONSTRAINT) => {
+                return ApiError::Conflict("EMAIL_ALREADY_REGISTERED")
+            }
+            Some("actors_ap_uri_key") | Some(account_claims::USERNAME_CLAIM_CONSTRAINT) => {
+                return ApiError::Conflict("USERNAME_TAKEN")
+            }
             _ => {}
         }
     }
@@ -563,12 +575,68 @@ async fn load_user_info(
 pub enum LoginResponse {
     Success(Box<AuthResponse>),
     TotpRequired(TotpRequiredResponse),
+    MigrationResume(MigrationResumeResponse),
+}
+
+/// ログインの識別子とパスワードが、アカウントのまだできていない DID 転入（希望したユーザー名・
+/// 新しいパスワード）と一致したときの応答。フロントは転入画面へ移って続きから進める。
+#[derive(Serialize)]
+pub struct MigrationResumeResponse {
+    pub migration_resume: crate::handlers::migration::MigrationSession,
 }
 
 #[derive(Serialize)]
 pub struct TotpRequiredResponse {
     pub totp_required: bool,
     pub pending_token: String,
+}
+
+/// アカウントが見つからなかったログイン。識別子が DID 転入中の名前（またはメール）で、
+/// パスワードが転入の開始時に決めたものと一致すれば、転入画面へ戻すトークンを返す。
+/// 期限切れで打ち切られた転入と一致すれば `MIGRATION_EXPIRED`。どの経路も Argon2 の照合を
+/// ちょうど1回行い、パスワードが違えば同じ `INVALID_CREDENTIALS` を返すので、転入中の名前が
+/// あるかどうかは応答からも時間からも分からない。
+async fn login_to_migration(
+    state: &AppState,
+    req: &LoginRequest,
+) -> Result<Json<LoginResponse>, ApiError> {
+    use seiran_common::repository::at_migration as migration_repo;
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let password_matches = |hash: &str| {
+        matches!(
+            LocalAuthProvider::verify_password(&req.password, hash),
+            Ok(true)
+        )
+    };
+
+    if let Some(m) = migration_repo::find_resumable_by_identifier(&state.db, &req.identifier)
+        .await
+        .map_err(internal)?
+    {
+        if !password_matches(&m.password_hash) {
+            return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
+        }
+        // 照合の間に完了・打ち切りされていたら、通常のログイン失敗と同じに扱う。
+        return match crate::handlers::migration::reissue_session(state, m.id).await? {
+            Some(session) => Ok(Json(LoginResponse::MigrationResume(
+                MigrationResumeResponse {
+                    migration_resume: session,
+                },
+            ))),
+            None => Err(ApiError::Unauthorized("INVALID_CREDENTIALS")),
+        };
+    }
+    if let Some(hash) = migration_repo::find_expired_password_hash(&state.db, &req.identifier)
+        .await
+        .map_err(internal)?
+    {
+        if password_matches(&hash) {
+            return Err(ApiError::Unauthorized("MIGRATION_EXPIRED"));
+        }
+        return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
+    }
+    let _ = LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
+    Err(ApiError::Unauthorized("INVALID_CREDENTIALS"))
 }
 
 pub async fn login(
@@ -607,9 +675,7 @@ pub async fn login(
                 None,
             )
             .await?;
-            let _ =
-                LocalAuthProvider::verify_password(&req.password, LocalAuthProvider::dummy_hash());
-            return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
+            return login_to_migration(&state, &req).await;
         }
     };
     let user_id = row.id;

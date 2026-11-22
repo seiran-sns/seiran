@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
 
-/// 新規ローカルアクター（`ActorRepository::insert_local`・`create_local_account`の入力）。
+/// 新規ローカルアクター（`create_local_account`・DID 転入の`materialize_account`の入力）。
 /// `at_did`/`at_signing_key_pem`/`at_rotation_key_pem`は、自ホストドメインが未確定
 /// （シングルホストモード）でPLC genesisを行っていない場合は`None`になる。
 #[derive(Debug, Clone, Copy)]
@@ -16,7 +16,7 @@ pub struct NewLocalActor<'a> {
     pub birth_date: Option<NaiveDate>,
 }
 
-/// ローカルアクター行を挿入する（`insert_local`・`create_local_account`共通のSQL）。
+/// ローカルアクター行を挿入する（`create_local_account`・`materialize_account`共通のSQL）。
 pub(crate) async fn insert_local_actor_row(
     conn: &mut sqlx::PgConnection,
     user_id: i64,
@@ -233,14 +233,6 @@ pub trait ActorRepository: Send + Sync {
         domain: &str,
     ) -> Result<Option<String>, sqlx::Error>;
 
-    /// 既存ユーザー（`user_id`）に紐づく新規ローカルアクターを挿入する。ユーザーと同時に
-    /// 作る場合は、両者を1トランザクションで作る`create_local_account`を使う。
-    async fn insert_local(
-        &self,
-        user_id: i64,
-        actor: &NewLocalActor<'_>,
-    ) -> Result<(), sqlx::Error>;
-
     /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
     /// `at_did` の一意制約で衝突した場合は handle と display_name を更新する。
     async fn upsert_remote_bsky(
@@ -445,15 +437,6 @@ impl ActorRepository for PgActorRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
-    }
-
-    async fn insert_local(
-        &self,
-        user_id: i64,
-        actor: &NewLocalActor<'_>,
-    ) -> Result<(), sqlx::Error> {
-        let mut conn = self.pool.acquire().await?;
-        insert_local_actor_row(&mut conn, user_id, actor).await
     }
 
     async fn upsert_remote_bsky(
@@ -781,38 +764,6 @@ pub async fn mark_did_moved_out(
         .execute(pool)
         .await
         .map(|_| ())
-}
-
-/// DID 転入で、転入元 DID のリモートキャッシュ行をローカルアクターに変換する。
-pub struct ConvertToLocal<'a> {
-    pub actor_id: i64,
-    pub user_id: i64,
-    pub username: &'a str,
-    pub domain: &'a str,
-    pub ap_uri: &'a str,
-    pub signing_key_pem: &'a str,
-    pub rotation_key_pem: &'a str,
-}
-
-pub async fn convert_remote_to_local(
-    pool: &sqlx::PgPool,
-    c: &ConvertToLocal<'_>,
-) -> Result<(), sqlx::Error> {
-    sqlx::query(
-        "UPDATE actors SET actor_type = 'local', user_id = $1, username = $2, domain = $3,
-             ap_uri = $4, at_signing_key_pem = $5, at_rotation_key_pem = $6, updated_at = NOW()
-         WHERE id = $7",
-    )
-    .bind(c.user_id)
-    .bind(c.username)
-    .bind(c.domain)
-    .bind(c.ap_uri)
-    .bind(c.signing_key_pem)
-    .bind(c.rotation_key_pem)
-    .bind(c.actor_id)
-    .execute(pool)
-    .await
-    .map(|_| ())
 }
 
 /// OGP に使う、未退会アクターのプロフィール。

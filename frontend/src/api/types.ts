@@ -260,10 +260,20 @@ export interface TotpRequiredResponse {
   pending_token: string;
 }
 
-export type LoginResult = AuthResponse | TotpRequiredResponse;
+/** ログインの識別子とパスワードが、アカウントのまだできていない DID 転入と一致したときの応答。
+ * 転入画面へ移って続きから進める。 */
+export interface MigrationResumeResponse {
+  migration_resume: { request_id: string; request_token: string };
+}
+
+export type LoginResult = AuthResponse | TotpRequiredResponse | MigrationResumeResponse;
 
 export function isTotpRequired(res: LoginResult): res is TotpRequiredResponse {
   return "totp_required" in res;
+}
+
+export function isMigrationResume(res: LoginResult): res is MigrationResumeResponse {
+  return "migration_resume" in res;
 }
 
 export interface PasskeySummary {

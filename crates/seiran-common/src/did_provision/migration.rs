@@ -18,10 +18,7 @@ use crate::atp::PlcError;
 use crate::cloudflare::client_from_settings;
 use crate::queue::worker::priority;
 use crate::repository::at_migration::{self as repo, MigrationDnsStage};
-use crate::repository::{
-    ActorRepository, AtMigrationRepository, AtMigrationRequestRow, NewLocalActor,
-    PgActorRepository, PgAtMigrationRepository, PgUserRepository, UserRepository,
-};
+use crate::repository::{AtMigrationRepository, AtMigrationRequestRow, PgAtMigrationRepository};
 use crate::traits::Job;
 use crate::LocalDomain;
 
@@ -145,6 +142,19 @@ impl DidProvisioner {
             return Ok(());
         }
         let migrations = PgAtMigrationRepository::new(self.pool.clone());
+        // PLC を送るとアカウントを作れないまま DID だけが移るので、送る前に名前とメールを
+        // この転入が確保できているか確かめる。
+        let claimed = repo::ensure_claims_before_submit(&self.pool, req.id)
+            .await
+            .map_err(|e| e.to_string())?;
+        if !claimed {
+            let message = "ユーザー名かメールアドレスが既に使われています".to_string();
+            migrations
+                .set_failed(req.id, "failed", &message, Utc::now())
+                .await
+                .map_err(|e| e.to_string())?;
+            return Err(message);
+        }
         if let Err(e) = submit_plc_operation(&req.source_did, operation, &self.http).await {
             // plc.directory が操作を拒んだ（転入元で別の操作が入った等）なら送り直しても通らない。
             // 通信の失敗なら待ちに戻して次回送り直す。
@@ -168,31 +178,16 @@ impl DidProvisioner {
             .mark_plc_submitted(req.id, signing_key_pem, rotation_key_pem, Utc::now())
             .await
             .map_err(|e| format!("mark_plc_submitted に失敗（PLC は提出済み！）: {e}"))?;
-        let email = req
-            .email
-            .as_deref()
-            .ok_or_else(|| "メールアドレス未確定".to_string())?;
         // ここで失敗しても `submitting_plc`・鍵記録済みなので、`submit-plc-token` の再入で
         // アカウント作成だけをやり直せる。
-        let (user_id, actor_id) = materialize_local_account(
+        materialize_local_account(
             &self.pool,
             &self.local_domain,
             req,
-            email,
             signing_key_pem,
             rotation_key_pem,
         )
         .await?;
-        if let Err(e) = migrations
-            .confirm_account_created(req.id, actor_id, user_id, Utc::now())
-            .await
-        {
-            tracing::error!(
-                "[did_provision] 転入 id={} の確定記録に失敗（アカウントは作成済み）: {}",
-                req.id,
-                e
-            );
-        }
         tracing::info!(
             "[did_provision] 転入の PLC 送信・アカウント確定: {} ({})",
             req.source_did,
@@ -216,78 +211,40 @@ impl DidProvisioner {
     }
 }
 
-/// 転入したアカウントの `users`/`actors` 行を確定し、`(user_id, actor_id)` を返す。
-///
-/// 転入元 DID が既に `actors` にリモートキャッシュ行として存在することがある（firehose 購読や
-/// プロフィール参照で自然に発生し、`start` 時点の重複チェックは `actor_type='local'` だけを
-/// 見るため素通りする）。あればローカル用に変換し、無ければ新規作成する。
+/// 転入したアカウントの `users`/`actors` 行を確定して `importing_data` にし、
+/// `(user_id, actor_id)` を返す（`at_migration::materialize_account`、1トランザクション）。
 pub async fn materialize_local_account(
     pool: &PgPool,
     local_domain: &LocalDomain,
     req: &AtMigrationRequestRow,
-    email: &str,
     signing_key_pem: &str,
     rotation_key_pem: &str,
 ) -> Result<(i64, i64), String> {
-    let actors = PgActorRepository::new(pool.clone());
-    let existing_actor_id = actors
-        .find_by_did(&req.source_did)
-        .await
-        .map_err(|e| e.to_string())?
-        .map(|a| a.id);
-    let existing_user_id = PgUserRepository::new(pool.clone())
-        .find_id_by_email(email)
-        .await
-        .map_err(|e| e.to_string())?;
-
-    let user_id = match existing_user_id {
-        Some(uid) => uid,
-        None => crate::repository::insert_local_user(
-            pool,
+    let email = req
+        .email
+        .as_deref()
+        .ok_or_else(|| "メールアドレス未確定".to_string())?;
+    let outcome = repo::materialize_account(
+        pool,
+        &repo::MigratedAccount {
+            request_id: req.id,
+            source_did: &req.source_did,
+            username: &req.new_username,
+            domain: local_domain.as_str(),
             email,
-            &req.password_hash,
-            "user",
-            req.agreed_tos_text.as_deref(),
-        )
-        .await
-        .map_err(|e| format!("users INSERT 失敗: {e}"))?,
-    };
-
-    let actor_id = if let Some(existing_id) = existing_actor_id {
-        let ap_uri = format!("https://{}/users/{}", local_domain, req.new_username);
-        crate::repository::actor::convert_remote_to_local(
-            pool,
-            &crate::repository::actor::ConvertToLocal {
-                actor_id: existing_id,
-                user_id,
-                username: &req.new_username,
-                domain: local_domain.as_str(),
-                ap_uri: &ap_uri,
-                signing_key_pem,
-                rotation_key_pem,
-            },
-        )
-        .await
-        .map_err(|e| format!("actors UPDATE（リモート→ローカル変換）失敗: {e}"))?;
-        existing_id
-    } else {
-        let new_id = crate::generate_snowflake_id(Utc::now());
-        actors
-            .insert_local(
-                user_id,
-                &NewLocalActor {
-                    id: new_id,
-                    username: &req.new_username,
-                    domain: local_domain,
-                    at_did: Some(&req.source_did),
-                    at_signing_key_pem: Some(signing_key_pem),
-                    at_rotation_key_pem: Some(rotation_key_pem),
-                    birth_date: None,
-                },
-            )
-            .await
-            .map_err(|e| format!("actors INSERT 失敗: {e}"))?;
-        new_id
-    };
-    Ok((user_id, actor_id))
+            password_hash: &req.password_hash,
+            agreed_tos_text: req.agreed_tos_text.as_deref(),
+            signing_key_pem,
+            rotation_key_pem,
+        },
+    )
+    .await
+    .map_err(|e| format!("アカウント作成に失敗: {e}"))?;
+    match outcome {
+        repo::MaterializeOutcome::Created { user_id, actor_id } => Ok((user_id, actor_id)),
+        repo::MaterializeOutcome::ClaimLost => Err(format!(
+            "ユーザー名 {} かメールアドレスをこの転入が確保していません",
+            req.new_username
+        )),
+    }
 }
