@@ -241,7 +241,7 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `repo.describeRepo` — handle/did/コレクション一覧/`didDoc`（`did:plc` なら plc.directory から取得）。
 - `sync.listRepos` — `at_did` を持つアクターを id 順に返す。
 - `sync.getLatestCommit` — `at_repo_cid`/`at_repo_rev`。
-- `sync.getRepoStatus` — `active`/`status`/`rev`。状態は firehose の `#account` と揃え、退会は `deleted`、DID転出（`did_moved_out_at`）は `deactivated`、凍結は `suspended`（凍結は `#account` を流していない）。稼働中のときだけ `rev` を付ける。ローカルのリポジトリを持たない DID は 400 `RepoNotFound`。
+- `sync.getRepoStatus` — `active`/`status`/`rev`。状態は firehose の `#account` と揃え、退会は `deleted`、DID転出（`did_moved_out_at`）は `deactivated`。凍結は `#account` を流していない（解除を伝える手段が無い）ので active のまま返す。稼働中のときだけ `rev` を付ける。ローカルのリポジトリを持たない DID は 400 `RepoNotFound`。
 - `sync.listBlobs` — その DID がアップロードした `media_files` の CID。CID は保持せず `sha256` から再構築する（`cid_from_sha256_hex`）。
 
 ### postgate・getTrends のスタブ応答

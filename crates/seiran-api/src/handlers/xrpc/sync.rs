@@ -237,19 +237,14 @@ pub struct GetRepoStatusParams {
 }
 
 /// アクターの状態を `com.atproto.sync.getRepoStatus` の `active` / `status` に写す。
-/// firehose の `#account` で流している値（退会=`deleted`、DID転出=`deactivated`）と揃え、
-/// 凍結は一時的な停止として `suspended` を返す。
-fn repo_status(
-    withdrawn: bool,
-    did_moved_out: bool,
-    suspended: bool,
-) -> (bool, Option<&'static str>) {
+/// firehose の `#account` で流している値（退会=`deleted`、DID転出=`deactivated`）と揃える。
+/// 凍結は `#account` を流していない（解除しても active に戻ったと伝える手段が無い）ので、
+/// ここでも active として返す。
+fn repo_status(withdrawn: bool, did_moved_out: bool) -> (bool, Option<&'static str>) {
     if withdrawn {
         (false, Some("deleted"))
     } else if did_moved_out {
         (false, Some("deactivated"))
-    } else if suspended {
-        (false, Some("suspended"))
     } else {
         (true, None)
     }
@@ -282,7 +277,6 @@ pub async fn xrpc_get_repo_status(
     let (active, status) = repo_status(
         actor.withdrawn_at.is_some(),
         actor.did_moved_out_at.is_some(),
-        actor.suspended_at.is_some(),
     );
     let mut body = serde_json::json!({ "did": params.did, "active": active });
     if let Some(status) = status {
@@ -487,9 +481,8 @@ mod repo_status_tests {
 
     #[test]
     fn maps_actor_state_to_repo_status() {
-        assert_eq!(repo_status(false, false, false), (true, None));
-        assert_eq!(repo_status(false, false, true), (false, Some("suspended")));
-        assert_eq!(repo_status(false, true, true), (false, Some("deactivated")));
-        assert_eq!(repo_status(true, true, true), (false, Some("deleted")));
+        assert_eq!(repo_status(false, false), (true, None));
+        assert_eq!(repo_status(false, true), (false, Some("deactivated")));
+        assert_eq!(repo_status(true, true), (false, Some("deleted")));
     }
 }
