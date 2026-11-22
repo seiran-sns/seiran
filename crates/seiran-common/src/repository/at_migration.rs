@@ -36,11 +36,19 @@ pub struct AtMigrationRequestRow {
     /// （同意した瞬間の site_settings.terms_of_service_text の文面そのもの）。
     /// `materialize_account`がアカウント確定時に`terms_of_service_agreements`へコピーする。
     pub agreed_tos_text: Option<String>,
-    /// 利用者の入力・選択待ち（[`INPUT_WAIT_STATUSES`]）に入った時刻。入力待ちでなければ
+    /// 利用者の入力・選択待ち（`INPUT_WAIT_STATUSES_SQL`）に入った時刻。入力待ちでなければ
     /// `None`。ここから [`INPUT_WAIT_EXPIRY_HOURS`] で打ち切る。
     pub input_wait_since: Option<DateTime<Utc>>,
     /// 入力待ちのまま期限が来て打ち切った時刻（`abandoned`）。利用者による打ち切りは `None`。
     pub expired_at: Option<DateTime<Utc>>,
+    /// PLC 提出後にリポジトリを取り直し、スナップショットより後の変更を取り込み対象に
+    /// 反映した時刻（打ち切りで取り直しをやめた場合も入る）。
+    pub repo_refetched_at: Option<DateTime<Utc>>,
+    /// 取り直しの一時的な失敗の回数と、次に試してよい時刻。
+    pub repo_refetch_attempts: i32,
+    pub repo_refetch_next_at: Option<DateTime<Utc>>,
+    /// 利用者が取り込みを打ち切った時刻（以後、転入元からは何も取らない）。
+    pub import_aborted_at: Option<DateTime<Utc>>,
 }
 
 /// 入力待ちの転入へ打ち切りの警告メールを送るまでの時間。
@@ -48,11 +56,11 @@ pub const INPUT_WAIT_WARNING_HOURS: i64 = 24;
 /// 入力待ちの転入を打ち切る（名前とメールの確保を解く）までの時間。
 pub const INPUT_WAIT_EXPIRY_HOURS: i64 = 48;
 
-/// 利用者の入力・選択を待つ状態。この状態に入った時刻から期限を数える。PLC 提出前の状態
-/// だけで、ジョブが動いている状態と DNS の公開待ち（利用者はやることを済ませている）は含めない。
-/// SQL 側（`input_wait_set` と打ち切り・案内の各文）にも同じ一覧を書いている。
-pub const INPUT_WAIT_STATUSES: [&str; 3] =
-    ["awaiting_source_password", "awaiting_plc_token", "failed"];
+/// 利用者の入力・選択を待つ状態（SQL の `IN` に使う一覧）。この状態に入った時刻から期限を
+/// 数える。PLC 提出前の状態だけで、ジョブが動いている状態と DNS の公開待ち（利用者はやることを
+/// 済ませている）は含めない。
+const INPUT_WAIT_STATUSES_SQL: &str =
+    "('awaiting_user_confirmation', 'awaiting_source_password', 'awaiting_plc_token', 'failed')";
 
 /// 状態を `new_status`（SQL 式）へ変える UPDATE に足す SET 句。入力待ちに入ったら時刻を記録し、
 /// 同じ入力待ちのままなら据え置き、入力待ちを抜けたら消す。案内メールの段階も入り直すたびに
@@ -60,7 +68,7 @@ pub const INPUT_WAIT_STATUSES: [&str; 3] =
 fn input_wait_set(new_status: &str) -> String {
     format!(
         "input_wait_since = CASE
-             WHEN {new_status}::text IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+             WHEN {new_status}::text IN {INPUT_WAIT_STATUSES_SQL}
                   AND plc_submitted_at IS NULL
              THEN CASE WHEN status = {new_status} THEN COALESCE(input_wait_since, NOW()) ELSE NOW() END
              ELSE NULL END,
@@ -161,6 +169,9 @@ pub trait AtMigrationRepository: Send + Sync {
 
     /// 未取り込み（`imported_at IS NULL`）のレコードを1件排他取得する
     /// （`follow_import::claim_next_item`と同じ`FOR UPDATE SKIP LOCKED`パターン）。
+    /// rkey が `self` のレコード（`app.bsky.actor.profile/self` 等、キーが1つしかないもの）を
+    /// 先に取る。利用者は取り込み中も seiran でプロフィールを編集でき、後から古い内容で
+    /// 上書きすると転入元の内容に戻ってしまうため、先に済ませて後の編集に任せる。
     /// 戻り値: (id, collection, rkey, cid, bytes)。
     #[allow(clippy::type_complexity)]
     async fn claim_next_record(
@@ -170,13 +181,14 @@ pub trait AtMigrationRepository: Send + Sync {
 
     async fn mark_record_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
 
-    /// 未取り込みのblobを1件排他取得する。戻り値: (id, cid)。
+    /// 取り込み待ちの blob（未取り込み・諦めていない・取り直しの時刻が来た）を1件排他取得する。
+    /// 戻り値: (id, cid)。
     async fn claim_next_blob(&self, request_id: i64) -> Result<Option<(i64, String)>, sqlx::Error>;
 
     async fn mark_blob_imported(&self, id: i64, now: DateTime<Utc>) -> Result<(), sqlx::Error>;
 
-    /// `importing_data`中の進捗表示用。戻り値: (取り込み済み件数, 全体件数)。
-    /// レコード（投稿等）とblobの両方を合算する。
+    /// `importing_data`/`importing_blobs`中の進捗表示用。戻り値: (済んだ件数, 全体件数)。
+    /// レコード（投稿等）とblobの両方を合算し、諦めた blob も済んだ側に数える。
     async fn import_progress(&self, request_id: i64) -> Result<(i64, i64), sqlx::Error>;
 
     /// フォロー関係復元待ち（`app.bsky.graph.follow`として取り込み済み＝`imported_at`は
@@ -214,7 +226,8 @@ impl PgAtMigrationRepository {
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
      plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem,
-     agreed_tos_text, input_wait_since, expired_at";
+     agreed_tos_text, input_wait_since, expired_at, repo_refetched_at, repo_refetch_attempts,
+     repo_refetch_next_at, import_aborted_at";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -429,7 +442,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
              WHERE id = (
                  SELECT id FROM at_migration_records
                  WHERE request_id = $1 AND imported_at IS NULL
-                 ORDER BY id LIMIT 1
+                 ORDER BY (rkey <> 'self'), id LIMIT 1
                  FOR UPDATE SKIP LOCKED
              )
              RETURNING id, collection, rkey, cid, bytes",
@@ -453,7 +466,8 @@ impl AtMigrationRepository for PgAtMigrationRepository {
             "UPDATE at_migration_blobs SET imported_at = imported_at
              WHERE id = (
                  SELECT id FROM at_migration_blobs
-                 WHERE request_id = $1 AND imported_at IS NULL
+                 WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL
+                   AND (next_attempt_at IS NULL OR next_attempt_at <= NOW())
                  ORDER BY id LIMIT 1
                  FOR UPDATE SKIP LOCKED
              )
@@ -477,7 +491,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
         let row: (i64, i64) = sqlx::query_as(
             "SELECT
                  (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_records WHERE request_id = $1)
-                 + (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) FROM at_migration_blobs WHERE request_id = $1),
+                 + (SELECT count(*) FILTER (WHERE imported_at IS NOT NULL OR given_up_at IS NOT NULL) FROM at_migration_blobs WHERE request_id = $1),
                  (SELECT count(*) FROM at_migration_records WHERE request_id = $1)
                  + (SELECT count(*) FROM at_migration_blobs WHERE request_id = $1)",
         )
@@ -561,8 +575,8 @@ pub struct MigrationDnsStage {
     pub txt_visible_at: Option<DateTime<Utc>>,
 }
 
-/// `awaiting_plc_token` から `awaiting_dns_txt` へ進め、署名済みの PLC 操作と新しい鍵を保存する。
-/// 状態が `awaiting_plc_token` でなければ何もせず `false`。
+/// `awaiting_plc_token` から最終確認待ち（`awaiting_user_confirmation`）へ進め、署名済みの PLC
+/// 操作と新しい鍵を保存する。状態が `awaiting_plc_token` でなければ何もせず `false`。
 pub async fn stage_plc_operation(
     pool: &PgPool,
     id: i64,
@@ -572,10 +586,10 @@ pub async fn stage_plc_operation(
 ) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
         "UPDATE at_migration_requests
-         SET status = 'awaiting_dns_txt', staged_plc_operation = $2,
+         SET status = 'awaiting_user_confirmation', staged_plc_operation = $2,
              staged_signing_key_pem = $3, staged_rotation_key_pem = $4,
              cf_txt_record_id = NULL, txt_visible_at = NULL, last_error = NULL,
-             input_wait_since = NULL, input_wait_mail_stage = 0, updated_at = NOW()
+             input_wait_since = NOW(), input_wait_mail_stage = 0, updated_at = NOW()
          WHERE id = $1 AND status = 'awaiting_plc_token'",
     )
     .bind(id)
@@ -795,13 +809,13 @@ pub struct ExpiredMigration {
 /// 再開リンクを解く。1文で行うので、利用者の入力（状態を条件にした遷移）と競合しても
 /// 片方だけが成立し、複数のプロセスが同時に実行しても同じ転入を二重に返さない。
 pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, sqlx::Error> {
-    sqlx::query_as(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "WITH r AS (
              UPDATE at_migration_requests
              SET status = 'abandoned', expired_at = NOW(), input_wait_since = NULL,
                  input_wait_mail_stage = 0, updated_at = NOW()
              WHERE input_wait_since < NOW() - make_interval(hours => $1)
-               AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+               AND status IN {INPUT_WAIT_STATUSES_SQL}
                AND plc_submitted_at IS NULL
              RETURNING id, email, new_username
          ),
@@ -814,8 +828,8 @@ pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, 
              WHERE c.migration_request_id = r.id AND c.user_id IS NULL
          ),
          dt AS (DELETE FROM at_migration_resume_tokens t USING r WHERE t.request_id = r.id)
-         SELECT id, email, new_username FROM r",
-    )
+         SELECT id, email, new_username FROM r"
+    )))
     .bind(INPUT_WAIT_EXPIRY_HOURS as i32)
     .fetch_all(pool)
     .await
@@ -1142,12 +1156,12 @@ pub async fn consume_resume_token(
 /// 転入と、開始時刻を記録しない版のサーバーが入力待ちにした転入が対象で、見つけた時刻を
 /// 期限の起点にする（入力待ちに入った本来の時刻を使うと、案内も警告も無いまま打ち切られる）。
 pub async fn adopt_untracked_input_waits(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE at_migration_requests
          SET input_wait_since = NOW(), input_wait_mail_stage = 0
          WHERE input_wait_since IS NULL AND plc_submitted_at IS NULL
-           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')",
-    )
+           AND status IN {INPUT_WAIT_STATUSES_SQL}"
+    )))
     .execute(pool)
     .await
     .map(|_| ())
@@ -1171,16 +1185,339 @@ pub async fn claim_input_wait_mails(
     stage: i16,
     min_age_hours: i64,
 ) -> Result<Vec<InputWaitMail>, sqlx::Error> {
-    sqlx::query_as(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE at_migration_requests
          SET input_wait_mail_stage = $1
          WHERE input_wait_since <= NOW() - make_interval(hours => $2)
            AND input_wait_mail_stage < $1 AND email IS NOT NULL AND plc_submitted_at IS NULL
-           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
-         RETURNING id, status::text, email, new_username, input_wait_since",
-    )
+           AND status IN {INPUT_WAIT_STATUSES_SQL}
+         RETURNING id, status::text, email, new_username, input_wait_since"
+    )))
     .bind(stage)
     .bind(min_age_hours as i32)
+    .fetch_all(pool)
+    .await
+}
+
+// ─── blob の取り込み（`importing_blobs`） ───
+
+/// レコードを取り込み終えた転入を `importing_blobs` へ進める。状態が `importing_data` で
+/// なければ何もせず `false`。
+pub async fn start_blob_import(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let res = sqlx::query(
+        "UPDATE at_migration_requests SET status = 'importing_blobs', updated_at = NOW()
+         WHERE id = $1 AND status = 'importing_data'",
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(res.rows_affected() == 1)
+}
+
+/// PLC 提出後に取り直したリポジトリを取り込み対象に反映した結果。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RefetchSummary {
+    /// スナップショットに無かった、または内容が変わったレコード。
+    pub upserted: u64,
+    /// スナップショットの後で消された、まだ取り込んでいないレコード（対象から外した）。
+    pub removed: u64,
+}
+
+/// PLC 提出後に取り直したリポジトリの全レコードを取り込み対象に反映し、取り直しを済みにする
+/// （1トランザクション）。スナップショット（`fetching_repo`）の後に追加・変更されたレコードを
+/// 取り込み対象に加え（取り込み済みでも内容が変わっていれば取り込み直す。投稿は rkey ごとに
+/// 内容が変わらないので対象外）、消されたレコードのうちまだ取り込んでいないものは外す。
+pub async fn apply_refetched_repo(
+    pool: &PgPool,
+    request_id: i64,
+    records: &[StagedRecord],
+) -> Result<RefetchSummary, sqlx::Error> {
+    let collections: Vec<&str> = records.iter().map(|r| r.collection.as_str()).collect();
+    let rkeys: Vec<&str> = records.iter().map(|r| r.rkey.as_str()).collect();
+    let cids: Vec<&str> = records.iter().map(|r| r.cid.as_str()).collect();
+    let bytes: Vec<&[u8]> = records.iter().map(|r| r.bytes.as_slice()).collect();
+
+    let mut tx = pool.begin().await?;
+    let upserted = sqlx::query(
+        "INSERT INTO at_migration_records (request_id, collection, rkey, cid, bytes)
+         SELECT $1, c, k, i, b
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::bytea[]) AS t(c, k, i, b)
+         ON CONFLICT (request_id, collection, rkey) DO UPDATE
+           SET cid = EXCLUDED.cid, bytes = EXCLUDED.bytes, imported_at = NULL
+           WHERE at_migration_records.cid <> EXCLUDED.cid
+             AND at_migration_records.collection <> 'app.bsky.feed.post'",
+    )
+    .bind(request_id)
+    .bind(&collections)
+    .bind(&rkeys)
+    .bind(&cids)
+    .bind(&bytes)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let removed = sqlx::query(
+        "DELETE FROM at_migration_records r
+         WHERE r.request_id = $1 AND r.imported_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) AS t(c, k)
+                           WHERE t.c = r.collection AND t.k = r.rkey)",
+    )
+    .bind(request_id)
+    .bind(&collections)
+    .bind(&rkeys)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET repo_refetched_at = NOW(), repo_refetch_error = NULL, repo_refetch_next_at = NULL
+         WHERE id = $1",
+    )
+    .bind(request_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(RefetchSummary { upserted, removed })
+}
+
+/// リポジトリの取り直しが一時的に失敗した。`delay_secs` 秒後まで試さない（その間もスナップ
+/// ショットのレコードの取り込みは進める）。
+pub async fn defer_repo_refetch(
+    pool: &PgPool,
+    id: i64,
+    error: &str,
+    delay_secs: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET repo_refetch_attempts = repo_refetch_attempts + 1, repo_refetch_error = $2,
+             repo_refetch_next_at = NOW() + make_interval(secs => $3)
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(error)
+    .bind(delay_secs as f64)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 利用者が取り込みを打ち切る。以後は転入元から何も取らない: リポジトリの取り直しをやめ、
+/// まだ取れていない blob をすべて諦める（スナップショットのレコードは手元にあるので取り込む）。
+/// 打ち切れる状態（`importing_data`/`importing_blobs`、未打ち切り）でなければ `false`。
+pub async fn abort_import(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let aborted = sqlx::query(
+        "UPDATE at_migration_requests
+         SET import_aborted_at = NOW(), repo_refetched_at = COALESCE(repo_refetched_at, NOW()),
+             repo_refetch_next_at = NULL
+         WHERE id = $1 AND status IN ('importing_data', 'importing_blobs')
+           AND import_aborted_at IS NULL",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    if aborted {
+        sqlx::query(
+            "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = '利用者が打ち切り'
+             WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(aborted)
+}
+
+/// レコードの取り込みの進み具合（ログイン後の画面の表示用）。戻り値: (取り込み済み, 全体)。
+pub async fn record_progress(pool: &PgPool, request_id: i64) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE imported_at IS NOT NULL), count(*)
+         FROM at_migration_records WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// 一時的に取れなかった blob を `delay_secs` 秒後まで後回しにする（その間は他の blob を先に取る）。
+pub async fn defer_blob(
+    pool: &PgPool,
+    blob_id: i64,
+    error: &str,
+    delay_secs: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_blobs
+         SET attempts = attempts + 1, last_error = $2,
+             next_attempt_at = NOW() + make_interval(secs => $3)
+         WHERE id = $1",
+    )
+    .bind(blob_id)
+    .bind(error)
+    .bind(delay_secs as f64)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 取れない blob を諦める（転入元に無い）。
+pub async fn give_up_blob(pool: &PgPool, blob_id: i64, reason: &str) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = $2
+         WHERE id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(blob_id)
+    .bind(reason)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// まだ取れていない blob の件数と、そのうち最も早く取り直してよい時刻（`NULL` は今すぐ）。
+pub async fn pending_blobs(
+    pool: &PgPool,
+    request_id: i64,
+) -> Result<(i64, Option<DateTime<Utc>>), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*), min(COALESCE(next_attempt_at, NOW()))
+         FROM at_migration_blobs
+         WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// blob の取り込みの進み具合（ログイン後の画面の表示用）。
+#[derive(Debug, Clone, Copy, sqlx::FromRow)]
+pub struct BlobProgress {
+    pub imported: i64,
+    pub given_up: i64,
+    pub total: i64,
+}
+
+pub async fn blob_progress(pool: &PgPool, request_id: i64) -> Result<BlobProgress, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE imported_at IS NOT NULL) AS imported,
+                count(*) FILTER (WHERE given_up_at IS NOT NULL) AS given_up,
+                count(*) AS total
+         FROM at_migration_blobs WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
+}
+
+/// ユーザーの、アカウント作成後でまだ完了していない転入（ログイン後の画面の表示・打ち切り用）。
+pub async fn incomplete_for_user(
+    pool: &PgPool,
+    user_id: i64,
+) -> Result<Option<AtMigrationRequestRow>, sqlx::Error> {
+    sqlx::query_as::<_, AtMigrationRequestRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT {SELECT_COLUMNS} FROM at_migration_requests
+         WHERE user_id = $1 AND status NOT IN ('completed', 'abandoned')"
+    )))
+    .bind(user_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// blob の一時的な失敗の回数。
+pub async fn blob_attempts(pool: &PgPool, blob_id: i64) -> Result<i32, sqlx::Error> {
+    sqlx::query_scalar("SELECT attempts FROM at_migration_blobs WHERE id = $1")
+        .bind(blob_id)
+        .fetch_one(pool)
+        .await
+}
+
+/// 止まっているかもしれない転入の (id, status)。ジョブが何かの理由で消えていても、積み直せば
+/// 進むようにするため。
+/// - ジョブが進める状態（取り込み以外）: `older_than_secs` 秒以上更新が無いもの。
+/// - 取り込み（`importing_data`/`importing_blobs`）: 次に動く予定の時刻（`import_next_run_at`。
+///   一度も動いていなければ状態が変わった時刻）を `import_grace_secs` 秒過ぎても動いていない
+///   もの。取り込みのジョブは自分を積み直しながら進むので、予定どおり動いている連鎖に外から
+///   積むと連鎖が2本になる。キューの混雑で待たされているだけの連鎖に手を出さないよう、猶予を
+///   長めに取る。
+pub async fn list_stalled_job_migrations(
+    pool: &PgPool,
+    older_than_secs: i64,
+    import_grace_secs: i64,
+) -> Result<Vec<(i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, status::text FROM at_migration_requests
+         WHERE (status IN ('fetching_repo', 'requesting_plc_signature', 'deactivating_source')
+                AND updated_at < NOW() - make_interval(secs => $1))
+            OR (status IN ('importing_data', 'importing_blobs')
+                AND COALESCE(import_next_run_at, updated_at) < NOW() - make_interval(secs => $2))",
+    )
+    .bind(older_than_secs as f64)
+    .bind(import_grace_secs as f64)
+    .fetch_all(pool)
+    .await
+}
+
+/// 取り込みのジョブが次に動く予定の時刻を記録する。
+pub async fn set_import_next_run_at(
+    pool: &PgPool,
+    id: i64,
+    at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE at_migration_requests SET import_next_run_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(at)
+        .execute(pool)
+        .await
+        .map(|_| ())
+}
+
+/// 転入で取り込んだプロフィール（`app.bsky.actor.profile/self`）のステージング済みの中身
+/// （取り込み済みのときだけ）と、いまの seiran の ATP リポジトリの `profile/self` の CID。
+/// 両者を比べて、取り込んだ後に seiran 側でプロフィールが書き換えられたかを判定する。
+pub async fn imported_profile_and_current_cid(
+    pool: &PgPool,
+    request_id: i64,
+    actor_id: i64,
+) -> Result<Option<(Vec<u8>, Option<String>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT r.bytes,
+                (SELECT a.cid FROM atp_records a
+                 WHERE a.actor_id = $2 AND a.collection = 'app.bsky.actor.profile'
+                   AND a.rkey = 'self')
+         FROM at_migration_records r
+         WHERE r.request_id = $1 AND r.collection = 'app.bsky.actor.profile'
+           AND r.rkey = 'self' AND r.imported_at IS NOT NULL",
+    )
+    .bind(request_id)
+    .bind(actor_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// 取り込み対象の blob を CID で引く（未取り込み・未諦めのときだけ）。戻り値は行の id。
+pub async fn pending_blob_id_by_cid(
+    pool: &PgPool,
+    request_id: i64,
+    cid: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM at_migration_blobs
+         WHERE request_id = $1 AND cid = $2 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(request_id)
+    .bind(cid)
+    .fetch_optional(pool)
+    .await
+}
+
+/// アカウントができた転入の (request_id, actor_id, user_id)。
+pub async fn list_migrated_accounts(pool: &PgPool) -> Result<Vec<(i64, i64, i64)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, actor_id, user_id FROM at_migration_requests
+         WHERE actor_id IS NOT NULL AND user_id IS NOT NULL",
+    )
     .fetch_all(pool)
     .await
 }

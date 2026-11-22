@@ -146,5 +146,21 @@
     "empty": "No pending follow requests.",
     "acceptButton": "Accept",
     "rejectButton": "Reject"
+  },
+  "migrationImport": {
+    "title": "Migration from Bluesky",
+    "description": "Your posts, images, and other data are being imported from your previous account in the background. You can keep using your account in the meantime.",
+    "statusRecords": "Importing posts and other records",
+    "statusBlobs": "Importing images and other media",
+    "statusDeactivating": "Deactivating your previous account",
+    "records": "Posts and records: {{done}} / {{total}}",
+    "blobs": "Images and media: {{done}} / {{total}}",
+    "blobsGivenUp": "({{count}} could not be imported)",
+    "refetchPending": "Checking for posts and other changes made on your previous account during the migration.",
+    "waitingForSource": "Your previous server isn't responding, so the import will be retried later.",
+    "aborted": "The import was stopped. The migration will be completed once the data already on hand has been imported.",
+    "abortWarning": "If you stop, nothing more will be imported from your previous account, and you can't resume. Images and media not yet imported will eventually stop showing on your past posts.",
+    "abort": "Stop importing",
+    "abortConfirm": "Stop the import? You won't be able to resume it."
   }
 }

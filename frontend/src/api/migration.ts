@@ -32,7 +32,7 @@ export interface MigrationStatusResponse {
   request_id: string;
   status: string;
   last_error?: string | null;
-  /** `"plc_token"` | `"source_password"` | null。フロントが表示すべき入力欄の種類。 */
+  /** `"confirm"` | `"plc_token"` | `"source_password"` | null。フロントが表示すべき入力欄の種類。 */
   needs_input?: string | null;
   retryable: boolean;
   can_abandon: boolean;
@@ -43,6 +43,9 @@ export interface MigrationStatusResponse {
   expires_at?: string | null;
   /** 入力待ちのまま期限が来て打ち切られたなら true（`status === "abandoned"`）。 */
   expired?: boolean;
+  /** 転入元でのハンドルと、転入後のハンドル（最終確認の表示用）。 */
+  source_handle: string;
+  new_handle: string;
 }
 
 /** 途中の転入へ戻るための、発行し直した転入トークン（再開リンク・ログインの応答）。 */
@@ -55,9 +58,12 @@ interface SimpleStatus {
   status: string;
 }
 
-/** `submit-plc-token` の応答。その場でアカウントまで確定できたら JWT、DNS TXT の公開待ちが
- * 残ったら `{ status: "awaiting_dns_txt" }`（`/status` をポーリングし、確定後に `session` で JWT を得る）。 */
-export type SubmitPlcTokenResponse = AuthResponse | { status: "awaiting_dns_txt" };
+/** `submit-plc-token`・`confirm` の応答。アカウントまで確定できたら JWT、それ以外は次の状態
+ * （`submit-plc-token` は最終確認待ち、`confirm` は DNS TXT の公開待ち。`/status` をポーリングし、
+ * 確定後に `session` で JWT を得る）。 */
+export type SubmitPlcTokenResponse =
+  | AuthResponse
+  | { status: "awaiting_user_confirmation" | "awaiting_dns_txt" };
 
 export function isAuthResponse(res: SubmitPlcTokenResponse): res is AuthResponse {
   return "token" in res;
@@ -121,6 +127,11 @@ export const migration = {
   },
   retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);
+  },
+  /** 転入の最終確認（`awaiting_user_confirmation`）。PLC 送信（不可逆）へ進める。その場で
+   * アカウントまで確定できれば JWT、DNS TXT の公開待ちが残れば `{ status: "awaiting_dns_txt" }`。 */
+  confirm(id: string, requestToken: string) {
+    return migrationRequest<SubmitPlcTokenResponse>("POST", `/migration/${id}/confirm`, requestToken);
   },
   abandon(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/abandon`, requestToken);

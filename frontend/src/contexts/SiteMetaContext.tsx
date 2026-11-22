@@ -28,6 +28,8 @@ interface SiteMeta {
   accountLimitReached: boolean;
   /** 管理者が新規登録・転入の受付を停止している。 */
   registrationClosed: boolean;
+  /** このサーバーのドメイン（`LocalDomain`）。ATP ハンドルの末尾（`@user.<domain>`）の表示に使う。 */
+  localDomain: string;
 }
 
 const EMPTY_SITE_META: SiteMeta = {
@@ -42,6 +44,7 @@ const EMPTY_SITE_META: SiteMeta = {
   loginBackgroundType: "",
   accountLimitReached: false,
   registrationClosed: false,
+  localDomain: "",
 };
 
 const SiteMetaContext = createContext<SiteMeta>(EMPTY_SITE_META);
@@ -110,6 +113,7 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
           loginBackgroundType: m.loginBackgroundType ?? "",
           accountLimitReached: m.accountLimitReached ?? false,
           registrationClosed: m.registrationClosed ?? false,
+          localDomain: (m.uri ?? "").replace(/^https?:\/\//, "").replace(/\/.*$/, ""),
         };
         setMeta(next);
         applyFavicon(next.iconUrl);

@@ -2,7 +2,7 @@
 
 対象読者: seiran のコード全体に手を入れる開発者。現在の動作だけを書く。
 
-新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/auth/MigratePanel.tsx`（ログインカルーセルの一部、`frontend/src/pages/auth/AuthCarouselPage.tsx`）と`frontend/src/pages/MigrationImportingPage.tsx`。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
+新規登録時に必ず新しいDIDを発行する通常のアカウント作成とは別に、既存のBluesky/AT Protocolアカウント（bsky.social等でホストされている）を、そのDID・投稿・フォロー関係・blobごとseiranへ「転入」させる登録経路（1〜5節）、およびその逆方向——seiranから他PDSへ既存DIDを転出させる際、seiranが転出元として応答するサーバー側API（6節）。技術的な実体はPDS間移行。実装本体は`crates/seiran-api/src/handlers/migration.rs`・`crates/seiran-common/src/jobs/at_migration.rs`・`crates/seiran-common/src/atp/{car,mst_walk,migration_client,plc}.rs`・`crates/seiran-api/src/handlers/xrpc/identity.rs`、フロントエンドは`frontend/src/pages/auth/MigratePanel.tsx`（ログインカルーセルの一部、`frontend/src/pages/auth/AuthCarouselPage.tsx`）と`frontend/src/pages/MigrationImportSection.tsx`（設定 > インポートの取り込み状況）。関連ドキュメント: `docs/architecture.md`（ジョブ・匿名段階認可）、`docs/database.md`（テーブル定義）、`docs/protocols.md` 3節（PDS Aとの通信・SSRF対策）。
 
 ## 1. 認証方式（ID/PW、OAuth不採用）
 
@@ -18,13 +18,14 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 `/register/migrate`（ログインカルーセルの「Blueskyから転入」パネル、`MigratePanel`）で移行元ハンドル・パスワードを入力すると開始する。以降は同じパネル内で「いま何を待っているか」の表示切り替えにより進行する（別画面への遷移はしない）。各ステップは入力欄0〜1個＋リトライボタンで構成される。
 
-1. `/register/migrate`でハンドル・パスワードを入力し送信
+1. `/register/migrate`でハンドル・パスワードを入力し送信。入力欄の上の「ℹ️ 転入とは？」（`MigrationInfoDialog`）で、Bluesky のアカウントはサーバー（PDS）間で引っ越せること、転入すると元のサーバーではログインできなくなること、フォロー関係・リプライのスレッド・メンションは保たれること、ハンドルが`@<ユーザー名>.<LocalDomain>`に変わることを説明する（元のアカウントが無効化される仕組みが伝わりにくいため）
 2. （PDS Aがメール2FAを要求する場合のみ）確認コード入力
 3. PDS Aのリポジトリ取得（自動、待機表示のみ）
-4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
-5. `signPlcOperation`で署名済みの PLC 操作を得て保存し、`_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
-6. データ取り込み中（`MigrationImportingPage`、`is_suspended`と同型で他画面をバイパス。`submit-plc-token`成功時にlocalStorageのmigration_token/idをクリアせず残しておき、`/api/migration/:id/status`のポーリングを引き続き行うことで、`importing_data`中の取り込み件数/全体件数（`import_done`/`import_total`）を表示する。完了検知時にクリアする）
-7. 完了、通常のSNS画面へ
+4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力。入力を受けたその場で`signPlcOperation`を呼び、署名済みの PLC 操作と新しい鍵を保存する（確認コードは15分・使い捨て。署名済みの操作は、間に他の操作が入らない限り後から送っても有効）
+5. 最終確認（`awaiting_user_confirmation`）。「元のサーバーでのログインは無効化される」「ハンドルは @旧 から @新 に変わる」を赤く目立たせて表示し、利用者が「転入する」（`POST /api/migration/:id/confirm`）を押すまで PLC を送らない。次が不可逆な PLC 送信なので、認証やメールの確認コードを全部済ませた後に置く。旧ハンドルは`start`で転入元の`createSession`が返した正式なもの（入力欄の文字列ではない）、新ハンドルは`to_atp_username(new_username).LocalDomain`
+6. `_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
+7. アカウントができた時点で通常のSNS画面へ（localStorageの転入トークンはここでクリアする）。取り込みは過去の投稿等を積み増すだけで今の利用には影響しないので、待たせない
+8. 取り込み（リポジトリの取り直し・レコード・blob）は裏で進む。状況は設定 > 🚚インポートの先頭に出し（`MigrationImportSection`、`GET /api/account/migration`、JWT で認可）、取り込みが続いている間はメニューの⚙️設定と🚚インポートに明滅する赤丸を付ける。「取り込みを打ち切る」（`POST /api/account/migration/abort-import`）で、再開できない旨の注意書きと確認の後に打ち切れる。取り終えるか打ち切ったら転入元を無効化して完了
 
 途中で画面を離れても、次のどちらかで続きに戻れる（4節「途中の転入への復帰」）。
 
@@ -33,7 +34,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 入力待ちのまま48時間たつと転入は打ち切られ、確保していたユーザー名とメールアドレスは空く（4節「入力待ちの期限と案内メール」）。
 
-「通常の新規登録に切り替える」は、転入を打ち切ってから登録画面へ移る（打ち切らずに離れると、同じユーザー名で登録できないまま期限まで待つことになる）。
+打ち切れる間（PLC 提出前）は転入画面に「転入を取りやめる」を出す。押すと転入を打ち切って確保を解き、入口のフォームへ戻る（打ち切らずに離れると、同じユーザー名で登録できないまま期限まで待つことになる）。
 
 ## 3. 状態遷移（`at_migration_status`）
 
@@ -41,21 +42,33 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 |---|---|---|
 | `awaiting_source_2fa` | PDS Aがメール2FAを要求、`authFactorToken`待ち | ユーザー入力待ち |
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
+
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
 | `awaiting_source_password` | 移行元にアプリパスワードでログインしていて PLC 操作に署名させられない。本来のパスワードの入れ直し待ち。入力されたら`POST /api/migration/:id/submit-source-password`が DID を識別子に`createSession`をやり直し（メール2FAを求められたら`start`と同じく`AUTH_FACTOR_TOKEN_REQUIRED`で確認コードを足して再送）、新しいセッションを保存して`requesting_plc_signature`へ戻す | ユーザー入力待ち |
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち。コードは PDS A 側で15分で切れるので、転入画面の「確認コードを送り直す」（`POST /api/migration/:id/resend-plc-token`）で`requesting_plc_signature`へ戻して送り直せる | ユーザー入力待ち |
-| `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
+| `awaiting_user_confirmation` | 最終確認待ち。確認コードで署名させた PLC 操作と新しい鍵を`staged_*`に保存済み。元のサーバーでのログインが無効化されること・ハンドルが変わることを見せ、`POST /api/migration/:id/confirm`で`awaiting_dns_txt`へ進めて PLC 送信に向かう（受付停止・ユーザー数上限はここで確かめる） | ユーザー入力待ち |
+| `awaiting_dns_txt` | 最終確認済み。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`confirm`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
 | `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
-| `importing_data` | ステージング済みレコード/blobの実体化中 | `Job::MigrationImportProcess`（自己再enqueue） |
+| `importing_data` | リポジトリを取り直し（下記）、ステージング済みレコードを実体化している。アカウントは使える。rkey が`self`のレコード（`app.bsky.actor.profile/self`等）を先に取り込む | `Job::MigrationImportProcess`（自己再enqueue） |
+| `importing_blobs` | blob を転入元から取得して保存している。転入元に無い blob（404・`BlobNotFound`）は諦め、一時的に取れない blob（タイムアウトを含む）は失敗のたびに間隔を倍にして（1分〜30分）後回しにし、他を先に取る。期限は無く、後回しが残る限り続ける | `Job::MigrationImportProcess`（自己再enqueue。取り直し待ちしか無ければ、その時刻に`enqueue_retry`で自分を積み直す） |
 | `deactivating_source` | PDS A側旧アカウントの無効化中（ベストエフォート。成否は`source_deactivated_at`/`source_deactivate_error`に残す）。送り先は refreshJwt の`aud`が示す entryway（bsky.social 等。PDS 経由だと PLC 送信後は必ず`BadJwtSignature`になる。`docs/protocols.md`） | `Job::MigrationDeactivateSource` |
 | `completed` | 転入完了 | — |
 | `failed` | `submitting_plc`到達前の失敗。リトライ／別DIDで再開／新規DID立ち上げへ切替のいずれも可 | ユーザー選択待ち |
 | `failed_post_submit` | `submitting_plc`成功後の失敗。リトライのみ可 | ユーザー選択待ち |
 | `abandoned` | 打ち切り。利用者が選ぶ（`plc_submitted_at IS NULL`かつ`submitting_plc`でない間のみ選択可。PLC 送信開始と競合しないよう、状態の条件付き遷移で行う）か、入力待ちのまま期限が来た（`expired_at`が入る）。どちらもユーザー名・メールの確保と再開リンクを同じ文で解く | — |
 
-`awaiting_dns_txt` を置くのは、PLC 送信で DID のハンドルが seiran 側に切り替わった時点で Relay/AppView が解決しにくるため（新規アカウントと同じ理由、`docs/protocols.md` 3節）。署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、メールのワンタイムトークンの期限（15分）とは無関係に待てる。plc.directory が操作を拒んだ（4xx。転入元で別の操作が入った等）場合は `failed`、通信の失敗なら `awaiting_dns_txt` に戻して送り直す。Cloudflare が未設定なら待たずに送る（`submit-plc-token` の中で確定まで終わる）。
+`awaiting_dns_txt` を置くのは、PLC 送信で DID のハンドルが seiran 側に切り替わった時点で Relay/AppView が解決しにくるため（新規アカウントと同じ理由、`docs/protocols.md` 3節）。署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、メールのワンタイムトークンの期限（15分）とは無関係に待てる。plc.directory が操作を拒んだ（4xx。転入元で別の操作が入った等）場合は `failed`、通信の失敗なら `awaiting_dns_txt` に戻して送り直す。Cloudflare が未設定なら待たずに送る（`confirm` の中で確定まで終わる）。
 
-`Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`deactivating_source`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
+取り込みは PLC 提出・アカウント確定の後、利用者がアカウントを使っている裏で進む。取り込みは過去の投稿等を積み増すだけで、新しい投稿（Bluesky への配送を含む）には影響しない（配送に要る DID・署名鍵はアカウント確定で入り、取り込みと新しい投稿のコミットは同じ SERIALIZABLE のコミットパイプラインで直列化される）。そのため取り込みには期限を設けず、転入元から取れないものは取れるまで（利用者が打ち切るまで）取り直す。一時的な失敗をワーカーのリトライに任せると5回で破棄され、取り込みが止まるので、ジョブは失敗したものを後回しにして自分で積み直す。
+
+- **リポジトリの取り直し**: `fetching_repo`で取るのは`start`時点のスナップショットで、そこから PLC 提出までに利用者が転入元でした投稿等が漏れる。`importing_data`の最初に`getRepo`と`listBlobs`を取り直し（PLC 提出後も転入元はアカウントを有効なまま持っている）、追加・変更されたレコードを取り込み対象に加え（取り込み済みでも内容が変われば取り込み直す。投稿は rkey ごとに内容が変わらないので対象外）、取り込み前に消されたレコードを外す（`apply_refetched_repo`）。取り直しに失敗してもスナップショットのレコードの取り込みは続け、取り直しは間隔をあけて試し続ける。取り直しが済むまで`importing_blobs`へは進まない
+- **`self`のレコードを先に取り込む**: キーが1つしかないレコードは、利用者が取り込み中に seiran で編集した後に古い内容で上書きすると、転入元の内容に戻ってしまう。先に取り込めば、後の編集がそのまま上書きする
+- **打ち切り**: 以後は転入元から何も取らない（取り直しをやめ、まだ取れていない blob を諦める。`import_aborted_at`）。手元のスナップショットのレコードは取り込んでから完了へ進む。再開はできない。諦めた画像は、Bluesky の CDN のキャッシュが切れると過去の投稿に表示されなくなる
+- **転入元の無効化を blob の後にする**のは、無効化された転入元は`getBlob`・`getRepo`に応答しなくなると考えられるため
+
+**止まったジョブの積み直し**: ジョブが進める状態のうち`fetching_repo`・`requesting_plc_signature`・`deactivating_source`は、3分以上更新が無ければ API ロールの定期処理（3分ごと、`requeue_stalled_migration_jobs`）がジョブを積み直す。ジョブが何かの理由で消えても、サーバーの再起動や利用者のリトライを待たずに進めるため。止まっているかどうかは経過時間でなくロックが見分ける: 取得に時間がかかっているだけなら進行中のジョブが`request_id`の advisory lock を握っているので、積み直したジョブは何もせずに終わる（`deactivating_source`のジョブはロックを使わないが、二重に動いても同じ結果になる）。取り込み（`importing_data`/`importing_blobs`）は、ジョブが自分を積み直しながら進むので、予定どおり動いている連鎖に外から積むと連鎖が2本になる。そこでジョブは続きを積むたびに次に動く予定の時刻（`import_next_run_at`。すぐ続けるなら今、後回しの待ちならその時刻）を書き、予定を10分過ぎても動いていない連鎖だけを積み直す（一度も動いていなければ状態が変わった時刻から数える）。無停止更新の間に取り込みの状態を知らない版のワーカーがジョブを拾って捨てた場合などに、連鎖が途切れたままにならないため。猶予を長めに取るのは、キューの混雑で待たされているだけの連鎖に積まないため（2本になっても、同時に動いてロックを取れなかった方が終わるので1本に戻る）。ジョブは止まるときには予定を書かない（知らない状態を見て止まった場合にも予定を消してしまうため。取り込みを終えたかは状態で分かる）。次のジョブは、自分のロックを放してから積む（握ったまま積むと、すぐに拾われた次のジョブが同じロックを取れずに何もせず終わる）。
+
+`Job::MigrationImportFollows`（フォロー関係の`follows`テーブルへの反映）は上記の`status`に含まれない。`importing_data`の完了時（`importing_blobs`への遷移と同時）にenqueueされるが、それ自体は`at_migration_requests.status`を見ず、未反映の`app.bsky.graph.follow`レコードが尽きるまで独立して動作し続ける結果整合処理。転入の完了判定（`completed`）はこのジョブの完了を待たない。
 
 ## 4. 不可逆境界（`submitPlcOperation`）
 
@@ -77,7 +90,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 ### 入力待ちの期限と案内メール
 
-利用者の入力・選択を待つ状態（`awaiting_source_password`・`awaiting_plc_token`・`failed`、いずれも PLC 提出前）に入った時刻を`input_wait_since`に記録し、そこから時間を数える。ジョブが動いている状態と`awaiting_dns_txt`（利用者はやることを済ませている）は数えない。PLC 提出後の未完了の転入は、名前を手放すと DID だけが移った状態を自分から作ることになるので、期限なしで確保し続ける。
+利用者の入力・選択を待つ状態（`awaiting_user_confirmation`・`awaiting_source_password`・`awaiting_plc_token`・`failed`、いずれも PLC 提出前）に入った時刻を`input_wait_since`に記録し、そこから時間を数える。ジョブが動いている状態と`awaiting_dns_txt`（利用者はやることを済ませている）は数えない。PLC 提出後の未完了の転入は、名前を手放すと DID だけが移った状態を自分から作ることになるので、期限なしで確保し続ける。
 
 | 経過 | 処理 |
 |---|---|
@@ -106,6 +119,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 - **`seiranPost`拡張オブジェクト（転入元もseiranの場合）**: 転入元PDSがseiranインスタンスであれば、取り込んだ`app.bsky.feed.post`レコードは`seiranPost`拡張オブジェクト（他seiranサーバー間の投稿完全再現、`docs/protocols.md` 5節）を持つ。検出できた場合、本文（`body`）・絵文字マップ（`emojiMap`）・CW（`contentWarning`）・投票（`poll`）・公開範囲（`visibility`）・URLカードの申告値（`linkCards`）をATP標準フィールドの変換値より優先して`posts`へ反映する。リモートseiranポストのATP受信（`seiran-atp-repo::firehose::save_bsky_post`）と同じ優先順位。
 
 - **画像・動画添付**: `app.bsky.feed.post`の`embed`（画像・動画）は、DID＋blob CIDのみからBluesky CDN/動画パイプラインのURLを決定的に組み立てる既存ロジック（`seiran_common::atp::parse_bsky_embed_attachments`、他の受信Bsky投稿と共通）で復元する。転入元PDSから取得した実バイト列（`at_migration_blobs`→`atp_blobs`）を再ホストするのではなく、Bluesky公式のCDN/動画配信を指す点は他の受信Bsky投稿の添付表示と同じ扱い。
+- **プロフィール**: `app.bsky.actor.profile/self`はATPリポジトリへの複製に加え、seiran のローカルアクター（`actors`の表示名・自己紹介・アバター・バナー）へも反映する（`seiran_common::atp::profile_sync::apply_profile_record`、外部クライアントの`putRecord`と共通）。片方の世界だけだと、次に seiran でプロフィールを編集したとき、空の`actors`を元に`profile/self`がコミットされて Bluesky 側の表示名やアバターが消える。アバター・バナーの blob は取り込みの最後に回るので、プロフィールを取り込むときに先に転入元から取る。取れなかった分は、blob を取り終えた時点でもう一度当てはめる。その時点までに seiran 側でプロフィールが編集されていれば（`profile/self`の CID が取り込んだものと変わっていれば）当てはめない（編集は両方の世界に反映済みのため）。同じ条件で、起動時にも転入済みのアカウントへ当てはめ直す（`backfill_migrated_profiles`）。blob は転入元から取って CID と一致する中身を保存しているので、同じ内容の`media_files`が他の人のアップロードとして既にあっても使う（`putRecord`はアップロードした本人のものに限る）。
 - **フォロー関係**: `app.bsky.graph.follow`はATPリポジトリへの複製に加え、`Job::MigrationImportFollows`がseiran自身の`follows`テーブルへも反映する（3節参照）。フォロー先ごとにAppView `getProfile`でリモートアクターを解決するため、レート制限は適用しない（新規フォローではなく既存関係の復元のため）。
 - **リプライ・引用先の解決、facet解析**: スコープ外。`reply_to_post_id`/`quote_of_post_id`は設定しない。
 - **DM（1:1）**: 転入固有の実装は無い。Bsky DM（`chat.bsky.convo`）はAT Protocolリポジトリに含まれない別サービス（`api.bsky.chat`）のデータで、認証は現在のDIDドキュメントの署名鍵（自己署名service-auth JWT）に基づくため、転入後のアカウントも既存の`BskyDmPoll`（`docs/protocols.md` 9節）が`actor_type='local'`かつ`at_did`/`at_signing_key_pem`設定済みの全アクターを対象に自動的に対象へ含める。会話ごとの初回同期はcursorページングで遡って取り込む（同節参照）。
@@ -138,7 +152,7 @@ seiranが自前でジェネシスDIDを発行するローカルアカウント�
 
 ### DID転出済み状態（`did_moved_out_at`）
 
-`is_suspended`（凍結）や本ドキュメント3節の`migration_status`ゲートとは異なる第三の状態。`submitPlcOperation`成功時、または`deactivateAccount`呼び出し時に`actors.did_moved_out_at`が設定される。この状態では:
+`is_suspended`（凍結）とは異なる状態。`submitPlcOperation`成功時、または`deactivateAccount`呼び出し時に`actors.did_moved_out_at`が設定される。この状態では:
 
 - タイムライン等の**読み取りは通常通り**表示する（専用画面へのバイパスはしない）
 - 投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等の**書き込みは全て拒否**（`AuthedUser::require_not_did_moved_out()`、`crates/seiran-api/src/middleware/authed_user.rs`。フロントエンドは`user.did_moved_out`で主要な書き込みUIを無効化、`frontend/src/components/note/PostComposer.tsx`・`frontend/src/hooks/useNoteCardActions.ts`）

@@ -8,6 +8,7 @@ pub mod migration_client;
 pub mod migration_session;
 pub mod mst_walk;
 pub mod plc;
+pub mod profile_sync;
 pub mod repo;
 pub mod service;
 pub mod service_auth;

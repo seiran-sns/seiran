@@ -23,7 +23,6 @@ const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
 const AppearanceSettingsPage = lazy(() => import("./pages/AppearanceSettingsPage"));
 const AuthCarouselPage = lazy(() => import("./pages/auth/AuthCarouselPage"));
 const MessagesPage = lazy(() => import("./pages/MessagesPage"));
-const MigrationImportingPage = lazy(() => import("./pages/MigrationImportingPage"));
 const MiAuthConnectPage = lazy(() => import("./pages/MiAuthConnectPage"));
 const OAuthConnectPage = lazy(() => import("./pages/OAuthConnectPage"));
 const MisskeyConnectPage = lazy(() => import("./pages/MisskeyConnectPage"));
@@ -104,16 +103,6 @@ function AppRoutes() {
     return (
       <Suspense fallback={null}>
         <SuspendedAccountPage />
-      </Suspense>
-    );
-  }
-
-  // 既存DID転入フロー（`docs/account_migration.md`）: JWT取得済み（submit-plc-token成功後）
-  // だがデータ取り込みが未完了の間は、is_suspendedと同型で他の全画面をバイパスする。
-  if (user?.migration_status && user.migration_status !== "completed") {
-    return (
-      <Suspense fallback={null}>
-        <MigrationImportingPage />
       </Suspense>
     );
   }

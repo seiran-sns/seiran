@@ -223,7 +223,13 @@ pub async fn start(
         request_id,
         &seiran_common::repository::NewMigrationRequest {
             request_token_hash: &request_token_hash,
-            source_handle: &req.source_handle,
+            // 入力欄の文字列（`@`付き・大文字混じり等）ではなく、転入元が返す正式なハンドルを
+            // 残す（最終確認で「@旧 から @新 に変わる」と見せるため）。
+            source_handle: if session.handle.is_empty() {
+                req.source_handle.trim().trim_start_matches('@')
+            } else {
+                &session.handle
+            },
             source_pds_endpoint: &resolved.url,
             source_did: &source_did,
             source_access_jwt: &session.access_jwt,
@@ -258,9 +264,10 @@ pub struct SubmitPlcTokenRequest {
     pub token: String,
 }
 
-/// `submit-plc-token` の応答。DNS TXT の公開を確かめてから PLC 送信へ進むため、その場で
-/// アカウントまで確定できたときだけ JWT を返し、待ちが残ったら状態だけを返す（フロントは
-/// `/status` をポーリングし、アカウントができたら `/session` で JWT を受け取る）。
+/// `submit-plc-token`・`confirm` の応答。アカウントまで確定できたときだけ JWT を返し、それ
+/// 以外は次の状態だけを返す（`submit-plc-token`は最終確認待ち、`confirm`は DNS TXT の公開待ちが
+/// 残ったとき。フロントは `/status` をポーリングし、アカウントができたら `/session` で JWT を
+/// 受け取る）。
 #[derive(Serialize)]
 #[serde(untagged)]
 pub enum SubmitPlcTokenResponse {
@@ -269,8 +276,9 @@ pub enum SubmitPlcTokenResponse {
 }
 
 /// PDS A に PLC 操作へ署名させ（`signPlcOperation`、メールのワンタイムトークンを消費する）、
-/// 署名済みの操作を保存して「DNS TXT 登録完了待ち」（`awaiting_dns_txt`）にする。PLC 送信・
-/// アカウント確定は `seiran_common::did_provision::migration` が TXT の公開を確かめてから行う。
+/// 署名済みの操作を保存して利用者の最終確認待ち（`awaiting_user_confirmation`）にする。PLC 送信・
+/// アカウント確定は、`confirm`の後に `seiran_common::did_provision::migration` が TXT の公開を
+/// 確かめてから行う。
 ///
 /// **再入可能**: PLC 送信後にアカウント作成だけが失敗した（`submitting_plc`・鍵記録済み）
 /// リクエストに対して同エンドポイントを再度叩けば、PLC 提出をやり直さず（＝使用済みtokenを
@@ -308,20 +316,14 @@ pub async fn submit_plc_token(
     if migration_req.status != "awaiting_plc_token" {
         return Err(ApiError::BadRequest("INVALID_STATE".into()));
     }
-    // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
     crate::handlers::auth::ensure_registration_open(&state).await?;
+    // 確認コードは転入元で15分・使い捨てなので、受け取ったその場で署名させて保存する。
+    // 署名済みの PLC 操作は、間に他の操作が入らない限り後から送っても有効なので、PLC 送信は
+    // 利用者の最終確認（`confirm`）まで待てる。
     stage_plc_operation(&state, &migration_req, &req.token).await?;
-
-    // 1段進め（Cloudflare 未設定ならここでアカウント確定まで終わる）、残りはバックグラウンドで進める。
-    if state.did_provisioner.advance_migration(id).await {
-        state.did_provisioner.kick_migration(id);
-        return Ok(Json(SubmitPlcTokenResponse::Pending {
-            status: "awaiting_dns_txt",
-        }));
-    }
-    Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
-        account_auth_response(&state, id).await?,
-    ))))
+    Ok(Json(SubmitPlcTokenResponse::Pending {
+        status: "awaiting_user_confirmation",
+    }))
 }
 
 /// 転入で作られたアカウントの JWT を発行する。`awaiting_dns_txt` の待ちが明けてアカウントが
@@ -349,8 +351,10 @@ async fn account_auth_response(state: &AppState, id: i64) -> Result<AuthResponse
         migration_req.actor_id,
         migration_req.email.clone(),
     ) else {
+        // 転入が失敗の状態で終わっている（PLC が拒まれた・名前が使われていた等）。中継先の
+        // 一時的な失敗ではなく、この転入の結果なので 4xx で返す。
         if migration_req.status == "failed" {
-            return Err(ApiError::BadGateway("PLC_SUBMIT_FAILED".into()));
+            return Err(ApiError::Conflict("PLC_SUBMIT_FAILED"));
         }
         return Err(ApiError::Conflict("ACCOUNT_NOT_READY"));
     };
@@ -397,7 +401,7 @@ fn generate_did_key(label: &str) -> Result<(String, String), ApiError> {
 }
 
 /// PDS A に、DID の鍵・ハンドル・PDS を seiran へ向け替える PLC 操作へ署名させ
-/// （`signPlcOperation`）、署名済みの操作と新しい鍵を保存して `awaiting_dns_txt` にする。
+/// （`signPlcOperation`）、署名済みの操作と新しい鍵を保存して `awaiting_user_confirmation` にする。
 async fn stage_plc_operation(
     state: &AppState,
     migration_req: &AtMigrationRequestRow,
@@ -440,30 +444,40 @@ async fn stage_plc_operation(
 
     // メールのトークンを入力するまでに accessJwt が切れていることがある（期限切れで
     // 拒まれた呼び出しではトークンは消費されないので、更新してやり直せる）。
-    let operation = seiran_common::atp::migration_session::call_with_refresh(
-        &state.db,
-        id,
-        &resolved,
-        &mut session,
-        |s| {
-            let (resolved, desired) = (&resolved, &desired);
-            async move {
-                seiran_common::atp::migration_client::sign_plc_operation(
-                    resolved, &s, plc_token, desired,
-                )
-                .await
-            }
-        },
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(
-            "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+    let operation =
+        seiran_common::atp::migration_session::call_with_refresh(
+            &state.db,
             id,
-            e
-        );
-        ApiError::BadGateway("PLC_SIGN_FAILED".into())
-    })?;
+            &resolved,
+            &mut session,
+            |s| {
+                let (resolved, desired) = (&resolved, &desired);
+                async move {
+                    seiran_common::atp::migration_client::sign_plc_operation(
+                        resolved, &s, plc_token, desired,
+                    )
+                    .await
+                }
+            },
+        )
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+                id,
+                e
+            );
+            // `call_with_refresh` はセッションを更新して送り直した後なので、ここでまだ
+            // `ExpiredToken` なのはメールの確認コード（15分）の期限切れ。転入元はセッションの
+            // 期限切れと同じコードで返す。
+            match &e {
+                e if e.is_expired_token() => ApiError::BadRequest("PLC_TOKEN_EXPIRED".into()),
+                seiran_common::atp::migration_client::MigrationClientError::Xrpc {
+                    code, ..
+                } if code == "InvalidToken" => ApiError::BadRequest("PLC_TOKEN_INVALID".into()),
+                _ => ApiError::BadGateway("PLC_SIGN_FAILED".into()),
+            }
+        })?;
 
     let staged = seiran_common::repository::at_migration::stage_plc_operation(
         &state.db,
@@ -521,10 +535,14 @@ pub struct MigrationStatusResponse {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// 入力待ちのまま期限が来て打ち切られたなら真（`status == "abandoned"`）。
     pub expired: bool,
+    /// 転入元でのハンドルと、転入後のハンドル（最終確認で「@旧 から @新 に変わる」と見せる）。
+    pub source_handle: String,
+    pub new_handle: String,
 }
 
 fn needs_input_for(status: &str) -> Option<&'static str> {
     match status {
+        "awaiting_user_confirmation" => Some("confirm"),
         "awaiting_plc_token" => Some("plc_token"),
         "awaiting_source_password" => Some("source_password"),
         _ => None,
@@ -540,6 +558,7 @@ fn is_job_driven_status(status: &str) -> bool {
             | "requesting_plc_signature"
             | "awaiting_dns_txt"
             | "importing_data"
+            | "importing_blobs"
             | "deactivating_source"
     )
 }
@@ -560,16 +579,17 @@ pub async fn get_status(
             .ok_or(ApiError::NotFound("NOT_FOUND"))?;
     }
 
-    let import_progress = if migration_req.status == "importing_data" {
-        let repo = PgAtMigrationRepository::new(state.db.clone());
-        let (done, total) = repo
-            .import_progress(id)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
-        Some((done, total))
-    } else {
-        None
-    };
+    let import_progress =
+        if migration_req.status == "importing_data" || migration_req.status == "importing_blobs" {
+            let repo = PgAtMigrationRepository::new(state.db.clone());
+            let (done, total) = repo
+                .import_progress(id)
+                .await
+                .map_err(|e| ApiError::Internal(e.to_string()))?;
+            Some((done, total))
+        } else {
+            None
+        };
 
     Ok(Json(MigrationStatusResponse {
         request_id: id.to_string(),
@@ -587,6 +607,12 @@ pub async fn get_status(
             .input_wait_since
             .map(|since| since + chrono::Duration::hours(INPUT_WAIT_EXPIRY_HOURS)),
         expired: migration_req.expired_at.is_some(),
+        new_handle: format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&migration_req.new_username),
+            state.local_domain
+        ),
+        source_handle: migration_req.source_handle,
     }))
 }
 
@@ -625,6 +651,12 @@ pub async fn retry(
             state.enqueue_migration_import_process(id).await;
             Ok(Json(MigrationStatusStub {
                 status: "importing_data",
+            }))
+        }
+        "importing_blobs" => {
+            state.enqueue_migration_import_process(id).await;
+            Ok(Json(MigrationStatusStub {
+                status: "importing_blobs",
             }))
         }
         "deactivating_source" => {
@@ -753,6 +785,42 @@ pub async fn submit_source_password(
     }))
 }
 
+/// 利用者の最終確認（`awaiting_user_confirmation`）。確認コードの入力・署名まで済んだところで、
+/// 元のサーバーでのログインが無効化されること・ハンドルが変わることを確かめてもらい、PLC 送信
+/// （★不可逆境界）へ進める。DNS TXT の公開を確かめてから送るので、その場でアカウントまで
+/// 確定できたときだけ JWT を返し、待ちが残ったら状態だけを返す（`submit-plc-token`の以前の
+/// 応答と同じ形）。状態が変わっていたら（打ち切り・期限切れと競合した等）何もしない。
+pub async fn confirm(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Json<SubmitPlcTokenResponse>, ApiError> {
+    authorize_migration_request(&state, id, &headers).await?;
+    // 不可逆なPLC提出の前に弾く（提出後に弾くとDIDだけ移ってアカウントが作られない）。
+    crate::handlers::auth::ensure_registration_open(&state).await?;
+    let moved = seiran_common::repository::at_migration::transition_status(
+        &state.db,
+        id,
+        "awaiting_user_confirmation",
+        "awaiting_dns_txt",
+    )
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !moved {
+        return Err(ApiError::Conflict("INVALID_STATE"));
+    }
+    // 1段進め（Cloudflare 未設定ならここでアカウント確定まで終わる）、残りはバックグラウンドで進める。
+    if state.did_provisioner.advance_migration(id).await {
+        state.did_provisioner.kick_migration(id);
+        return Ok(Json(SubmitPlcTokenResponse::Pending {
+            status: "awaiting_dns_txt",
+        }));
+    }
+    Ok(Json(SubmitPlcTokenResponse::Auth(Box::new(
+        account_auth_response(&state, id).await?,
+    ))))
+}
+
 /// `plc_submitted_at`が未設定（不可逆境界の前）のリクエストのみ打ち切れる。
 /// フロント側はこの後「別DIDで再開」（`/api/migration/start`を新しい`source_handle`で
 /// 再度叩く）か「新規DID立ち上げ」（通常の`/api/auth/register`）へ遷移させる。
@@ -845,4 +913,102 @@ pub(crate) async fn create_resume_link(
         "https://{}/register/migrate?resume={}",
         state.local_domain, token
     ))
+}
+
+/// ログイン後に見る、アカウント作成後でまだ完了していない転入の取り込み状況（設定 >
+/// インポートの表示と打ち切りボタン用）。
+#[derive(Serialize)]
+pub struct AccountMigrationResponse {
+    pub status: String,
+    pub records_imported: i64,
+    pub records_total: i64,
+    pub blobs_imported: i64,
+    pub blobs_given_up: i64,
+    pub blobs_total: i64,
+    /// PLC 提出後のリポジトリの取り直しが済んだか。
+    pub repo_refetched: bool,
+    /// 転入元から取れずに取り直しを待っている（リポジトリの取り直しが失敗している、または
+    /// 残りの blob がすべて後回しになっている）。
+    pub waiting_for_source: bool,
+    /// 利用者が取り込みを打ち切ったか。
+    pub aborted: bool,
+}
+
+/// `GET /api/account/migration` — ログイン中のユーザーの、アカウント作成後でまだ完了して
+/// いない転入の取り込み状況。無ければ `null`。転入トークンではなく JWT で認可する
+/// （別の端末からでも見られる）。
+pub async fn account_migration(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<Option<AccountMigrationResponse>>, ApiError> {
+    let auth_user = crate::middleware::extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let Some(req) = migration_repo::incomplete_for_user(&state.db, auth_user.user_id)
+        .await
+        .map_err(internal)?
+    else {
+        return Ok(Json(None));
+    };
+    let (records_imported, records_total) = migration_repo::record_progress(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    let blobs = migration_repo::blob_progress(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    let (pending_blobs, next_blob_at) = migration_repo::pending_blobs(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    let now = chrono::Utc::now();
+    let refetch_failing = req.repo_refetched_at.is_none() && req.repo_refetch_attempts > 0;
+    let blobs_all_deferred = req.status == "importing_blobs"
+        && pending_blobs > 0
+        && next_blob_at.is_some_and(|t| t > now);
+    Ok(Json(Some(AccountMigrationResponse {
+        status: req.status,
+        records_imported,
+        records_total,
+        blobs_imported: blobs.imported,
+        blobs_given_up: blobs.given_up,
+        blobs_total: blobs.total,
+        repo_refetched: req.repo_refetched_at.is_some(),
+        waiting_for_source: refetch_failing || blobs_all_deferred,
+        aborted: req.import_aborted_at.is_some(),
+    })))
+}
+
+/// `POST /api/account/migration/abort-import` — 転入の取り込みを利用者が打ち切る。以後は
+/// 転入元から何も取らない（リポジトリの取り直しをやめ、まだ取れていない blob を諦める）。
+/// 手元にあるスナップショットのレコードは取り込み、その後に転入元の無効化へ進む。再開はできない。
+/// 諦めた画像は、Bluesky の CDN のキャッシュが切れると過去の投稿に表示されなくなる。
+pub async fn abort_import(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+) -> Result<Json<MigrationStatusStub>, ApiError> {
+    let auth_user = crate::middleware::extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+    let req = migration_repo::incomplete_for_user(&state.db, auth_user.user_id)
+        .await
+        .map_err(internal)?
+        .ok_or(ApiError::Conflict("INVALID_STATE"))?;
+    if !migration_repo::abort_import(&state.db, req.id)
+        .await
+        .map_err(internal)?
+    {
+        return Err(ApiError::Conflict("INVALID_STATE"));
+    }
+    // 取り直し待ちで眠っているジョブを待たずに、すぐ先へ進める。
+    state.enqueue_migration_import_process(req.id).await;
+    Ok(Json(MigrationStatusStub { status: "aborted" }))
 }

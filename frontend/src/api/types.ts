@@ -20,12 +20,11 @@ export interface User {
   is_suspended: boolean;
   /** 既存DID転入フロー（アカウント移行）由来のアカウントで、データ取り込みが
    * 未完了の場合のみ値が入る（`"importing_data"` 等）。通常アカウントは `null`/`undefined`。
-   * `is_suspended` と同型のゲートで、アプリ側は他の全画面をバイパスして
-   * 「データ取り込み中」専用画面を表示する。 */
+   * 取り込みは裏で進み、アカウントはそのまま使える。メニューの取り込み中の印に使う
+   * （`hooks/useMigrationImport`）。 */
   migration_status?: string | null;
-  /** DID転出済み（既存DID転入フローの逆方向、転出元API対応）。`is_suspended`や
-   * `migration_status`とは異なり、`true`の間もタイムライン等の読み取り画面はそのまま
-   * 表示する。投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等の
+  /** DID転出済み（既存DID転入フローの逆方向、転出元API対応）。`is_suspended`と異なり、
+   * `true`の間もタイムライン等の読み取り画面はそのまま表示する。投稿・リアクション・リポスト・フォロー・リスト操作・DM送信等の
    * 書き込みUIのみを無効化する。 */
   did_moved_out: boolean;
 }

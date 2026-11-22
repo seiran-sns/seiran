@@ -13,8 +13,8 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use seiran_common::atp::{
-    cid_from_sha256_hex, cid_from_str, cid_to_string, encode_generic_record,
-    fetch_raw_did_document, generate_tid, ipld_to_json, resolve_atproto_verification_key,
+    cid_from_sha256_hex, cid_to_string, encode_generic_record, fetch_raw_did_document,
+    generate_tid, ipld_to_json, resolve_atproto_verification_key,
 };
 use seiran_common::repository::{atp, media_file, post, Actor};
 use seiran_common::{
@@ -732,45 +732,13 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
     let Some(user_id) = actor.user_id else {
         return;
     };
-    let Ok(Some(current)) = state.actors.find_profile_by_user_id(user_id).await else {
-        return;
-    };
-
-    let display_name = value
-        .get("displayName")
-        .and_then(|v| v.as_str())
-        .or(current.display_name.as_deref());
-    let bio = value
-        .get("description")
-        .and_then(|v| v.as_str())
-        .or(current.bio.as_deref());
-    let avatar_media_id = resolve_blob_media_id(state, value.get("avatar"), actor.id)
-        .await
-        .or(current.avatar_media_id);
-    let banner_media_id = resolve_blob_media_id(state, value.get("banner"), actor.id)
-        .await
-        .or(current.banner_media_id);
-    let emoji_map = current
-        .emoji_map
-        .clone()
-        .unwrap_or_else(|| serde_json::json!({}));
-
-    if let Err(e) = state
-        .actors
-        .update_profile(
-            user_id,
-            &seiran_common::repository::LocalProfileUpdate {
-                display_name,
-                bio,
-                avatar_media_id,
-                banner_media_id,
-                profile_fields: &current.profile_fields,
-                emoji_map: &emoji_map,
-                birth_date: current.birth_date,
-                birth_date_public: current.birth_date_public,
-            },
-        )
-        .await
+    if let Err(e) = seiran_common::atp::profile_sync::apply_profile_record(
+        &state.db,
+        user_id,
+        value,
+        seiran_common::atp::profile_sync::BlobOwner::Uploader(actor.id),
+    )
+    .await
     {
         tracing::error!(
             "[putRecord] app.bsky.actor.profile → actors 同期失敗 actor_id={}: {}",
@@ -780,29 +748,19 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
     }
 }
 
-/// blob参照（`{"$type":"blob","ref":{"$link":"<CID>"},...}`）のCIDから、対応する
-/// `media_files` 行（Seiran自前UI経由、または `com.atproto.repo.uploadBlob` 経由の
-/// どちらでアップロードされたものも `media_files` に直接入っている）を検索する。
-/// これにより、ATP経由で直接プロフィール画像・背景画像を設定した場合でも `actors.avatar_media_id`
-/// / `banner_media_id`（＝Fediverse側にも公開されるアバター）に反映される。
-/// CIDのmultihashはsha256そのものなので、逆算して一致検索する（`xrpc_get_blob`と同じ手法）。
+/// blob参照のCIDから、このアクターがアップロードした`media_files`行（Seiran自前UI経由、
+/// または`com.atproto.repo.uploadBlob`経由）を探す（`profile_sync::blob_media_id`）。
 pub(crate) async fn resolve_blob_media_id(
     state: &AppState,
     blob_value: Option<&serde_json::Value>,
     actor_id: i64,
 ) -> Option<i64> {
-    let cid_str = blob_value?.get("ref")?.get("$link")?.as_str()?;
-    let cid = cid_from_str(cid_str).ok()?;
-    let mh = cid.hash();
-    if mh.code() != 0x12 {
-        return None;
-    }
-    let sha256_hex = hex::encode(mh.digest());
-
-    media_file::find_id_by_sha256_and_uploader(&state.db, &sha256_hex, actor_id)
-        .await
-        .ok()
-        .flatten()
+    seiran_common::atp::profile_sync::blob_media_id(
+        &state.db,
+        blob_value,
+        seiran_common::atp::profile_sync::BlobOwner::Uploader(actor_id),
+    )
+    .await
 }
 
 /// `app.bsky.feed.post` 以外のレコードを汎用経路でコミットする前に、ロールによる働きかけの

@@ -146,5 +146,21 @@
     "empty": "沒有待處理的追蹤請求。",
     "acceptButton": "批准",
     "rejectButton": "拒絕"
+  },
+  "migrationImport": {
+    "title": "從 Bluesky 遷移",
+    "description": "正在背景從原帳號匯入你的貼文、圖片等資料。在此期間你可以照常使用帳號。",
+    "statusRecords": "正在匯入貼文等記錄",
+    "statusBlobs": "正在匯入圖片等媒體",
+    "statusDeactivating": "正在停用原帳號",
+    "records": "貼文等：{{done}} / {{total}}",
+    "blobs": "圖片等：{{done}} / {{total}}",
+    "blobsGivenUp": "（其中 {{count}} 項未能匯入）",
+    "refetchPending": "正在檢查遷移過程中在原帳號上發布的貼文等變更。",
+    "waitingForSource": "原伺服器沒有回應，稍後將重新嘗試取得。",
+    "aborted": "已停止匯入。已取得的資料匯入完成後，遷移即告完成。",
+    "abortWarning": "停止後將不再從原帳號匯入任何內容，且無法恢復。尚未匯入的圖片等最終將無法在過去的貼文中顯示。",
+    "abort": "停止匯入",
+    "abortConfirm": "要停止匯入嗎？停止後將無法恢復。"
   }
 }

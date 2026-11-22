@@ -11,6 +11,7 @@ import TwemojiEmoji from "../common/TwemojiEmoji";
 import PostComposer from "../note/PostComposer";
 import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
+import { useMigrationImportActive, useMigrationImportWatcher } from "../../hooks/useMigrationImport";
 import styles from "./AppShell.module.css";
 
 interface AppShellProps {
@@ -35,6 +36,8 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  useMigrationImportWatcher();
+  const migrationImportActive = useMigrationImportActive();
 
   const closeCompose = () => {
     // Modal 内コンポーザを同期的にアンマウントしてから、常設のホーム上部
@@ -89,6 +92,9 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
             <span className={styles.floatingMenuBadge}>
               {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
             </span>
+          )}
+          {dmUnreadCount === 0 && migrationImportActive && (
+            <span className={styles.floatingMenuDot} aria-hidden="true" />
           )}
         </button>
 

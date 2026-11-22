@@ -146,5 +146,21 @@
     "empty": "没有待处理的关注请求。",
     "acceptButton": "批准",
     "rejectButton": "拒绝"
+  },
+  "migrationImport": {
+    "title": "从 Bluesky 迁移",
+    "description": "正在后台从原账号导入你的帖子、图片等数据。在此期间你可以照常使用账号。",
+    "statusRecords": "正在导入帖子等记录",
+    "statusBlobs": "正在导入图片等媒体",
+    "statusDeactivating": "正在停用原账号",
+    "records": "帖子等：{{done}} / {{total}}",
+    "blobs": "图片等：{{done}} / {{total}}",
+    "blobsGivenUp": "（其中 {{count}} 项未能导入）",
+    "refetchPending": "正在检查迁移过程中在原账号上发布的帖子等变更。",
+    "waitingForSource": "原服务器没有响应，稍后将重新尝试获取。",
+    "aborted": "已停止导入。已获取的数据导入完成后，迁移即告完成。",
+    "abortWarning": "停止后将不再从原账号导入任何内容，且无法恢复。尚未导入的图片等最终将无法在过去的帖子中显示。",
+    "abort": "停止导入",
+    "abortConfirm": "要停止导入吗？停止后将无法恢复。"
   }
 }

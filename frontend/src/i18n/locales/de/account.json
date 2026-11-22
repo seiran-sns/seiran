@@ -146,5 +146,21 @@
     "empty": "Keine ausstehenden Follow-Anfragen.",
     "acceptButton": "Annehmen",
     "rejectButton": "Ablehnen"
+  },
+  "migrationImport": {
+    "title": "Umzug von Bluesky",
+    "description": "Deine Beiträge, Bilder und weiteren Daten werden im Hintergrund aus deinem bisherigen Konto importiert. Du kannst dein Konto währenddessen weiter nutzen.",
+    "statusRecords": "Beiträge und andere Einträge werden importiert",
+    "statusBlobs": "Bilder und andere Medien werden importiert",
+    "statusDeactivating": "Dein bisheriges Konto wird deaktiviert",
+    "records": "Beiträge und Einträge: {{done}} / {{total}}",
+    "blobs": "Bilder und Medien: {{done}} / {{total}}",
+    "blobsGivenUp": "({{count}} konnten nicht importiert werden)",
+    "refetchPending": "Es wird geprüft, ob während des Umzugs in deinem bisherigen Konto Beiträge oder andere Änderungen hinzugekommen sind.",
+    "waitingForSource": "Dein bisheriger Server antwortet nicht; der Import wird später erneut versucht.",
+    "aborted": "Der Import wurde abgebrochen. Der Umzug wird abgeschlossen, sobald die bereits vorliegenden Daten importiert sind.",
+    "abortWarning": "Wenn du abbrichst, wird nichts mehr aus deinem bisherigen Konto importiert, und du kannst nicht fortfahren. Noch nicht importierte Bilder und Medien werden in deinen früheren Beiträgen irgendwann nicht mehr angezeigt.",
+    "abort": "Import abbrechen",
+    "abortConfirm": "Import abbrechen? Du kannst ihn danach nicht fortsetzen."
   }
 }

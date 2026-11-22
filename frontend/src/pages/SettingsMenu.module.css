@@ -60,3 +60,29 @@
   border-radius: 12px;
   padding: 2px 8px;
 }
+
+/* 件数の無い「続いている処理がある」印（Bluesky からの転入の取り込み中など）。 */
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #dc2626;
+  flex-shrink: 0;
+  animation: dotBlink 1.6s ease-in-out infinite;
+}
+
+@keyframes dotBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}

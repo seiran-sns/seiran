@@ -303,6 +303,14 @@ fn auth_account_routes() -> Router<AppState> {
         .route("/api/migration/start", post(handlers::migration::start))
         .route("/api/migration/resume", post(handlers::migration::resume))
         .route(
+            "/api/account/migration",
+            get(handlers::migration::account_migration),
+        )
+        .route(
+            "/api/account/migration/abort-import",
+            post(handlers::migration::abort_import),
+        )
+        .route(
             "/api/migration/:id/submit-plc-token",
             post(handlers::migration::submit_plc_token),
         )
@@ -322,6 +330,10 @@ fn auth_account_routes() -> Router<AppState> {
         .route(
             "/api/migration/:id/submit-source-password",
             post(handlers::migration::submit_source_password),
+        )
+        .route(
+            "/api/migration/:id/confirm",
+            post(handlers::migration::confirm),
         )
         .route(
             "/api/migration/:id/abandon",

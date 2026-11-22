@@ -5,6 +5,7 @@ import { api, getErrorMessage, ApiError } from "../../api/client";
 import { isAuthResponse, type MigrationStatusResponse } from "../../api/migration";
 import { useAuth } from "../../contexts/AuthContext";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
+import MigrationInfoDialog from "../../components/auth/MigrationInfoDialog";
 import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import {
@@ -17,7 +18,7 @@ import { migrationStepLabel } from "../migrationStatusLabels";
 import styles from "../Auth.module.css";
 
 /** アカウント（`users`/`actors`）が作られた後の転入の状態。 */
-const ACCOUNT_CREATED_STATUSES = ["importing_data", "deactivating_source", "completed"];
+const ACCOUNT_CREATED_STATUSES = ["importing_data", "importing_blobs", "deactivating_source", "completed"];
 
 /** 他パネルへ切り替えて戻ってきても再開できるよう、親（`AuthCarouselPage`）に持たせる状態。 */
 export interface MigratePanelState {
@@ -155,6 +156,7 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
   const { accountLimitReached, registrationClosed } = useSiteMeta();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -192,9 +194,15 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
 
   return (
     <>
-      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem", fontSize: "0.9rem" }}>
+      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "0.5rem", fontSize: "0.9rem" }}>
         {t("auth:migrateRegister.description")}
       </p>
+      <p style={{ textAlign: "center", marginBottom: "1rem" }}>
+        <button type="button" className={styles.linkButton} onClick={() => setInfoOpen(true)}>
+          {t("auth:migrateRegister.infoButton")}
+        </button>
+      </p>
+      <MigrationInfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} username={state.newUsername} />
       <form onSubmit={handleSubmit} className={styles.form}>
         <label className={styles.label}>
           {t("auth:migrateRegister.sourceHandleLabel")}
@@ -347,6 +355,9 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
       .session(stored.id, stored.token)
       .then((res) => {
         if (cancelled) return;
+        // アカウントができたら転入トークンは要らない（以後の取り込み状況は設定 > インポートが
+        // JWT で見る）。
+        clearStoredMigrationRequest();
         login(res.token, res.user);
         navigate("/", { replace: true });
       })
@@ -362,6 +373,28 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     try {
       await api.migration.retry(stored.id, stored.token);
       await fetchStatus();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
+  async function handleConfirm() {
+    setError("");
+    setSubmitting(true);
+    try {
+      const res = await api.migration.confirm(stored.id, stored.token);
+      if (!isAuthResponse(res)) {
+        // DNS TXT の公開待ち。ポーリングで待ち、アカウントができたら下の effect がログインする。
+        await fetchStatus();
+        return;
+      }
+      // アカウントができたら転入トークンは要らない（取り込みは裏で進み、状況は設定 >
+      // インポートが JWT で見る）。
+      clearStoredMigrationRequest();
+      login(res.token, res.user);
+      navigate("/", { replace: true });
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -449,13 +482,15 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     try {
       const res = await api.migration.submitPlcToken(stored.id, stored.token, inputValue);
       if (!isAuthResponse(res)) {
-        // DNS TXT の公開待ち。ポーリングで待ち、アカウントができたら下の effect がログインする。
+        // 署名まで済み、最終確認の画面へ進む（PLC 提出後にアカウント作成だけをやり直す再入の
+        // 場合だけ、その場で JWT が返る）。
+        setInputValue("");
         await fetchStatus();
         return;
       }
-      // localStorageのmigration_token/idはここではクリアしない——`importing_data`以降は
-      // `MigrationImportingPage`（ログイン後専用画面）が同じ`/api/migration/:id/status`を
-      // 引き続きポーリングして進捗表示に使うため、完了検知した時点でそちらがクリアする。
+      // アカウントができたら転入トークンは要らない（取り込みは裏で進み、状況は設定 >
+      // インポートが JWT で見る）。
+      clearStoredMigrationRequest();
       login(res.token, res.user);
       navigate("/", { replace: true });
     } catch (err) {
@@ -482,7 +517,10 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
 
   return (
     <>
-      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+      {/* 最終確認はパネル自身の見出し（「転入の最終確認」）が説明するので、段階の表示は出さない。 */}
+      {statusData?.needs_input !== "confirm" && (
+        <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem" }}>{stepLabel}</p>
+      )}
       {statusData?.expired && <p className={styles.error}>{t("auth:migrationStatus.expired")}</p>}
       {statusData?.expires_at && (
         <p style={{ textAlign: "center", color: "#a0aec0", fontSize: "0.85rem", marginBottom: "1rem" }}>
@@ -492,6 +530,15 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
 
       {statusData?.last_error && <p className={styles.error}>{statusData.last_error}</p>}
       {error && <p className={styles.error}>{error}</p>}
+
+      {statusData?.needs_input === "confirm" && (
+        <MigrateConfirmPanel
+          sourceHandle={statusData.source_handle}
+          newHandle={statusData.new_handle}
+          submitting={submitting}
+          onConfirm={handleConfirm}
+        />
+      )}
 
       {statusData?.needs_input === "plc_token" && (
         <form onSubmit={handleInputSubmit} className={styles.form}>
@@ -560,29 +607,17 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
         </button>
       )}
 
+      {/* 取りやめると転入を打ち切り（確保したユーザー名とメールも解く）、入口のフォームへ戻る。
+          別のアカウントでの転入も通常の新規登録も、そこから選び直せる。 */}
       {statusData?.can_abandon && (
-        <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
-          <p style={{ color: "#a0aec0", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-            {t("auth:migrationStatus.abandonDescription")}
-          </p>
-          <button
-            type="button"
-            className={styles.button}
-            onClick={handleAbandon}
-            disabled={submitting}
-            style={{ marginBottom: "0.5rem" }}
-          >
-            {t("auth:migrationStatus.retryWithDifferentAccount")}
-          </button>
-          <button type="button" className={styles.button} onClick={handleStartOver} disabled={submitting}>
-            {t("auth:migrationStatus.startFreshInstead")}
+        <div className={styles.form} style={{ marginTop: "1.5rem" }}>
+          <button type="button" className={styles.button} onClick={handleAbandon} disabled={submitting}>
+            {t("auth:migrationStatus.abandon")}
           </button>
         </div>
       )}
 
-      {(statusData?.status === "abandoned" ||
-        statusData?.status === "failed" ||
-        statusData?.status === "failed_post_submit") && (
+      {(statusData?.status === "abandoned" || statusData?.status === "failed_post_submit") && (
         <p className={styles.link} style={{ marginTop: "1rem" }}>
           <button type="button" className={styles.button} onClick={handleStartOver}>
             {t("auth:migrationStatus.backToRegister")}
@@ -590,5 +625,52 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
         </p>
       )}
     </>
+  );
+}
+
+interface MigrateConfirmPanelProps {
+  sourceHandle: string;
+  newHandle: string;
+  submitting: boolean;
+  onConfirm: () => void;
+}
+
+/**
+ * 転入の最終確認。確認コードの入力（転入元の署名）まで済んだところで、元のサーバーでの
+ * ログインが無効化されること・ハンドルが変わることを赤く目立たせて見せ、利用者が「転入する」を
+ * 押してから PLC 送信（不可逆）へ進める。
+ */
+function MigrateConfirmPanel({ sourceHandle, newHandle, submitting, onConfirm }: MigrateConfirmPanelProps) {
+  const { t } = useTranslation();
+  const [infoOpen, setInfoOpen] = useState(false);
+  const warningStyle = {
+    color: "var(--danger)",
+    border: "1px solid var(--danger)",
+    borderRadius: 8,
+    padding: "10px 12px",
+    margin: "0 0 0.75rem",
+    fontWeight: 700,
+    lineHeight: 1.6,
+  } as const;
+
+  return (
+    <div className={styles.form}>
+      <p style={{ textAlign: "center", fontWeight: 700, margin: "0 0 0.75rem" }}>
+        {t("auth:migrationStatus.confirm.title")}
+      </p>
+      <p style={warningStyle}>{t("auth:migrationStatus.confirm.loginDisabled")}</p>
+      <p style={warningStyle}>
+        {t("auth:migrationStatus.confirm.handleChange", { from: sourceHandle, to: newHandle })}
+      </p>
+      <p style={{ textAlign: "center", margin: "0 0 0.75rem" }}>
+        <button type="button" className={styles.linkButton} onClick={() => setInfoOpen(true)}>
+          {t("auth:migrateRegister.infoButton")}
+        </button>
+      </p>
+      <MigrationInfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} username={newHandle.split(".")[0] ?? ""} />
+      <button type="button" className={styles.button} onClick={onConfirm} disabled={submitting}>
+        {t("auth:migrationStatus.confirm.proceed")}
+      </button>
+    </div>
   );
 }
