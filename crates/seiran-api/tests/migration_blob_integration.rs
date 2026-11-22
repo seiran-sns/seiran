@@ -176,3 +176,107 @@ async fn refetch_applies_changes_and_self_records_come_first() {
         .unwrap();
     assert!(repo.claim_next_record(id).await.unwrap().is_none());
 }
+
+/// 取り込んだプロフィールは、ATP の `profile/self` が取り込んだときのままなら actors へ
+/// 当てはまり、seiran 側で書き換えられていれば当てはまらない。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn imported_profile_is_applied_only_while_unchanged() {
+    let pool = test_db_pool().await;
+    let repo = PgAtMigrationRepository::new(pool.clone());
+    let id = migration_with_blobs(&pool, &[]).await;
+    let req = repo.get(id).await.unwrap().unwrap();
+    let outcome = at_migration::materialize_account(
+        &pool,
+        &at_migration::MigratedAccount {
+            request_id: id,
+            source_did: &req.source_did,
+            username: &req.new_username,
+            domain: "localhost",
+            email: req.email.as_deref().unwrap(),
+            password_hash: "hash",
+            agreed_tos_text: None,
+            signing_key_pem: "signing-key",
+            rotation_key_pem: "rotation-key",
+        },
+    )
+    .await
+    .unwrap();
+    let at_migration::MaterializeOutcome::Created { user_id, actor_id } = outcome else {
+        panic!("アカウントを確定できない: {outcome:?}");
+    };
+
+    let profile = serde_json::json!({
+        "$type": "app.bsky.actor.profile",
+        "displayName": "Imported Name",
+        "description": "imported bio",
+    });
+    let (bytes, cid) = seiran_common::atp::repo::encode_generic_record(&profile).unwrap();
+    let cid = seiran_common::atp::repo::cid_to_string(&cid);
+    repo.stage_records(
+        id,
+        &[StagedRecord {
+            collection: "app.bsky.actor.profile".into(),
+            rkey: "self".into(),
+            cid: cid.clone(),
+            bytes,
+        }],
+    )
+    .await
+    .unwrap();
+    let (record_id, ..) = repo.claim_next_record(id).await.unwrap().unwrap();
+    repo.mark_record_imported(record_id, chrono::Utc::now())
+        .await
+        .unwrap();
+
+    // seiran の ATP リポジトリに、取り込んだときのままの profile/self がある。
+    sqlx::query(
+        "INSERT INTO atp_records (actor_id, collection, rkey, cid)
+         VALUES ($1, 'app.bsky.actor.profile', 'self', $2)",
+    )
+    .bind(actor_id)
+    .bind(&cid)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(
+        seiran_common::jobs::at_migration::reapply_imported_profile_to_actor(
+            &pool, id, actor_id, user_id
+        )
+        .await
+        .unwrap()
+    );
+    let (name, bio): (Option<String>, Option<String>) =
+        sqlx::query_as("SELECT display_name, bio FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(name.as_deref(), Some("Imported Name"));
+    assert_eq!(bio.as_deref(), Some("imported bio"));
+
+    // seiran 側で編集された（profile/self の CID が変わった）後は当てはめない。
+    sqlx::query("UPDATE atp_records SET cid = 'edited' WHERE actor_id = $1 AND rkey = 'self'")
+        .bind(actor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE actors SET display_name = 'Edited on seiran' WHERE id = $1")
+        .bind(actor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert!(
+        !seiran_common::jobs::at_migration::reapply_imported_profile_to_actor(
+            &pool, id, actor_id, user_id
+        )
+        .await
+        .unwrap()
+    );
+    let name: Option<String> = sqlx::query_scalar("SELECT display_name FROM actors WHERE id = $1")
+        .bind(actor_id)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+    assert_eq!(name.as_deref(), Some("Edited on seiran"));
+}

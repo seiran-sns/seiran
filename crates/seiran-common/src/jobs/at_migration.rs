@@ -435,6 +435,7 @@ async fn process_import(
         req: &req,
         actor_id,
         follow_exec,
+        encryption_key: ctx.encryption_key.clone(),
         now,
     };
 
@@ -589,6 +590,7 @@ async fn import_next_blob(
         .await
         .map_err(db_err)?;
     if pending == 0 {
+        reapply_imported_profile(ic).await;
         return finish_import(request_id, repo, ctx, ic.now).await;
     }
     // 取り直しの時刻が来た blob が無い。最も早いものまで待つ。
@@ -671,6 +673,8 @@ struct ImportContext<'a> {
     req: &'a crate::repository::AtMigrationRequestRow,
     actor_id: i64,
     follow_exec: &'a crate::queue::worker::FollowExecConfig,
+    /// blob の保存先ストレージプロバイダーの選択に使う（`JobContext::encryption_key`）。
+    encryption_key: Option<Vec<u8>>,
     now: chrono::DateTime<chrono::Utc>,
 }
 
@@ -709,8 +713,163 @@ async fn import_staged_record(
                     "[MigrationImportProcess] commit_generic_record失敗 (collection={collection}, rkey={rkey}): {e}"
                 ))
             })?;
+        if collection == "app.bsky.actor.profile" && rkey == "self" {
+            sync_imported_profile(ic, &value).await;
+        }
     }
     Ok(())
+}
+
+/// 取り込んだプロフィールを seiran のローカルアクターへ反映する（ATP → actors）。片方だけだと、
+/// 次に seiran でプロフィールを編集したとき、空の`actors`を元に`profile/self`がコミットされて
+/// Bluesky 側の表示名やアバターが消える。アバター・バナーの blob は取り込みの最後に回るので、
+/// ここで先に転入元から取ってくる（取れなければ、blob を取り終えた時点で
+/// `reapply_imported_profile`がもう一度当てはめる）。失敗しても取り込みは止めない。
+async fn sync_imported_profile(ic: &ImportContext<'_>, value: &serde_json::Value) {
+    let request_id = ic.req.id;
+    for key in ["avatar", "banner"] {
+        let Some(cid) = value
+            .get(key)
+            .and_then(|b| b.get("ref"))
+            .and_then(|r| r.get("$link"))
+            .and_then(|c| c.as_str())
+        else {
+            continue;
+        };
+        if let Err(e) = prefetch_profile_blob(ic, cid).await {
+            tracing::warn!(
+                "[MigrationImportProcess] request_id={} プロフィールの{}を先に取れませんでした（blob の取り込みで取り直す）: {}",
+                request_id,
+                key,
+                e
+            );
+        }
+    }
+    let Some(user_id) = ic.req.user_id else {
+        return;
+    };
+    if let Err(e) = crate::atp::profile_sync::apply_profile_record(
+        ic.pool,
+        user_id,
+        value,
+        crate::atp::profile_sync::BlobOwner::Any,
+    )
+    .await
+    {
+        tracing::error!(
+            "[MigrationImportProcess] request_id={} プロフィールの actors への反映失敗: {}",
+            request_id,
+            e
+        );
+    }
+}
+
+/// プロフィールのアバター・バナーの blob を、取り込みの順番を待たずに転入元から取って保存する。
+async fn prefetch_profile_blob(ic: &ImportContext<'_>, cid: &str) -> Result<(), String> {
+    use crate::repository::at_migration as migration_repo;
+    let Some(blob_id) = migration_repo::pending_blob_id_by_cid(ic.pool, ic.req.id, cid)
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(());
+    };
+    let bytes = fetch_source_blob(ic.pool, ic.req, cid)
+        .await
+        .map_err(|e| format!("getBlob失敗: {e}"))?;
+    let encryption_key = ic
+        .encryption_key
+        .clone()
+        .ok_or_else(|| "encryption_key 未設定".to_string())?;
+    import_one_blob(ic.pool, encryption_key, ic.actor_id, cid, &bytes).await?;
+    PgAtMigrationRepository::new(ic.pool.clone())
+        .mark_blob_imported(blob_id, ic.now)
+        .await
+        .map_err(|e| e.to_string())
+}
+
+/// blob を取り終えた時点で、取り込んだプロフィールをもう一度 actors へ当てはめる（先に取れ
+/// なかったアバター・バナーを反映するため）。
+async fn reapply_imported_profile(ic: &ImportContext<'_>) {
+    let Some(user_id) = ic.req.user_id else {
+        return;
+    };
+    if let Err(e) =
+        reapply_imported_profile_to_actor(ic.pool, ic.req.id, ic.actor_id, user_id).await
+    {
+        tracing::error!(
+            "[MigrationImportProcess] request_id={} プロフィールの actors への再反映失敗: {}",
+            ic.req.id,
+            e
+        );
+    }
+}
+
+/// 転入で取り込んだプロフィールを、ローカルアクターへ当てはめる（ATP → actors）。取り込んだ後に
+/// seiran 側でプロフィールが編集されていれば（`profile/self`の CID が取り込んだものと変わって
+/// いれば）当てはめない: 編集は両方の世界に反映済みで、古い内容に戻してしまうため。
+/// 当てはめたら `true`。
+pub async fn reapply_imported_profile_to_actor(
+    pool: &PgPool,
+    request_id: i64,
+    actor_id: i64,
+    user_id: i64,
+) -> Result<bool, String> {
+    let Some((bytes, current_cid)) =
+        crate::repository::at_migration::imported_profile_and_current_cid(
+            pool, request_id, actor_id,
+        )
+        .await
+        .map_err(|e| e.to_string())?
+    else {
+        return Ok(false);
+    };
+    let value = crate::atp::decode_dagcbor_to_json(&bytes).map_err(|e| e.to_string())?;
+    let (_, imported_cid) =
+        crate::atp::repo::encode_generic_record(&value).map_err(|e| e.to_string())?;
+    if current_cid.as_deref() != Some(crate::atp::repo::cid_to_string(&imported_cid).as_str()) {
+        return Ok(false);
+    }
+    crate::atp::profile_sync::apply_profile_record(
+        pool,
+        user_id,
+        &value,
+        crate::atp::profile_sync::BlobOwner::Any,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(true)
+}
+
+/// 転入済みのアカウントに、取り込んだプロフィールを当てはめ直す（起動時）。取り込みが
+/// プロフィールを actors へ反映していなかった間に転入したアカウントの表示名・自己紹介・
+/// アバター・バナーを埋めるため。seiran 側で編集済みのアカウントは対象外
+/// （`reapply_imported_profile_to_actor`）。何度実行しても同じ結果になる。
+pub async fn backfill_migrated_profiles(pool: &PgPool) {
+    let accounts = match crate::repository::at_migration::list_migrated_accounts(pool).await {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[startup] 転入済みアカウントの取得に失敗: {}", e);
+            return;
+        }
+    };
+    let mut applied = 0usize;
+    for (request_id, actor_id, user_id) in accounts {
+        match reapply_imported_profile_to_actor(pool, request_id, actor_id, user_id).await {
+            Ok(true) => applied += 1,
+            Ok(false) => {}
+            Err(e) => tracing::warn!(
+                "[startup] 転入 id={} のプロフィールの当てはめ直しに失敗: {}",
+                request_id,
+                e
+            ),
+        }
+    }
+    if applied > 0 {
+        tracing::info!(
+            "[startup] 転入済みアカウント {} 件に取り込んだプロフィールを当てはめ直しました",
+            applied
+        );
+    }
 }
 
 /// 転入した投稿レコードに対応する`posts`行を用意し、その id を返す。

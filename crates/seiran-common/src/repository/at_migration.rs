@@ -1450,3 +1450,52 @@ pub async fn list_stalled_job_migrations(
     .fetch_all(pool)
     .await
 }
+
+/// 転入で取り込んだプロフィール（`app.bsky.actor.profile/self`）のステージング済みの中身
+/// （取り込み済みのときだけ）と、いまの seiran の ATP リポジトリの `profile/self` の CID。
+/// 両者を比べて、取り込んだ後に seiran 側でプロフィールが書き換えられたかを判定する。
+pub async fn imported_profile_and_current_cid(
+    pool: &PgPool,
+    request_id: i64,
+    actor_id: i64,
+) -> Result<Option<(Vec<u8>, Option<String>)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT r.bytes,
+                (SELECT a.cid FROM atp_records a
+                 WHERE a.actor_id = $2 AND a.collection = 'app.bsky.actor.profile'
+                   AND a.rkey = 'self')
+         FROM at_migration_records r
+         WHERE r.request_id = $1 AND r.collection = 'app.bsky.actor.profile'
+           AND r.rkey = 'self' AND r.imported_at IS NOT NULL",
+    )
+    .bind(request_id)
+    .bind(actor_id)
+    .fetch_optional(pool)
+    .await
+}
+
+/// 取り込み対象の blob を CID で引く（未取り込み・未諦めのときだけ）。戻り値は行の id。
+pub async fn pending_blob_id_by_cid(
+    pool: &PgPool,
+    request_id: i64,
+    cid: &str,
+) -> Result<Option<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT id FROM at_migration_blobs
+         WHERE request_id = $1 AND cid = $2 AND imported_at IS NULL AND given_up_at IS NULL",
+    )
+    .bind(request_id)
+    .bind(cid)
+    .fetch_optional(pool)
+    .await
+}
+
+/// アカウントができた転入の (request_id, actor_id, user_id)。
+pub async fn list_migrated_accounts(pool: &PgPool) -> Result<Vec<(i64, i64, i64)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT id, actor_id, user_id FROM at_migration_requests
+         WHERE actor_id IS NOT NULL AND user_id IS NOT NULL",
+    )
+    .fetch_all(pool)
+    .await
+}

@@ -953,6 +953,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
         resume_running_follow_imports(&state).await;
         resume_running_emoji_imports(&state).await;
         resume_running_migrations(&state).await;
+        seiran_common::jobs::at_migration::backfill_migrated_profiles(&state.db).await;
         resume_account_withdraw_unfollow_all(&state).await;
         resume_bsky_video_poll(&state).await;
         resume_bsky_post_commit_deferred(&state).await;
