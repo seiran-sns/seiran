@@ -41,14 +41,15 @@ pub struct AtMigrationRequestRow {
     pub input_wait_since: Option<DateTime<Utc>>,
     /// 入力待ちのまま期限が来て打ち切った時刻（`abandoned`）。利用者による打ち切りは `None`。
     pub expired_at: Option<DateTime<Utc>>,
-    /// `importing_blobs` に入った時刻から [`BLOB_IMPORT_DEADLINE_DAYS`] 日。過ぎたら残りの
-    /// blob を諦める。
-    pub blob_import_deadline: Option<DateTime<Utc>>,
+    /// PLC 提出後にリポジトリを取り直し、スナップショットより後の変更を取り込み対象に
+    /// 反映した時刻（打ち切りで取り直しをやめた場合も入る）。
+    pub repo_refetched_at: Option<DateTime<Utc>>,
+    /// 取り直しの一時的な失敗の回数と、次に試してよい時刻。
+    pub repo_refetch_attempts: i32,
+    pub repo_refetch_next_at: Option<DateTime<Utc>>,
+    /// 利用者が取り込みを打ち切った時刻（以後、転入元からは何も取らない）。
+    pub import_aborted_at: Option<DateTime<Utc>>,
 }
-
-/// `importing_blobs` に入ってから、取れない blob を諦めるまでの日数。転入元の無効化は
-/// その後なので、転入元が一時的に応答しなくても戻るのを待てる。
-pub const BLOB_IMPORT_DEADLINE_DAYS: i64 = 7;
 
 /// 入力待ちの転入へ打ち切りの警告メールを送るまでの時間。
 pub const INPUT_WAIT_WARNING_HOURS: i64 = 24;
@@ -168,6 +169,9 @@ pub trait AtMigrationRepository: Send + Sync {
 
     /// 未取り込み（`imported_at IS NULL`）のレコードを1件排他取得する
     /// （`follow_import::claim_next_item`と同じ`FOR UPDATE SKIP LOCKED`パターン）。
+    /// rkey が `self` のレコード（`app.bsky.actor.profile/self` 等、キーが1つしかないもの）を
+    /// 先に取る。利用者は取り込み中も seiran でプロフィールを編集でき、後から古い内容で
+    /// 上書きすると転入元の内容に戻ってしまうため、先に済ませて後の編集に任せる。
     /// 戻り値: (id, collection, rkey, cid, bytes)。
     #[allow(clippy::type_complexity)]
     async fn claim_next_record(
@@ -222,7 +226,8 @@ impl PgAtMigrationRepository {
 const SELECT_COLUMNS: &str = "id, status::text, source_handle, source_pds_endpoint, source_did,
      source_access_jwt, source_refresh_jwt, new_username, password_hash, new_signing_key_pem,
      plc_submitted_at, actor_id, user_id, email, last_error, new_rotation_key_pem,
-     agreed_tos_text, input_wait_since, expired_at, blob_import_deadline";
+     agreed_tos_text, input_wait_since, expired_at, repo_refetched_at, repo_refetch_attempts,
+     repo_refetch_next_at, import_aborted_at";
 
 #[async_trait]
 impl AtMigrationRepository for PgAtMigrationRepository {
@@ -437,7 +442,7 @@ impl AtMigrationRepository for PgAtMigrationRepository {
              WHERE id = (
                  SELECT id FROM at_migration_records
                  WHERE request_id = $1 AND imported_at IS NULL
-                 ORDER BY id LIMIT 1
+                 ORDER BY (rkey <> 'self'), id LIMIT 1
                  FOR UPDATE SKIP LOCKED
              )
              RETURNING id, collection, rkey, cid, bytes",
@@ -1196,21 +1201,145 @@ pub async fn claim_input_wait_mails(
 
 // ─── blob の取り込み（`importing_blobs`） ───
 
-/// レコードを取り込み終えた転入を `importing_blobs` へ進め、blob を諦める期限を決める。
-/// 状態が `importing_data` でなければ何もせず `false`。
+/// レコードを取り込み終えた転入を `importing_blobs` へ進める。状態が `importing_data` で
+/// なければ何もせず `false`。
 pub async fn start_blob_import(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
     let res = sqlx::query(
-        "UPDATE at_migration_requests
-         SET status = 'importing_blobs',
-             blob_import_deadline = NOW() + make_interval(days => $2),
-             updated_at = NOW()
+        "UPDATE at_migration_requests SET status = 'importing_blobs', updated_at = NOW()
          WHERE id = $1 AND status = 'importing_data'",
     )
     .bind(id)
-    .bind(BLOB_IMPORT_DEADLINE_DAYS as i32)
     .execute(pool)
     .await?;
     Ok(res.rows_affected() == 1)
+}
+
+/// PLC 提出後に取り直したリポジトリを取り込み対象に反映した結果。
+#[derive(Debug, Clone, Copy, Default)]
+pub struct RefetchSummary {
+    /// スナップショットに無かった、または内容が変わったレコード。
+    pub upserted: u64,
+    /// スナップショットの後で消された、まだ取り込んでいないレコード（対象から外した）。
+    pub removed: u64,
+}
+
+/// PLC 提出後に取り直したリポジトリの全レコードを取り込み対象に反映し、取り直しを済みにする
+/// （1トランザクション）。スナップショット（`fetching_repo`）の後に追加・変更されたレコードを
+/// 取り込み対象に加え（取り込み済みでも内容が変わっていれば取り込み直す。投稿は rkey ごとに
+/// 内容が変わらないので対象外）、消されたレコードのうちまだ取り込んでいないものは外す。
+pub async fn apply_refetched_repo(
+    pool: &PgPool,
+    request_id: i64,
+    records: &[StagedRecord],
+) -> Result<RefetchSummary, sqlx::Error> {
+    let collections: Vec<&str> = records.iter().map(|r| r.collection.as_str()).collect();
+    let rkeys: Vec<&str> = records.iter().map(|r| r.rkey.as_str()).collect();
+    let cids: Vec<&str> = records.iter().map(|r| r.cid.as_str()).collect();
+    let bytes: Vec<&[u8]> = records.iter().map(|r| r.bytes.as_slice()).collect();
+
+    let mut tx = pool.begin().await?;
+    let upserted = sqlx::query(
+        "INSERT INTO at_migration_records (request_id, collection, rkey, cid, bytes)
+         SELECT $1, c, k, i, b
+         FROM UNNEST($2::text[], $3::text[], $4::text[], $5::bytea[]) AS t(c, k, i, b)
+         ON CONFLICT (request_id, collection, rkey) DO UPDATE
+           SET cid = EXCLUDED.cid, bytes = EXCLUDED.bytes, imported_at = NULL
+           WHERE at_migration_records.cid <> EXCLUDED.cid
+             AND at_migration_records.collection <> 'app.bsky.feed.post'",
+    )
+    .bind(request_id)
+    .bind(&collections)
+    .bind(&rkeys)
+    .bind(&cids)
+    .bind(&bytes)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    let removed = sqlx::query(
+        "DELETE FROM at_migration_records r
+         WHERE r.request_id = $1 AND r.imported_at IS NULL
+           AND NOT EXISTS (SELECT 1 FROM UNNEST($2::text[], $3::text[]) AS t(c, k)
+                           WHERE t.c = r.collection AND t.k = r.rkey)",
+    )
+    .bind(request_id)
+    .bind(&collections)
+    .bind(&rkeys)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected();
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET repo_refetched_at = NOW(), repo_refetch_error = NULL, repo_refetch_next_at = NULL
+         WHERE id = $1",
+    )
+    .bind(request_id)
+    .execute(&mut *tx)
+    .await?;
+    tx.commit().await?;
+    Ok(RefetchSummary { upserted, removed })
+}
+
+/// リポジトリの取り直しが一時的に失敗した。`delay_secs` 秒後まで試さない（その間もスナップ
+/// ショットのレコードの取り込みは進める）。
+pub async fn defer_repo_refetch(
+    pool: &PgPool,
+    id: i64,
+    error: &str,
+    delay_secs: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET repo_refetch_attempts = repo_refetch_attempts + 1, repo_refetch_error = $2,
+             repo_refetch_next_at = NOW() + make_interval(secs => $3)
+         WHERE id = $1",
+    )
+    .bind(id)
+    .bind(error)
+    .bind(delay_secs as f64)
+    .execute(pool)
+    .await
+    .map(|_| ())
+}
+
+/// 利用者が取り込みを打ち切る。以後は転入元から何も取らない: リポジトリの取り直しをやめ、
+/// まだ取れていない blob をすべて諦める（スナップショットのレコードは手元にあるので取り込む）。
+/// 打ち切れる状態（`importing_data`/`importing_blobs`、未打ち切り）でなければ `false`。
+pub async fn abort_import(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
+    let mut tx = pool.begin().await?;
+    let aborted = sqlx::query(
+        "UPDATE at_migration_requests
+         SET import_aborted_at = NOW(), repo_refetched_at = COALESCE(repo_refetched_at, NOW()),
+             repo_refetch_next_at = NULL
+         WHERE id = $1 AND status IN ('importing_data', 'importing_blobs')
+           AND import_aborted_at IS NULL",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await?
+    .rows_affected()
+        == 1;
+    if aborted {
+        sqlx::query(
+            "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = '利用者が打ち切り'
+             WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
+        )
+        .bind(id)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+    Ok(aborted)
+}
+
+/// レコードの取り込みの進み具合（ログイン後の画面の表示用）。戻り値: (取り込み済み, 全体)。
+pub async fn record_progress(pool: &PgPool, request_id: i64) -> Result<(i64, i64), sqlx::Error> {
+    sqlx::query_as(
+        "SELECT count(*) FILTER (WHERE imported_at IS NOT NULL), count(*)
+         FROM at_migration_records WHERE request_id = $1",
+    )
+    .bind(request_id)
+    .fetch_one(pool)
+    .await
 }
 
 /// 一時的に取れなかった blob を `delay_secs` 秒後まで後回しにする（その間は他の blob を先に取る）。
@@ -1234,7 +1363,7 @@ pub async fn defer_blob(
     .map(|_| ())
 }
 
-/// 取れない blob を諦める（転入元に無い等）。
+/// 取れない blob を諦める（転入元に無い）。
 pub async fn give_up_blob(pool: &PgPool, blob_id: i64, reason: &str) -> Result<(), sqlx::Error> {
     sqlx::query(
         "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = $2
@@ -1245,23 +1374,6 @@ pub async fn give_up_blob(pool: &PgPool, blob_id: i64, reason: &str) -> Result<(
     .execute(pool)
     .await
     .map(|_| ())
-}
-
-/// まだ取れていない blob をすべて諦める（期限切れ・利用者の打ち切り）。諦めた件数を返す。
-pub async fn give_up_pending_blobs(
-    pool: &PgPool,
-    request_id: i64,
-    reason: &str,
-) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query(
-        "UPDATE at_migration_blobs SET given_up_at = NOW(), last_error = $2
-         WHERE request_id = $1 AND imported_at IS NULL AND given_up_at IS NULL",
-    )
-    .bind(request_id)
-    .bind(reason)
-    .execute(pool)
-    .await?;
-    Ok(res.rows_affected())
 }
 
 /// まだ取れていない blob の件数と、そのうち最も早く取り直してよい時刻（`NULL` は今すぐ）。

@@ -326,8 +326,8 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
   - `plc_submitted_at`: 不可逆境界のマーカー。`new_signing_key_pem`（転入後の repo 署名鍵）と `new_rotation_key_pem`（専用ローテーションキー）はこの成功と同時に保存する（後のアカウント作成が失敗しても鍵を失わないよう、`actor_id`/`user_id` の確定とは別ステップ）。
 - `at_migration_records`: 取得した生レコード1件＝1行（`request_id, collection, rkey` の UNIQUE）。`bytes` は DAG-CBOR のまま。`imported_at` は `posts`/`atp_records` への実体化の完了。`app.bsky.graph.follow` だけは `follow_materialized_at` で `follows` への反映を別に追跡する（ATP リポジトリへの複製と seiran の社会グラフへの反映は別の処理だから）。
   - `source_deactivated_at` / `source_deactivate_error`: 転入元アカウントの無効化（`deactivateAccount`、ベストエフォート）の結果。成功なら日時が入り、失敗なら理由だけが入る（どちらでも転入は `completed` になる）。この列を足す前に完了した転入はどちらも NULL。
-- `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。`attempts`/`next_attempt_at` は一時的な失敗の回数と次に取り直してよい時刻（それまで他の blob を先に取る）、`given_up_at` は諦めた時刻（転入元に無い・期限切れ・利用者の打ち切り）、`last_error` はその理由。
-- `at_migration_requests.blob_import_deadline`: `importing_blobs` に入ってから7日。過ぎたら残りの blob を諦めて転入元の無効化へ進む。
+- `at_migration_blobs`: `listBlobs` の CID（`request_id, cid` の UNIQUE）。`imported_at` は `media_files` への保存の完了。`attempts`/`next_attempt_at` は一時的な失敗の回数と次に取り直してよい時刻（それまで他の blob を先に取る）、`given_up_at` は諦めた時刻（転入元に無い・利用者の打ち切り）、`last_error` はその理由。
+- `at_migration_requests.repo_refetched_at`: PLC 提出後にリポジトリを取り直し、スナップショットより後の変更を取り込み対象に反映した時刻（打ち切りで取り直しをやめた場合も入る）。`repo_refetch_attempts`/`repo_refetch_next_at`/`repo_refetch_error` は取り直しの一時的な失敗の回数・次に試してよい時刻・理由。`import_aborted_at` は利用者が取り込みを打ち切った時刻。
 - `at_migration_requests.input_wait_since`: 利用者の入力・選択待ち（`awaiting_source_password`・`awaiting_plc_token`・`failed`）に入った時刻。入力待ちでなければ NULL。`input_wait_mail_stage` はこの入力待ちで送った案内メールの段階（0: 未送信、1: 入力待ちの案内、2: 打ち切りの警告）。`expired_at` は入力待ちのまま期限が来て打ち切った時刻（利用者による打ち切りは NULL）。期限と案内の流れは `docs/account_migration.md` 4節。
 - `at_migration_resume_tokens`: 案内メールの再開リンクのトークン（`token_hash` は SHA-256）。使い捨てで、`expires_at` は打ち切りの時刻。
 - `at_migration_requests.agreed_tos_text`: `start` 時点で利用規約チェックボックスに同意していた場合のみ、その時点の `site_settings.terms_of_service_text` の文面を一時保持する。`users`/`actors` 行が確定するのは `submit_plc_token` まで待つため、`terms_of_service_agreements` へのコピーもそこまで遅延する。

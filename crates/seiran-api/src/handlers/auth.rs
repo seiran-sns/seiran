@@ -139,12 +139,11 @@ pub struct UserInfo {
     pub is_suspended: bool,
     /// 既存DID転入フロー（`docs/account_migration.md`）由来のアカウントで、かつ
     /// データ取り込みが未完了（`completed`以外）の場合のみ`Some`。通常アカウントは`None`。
-    /// フロントは`is_suspended`と同型のゲートで、`completed`以外なら他画面をバイパスして
-    /// 「データ取り込み中」専用画面を表示する。
+    /// 取り込みは裏で進み、アカウントはそのまま使える。フロントはこれを見て、メニューに
+    /// 取り込み中の印を出す（状況は設定 > インポート）。
     pub migration_status: Option<String>,
-    /// DID転出済み（`docs/account_migration.md`「転出元API対応」参照）。`is_suspended`や
-    /// `migration_status`とは異なり、`true`の間もフロントは通常のタイムライン等の
-    /// 読み取り画面をそのまま表示する。投稿・リアクション・リポスト・フォロー・
+    /// DID転出済み（`docs/account_migration.md`「転出元API対応」参照）。`is_suspended`と
+    /// 異なり、`true`の間もフロントは通常のタイムライン等の読み取り画面をそのまま表示する。投稿・リアクション・リポスト・フォロー・
     /// リスト操作・DM送信等の書き込みUIのみを無効化する。
     pub did_moved_out: bool,
 }

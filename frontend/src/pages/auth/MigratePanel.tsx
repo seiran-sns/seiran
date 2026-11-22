@@ -347,6 +347,9 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
       .session(stored.id, stored.token)
       .then((res) => {
         if (cancelled) return;
+        // アカウントができたら転入トークンは要らない（以後の取り込み状況は設定 > インポートが
+        // JWT で見る）。
+        clearStoredMigrationRequest();
         login(res.token, res.user);
         navigate("/", { replace: true });
       })
@@ -453,9 +456,9 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
         await fetchStatus();
         return;
       }
-      // localStorageのmigration_token/idはここではクリアしない——`importing_data`以降は
-      // `MigrationImportingPage`（ログイン後専用画面）が同じ`/api/migration/:id/status`を
-      // 引き続きポーリングして進捗表示に使うため、完了検知した時点でそちらがクリアする。
+      // アカウントができたら転入トークンは要らない（取り込みは裏で進み、状況は設定 >
+      // インポートが JWT で見る）。
+      clearStoredMigrationRequest();
       login(res.token, res.user);
       navigate("/", { replace: true });
     } catch (err) {

@@ -2,7 +2,7 @@ import type { TFunction } from "i18next";
 import type { MigrationStatusResponse } from "../api/migration";
 
 // 既存DID転入フロー（`docs/account_migration.md`）の状態→表示文言マッピング。
-// ログイン前（`MigratePanel`）・ログイン後（`MigrationImportingPage`）の両方から使う。
+// ログイン前の転入画面（`MigratePanel`）が使う。
 const STATUS_LABEL_KEYS: Record<string, string> = {
   fetching_repo: "auth:migrationStatus.step.fetchingRepo",
   requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",

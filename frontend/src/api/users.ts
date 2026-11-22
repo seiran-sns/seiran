@@ -183,14 +183,21 @@ export const actors = {
   },
 };
 
-/** ログイン後に見る、アカウント作成後でまだ完了していない DID 転入（`GET /api/account/migration`）。 */
+/** ログイン後に見る、アカウント作成後でまだ完了していない DID 転入の取り込み状況
+ * （`GET /api/account/migration`）。 */
 export interface AccountMigration {
   status: string;
+  records_imported: number;
+  records_total: number;
   blobs_imported: number;
   blobs_given_up: number;
   blobs_total: number;
-  /** 取れない画像等を諦める時刻（ISO 8601、`importing_blobs` の間だけ）。 */
-  blob_import_deadline: string | null;
+  /** PLC 提出後のリポジトリの取り直しが済んだか。 */
+  repo_refetched: boolean;
+  /** 転入元から取れずに取り直しを待っている。 */
+  waiting_for_source: boolean;
+  /** 利用者が取り込みを打ち切ったか。 */
+  aborted: boolean;
 }
 
 export const account = {
@@ -198,9 +205,9 @@ export const account = {
   migration() {
     return request<AccountMigration | null>("GET", "/account/migration");
   },
-  /** DID 転入の画像等の取り込みを打ち切る（取れていない分を諦めて、転入元の無効化へ進める）。 */
-  skipMigrationBlobs() {
-    return request<{ status: string }>("POST", "/account/migration/skip-blobs");
+  /** DID 転入の取り込みを打ち切る（以後、転入元からは何も取らない。再開はできない）。 */
+  abortMigrationImport() {
+    return request<{ status: string }>("POST", "/account/migration/abort-import");
   },
   withdraw(confirmHandle: string) {
     return request<void>("POST", "/account/withdraw", {

@@ -147,11 +147,20 @@
     "acceptButton": "Aceptar",
     "rejectButton": "Rechazar"
   },
-  "migrationBlobs": {
-    "progress": "Importando las imágenes y otros archivos de tu cuenta de Bluesky migrada ({{done}} / {{total}}). Mientras tanto, puedes seguir usando tu cuenta.",
-    "deadline": "Lo que no se haya importado antes de {{time}} se omitirá y la migración se completará.",
-    "skip": "Detener la importación",
-    "skipConfirm": "¿Omitir las imágenes y archivos que aún no se han importado y completar la migración? Las imágenes omitidas acabarán dejando de mostrarse en tus publicaciones anteriores.",
-    "deactivating": "Desactivando tu cuenta anterior…"
+  "migrationImport": {
+    "title": "Migración desde Bluesky",
+    "description": "Tus publicaciones, imágenes y otros datos se están importando desde tu cuenta anterior en segundo plano. Mientras tanto, puedes seguir usando tu cuenta.",
+    "statusRecords": "Importando publicaciones y otros registros",
+    "statusBlobs": "Importando imágenes y otros archivos",
+    "statusDeactivating": "Desactivando tu cuenta anterior",
+    "records": "Publicaciones y registros: {{done}} / {{total}}",
+    "blobs": "Imágenes y archivos: {{done}} / {{total}}",
+    "blobsGivenUp": "({{count}} no se pudieron importar)",
+    "refetchPending": "Comprobando si se hicieron publicaciones u otros cambios en tu cuenta anterior durante la migración.",
+    "waitingForSource": "Tu servidor anterior no responde, así que la importación se reintentará más tarde.",
+    "aborted": "Se detuvo la importación. La migración se completará cuando terminen de importarse los datos ya disponibles.",
+    "abortWarning": "Si la detienes, no se importará nada más de tu cuenta anterior y no podrás reanudarla. Las imágenes y archivos aún no importados acabarán dejando de mostrarse en tus publicaciones anteriores.",
+    "abort": "Detener la importación",
+    "abortConfirm": "¿Detener la importación? No podrás reanudarla."
   }
 }

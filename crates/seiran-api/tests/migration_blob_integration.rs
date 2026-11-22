@@ -1,4 +1,5 @@
-//! DID 転入の blob 取り込み（`importing_blobs`）のリポジトリ層の結合テスト。
+//! DID 転入の取り込み（PLC 提出後のリポジトリの取り直し・レコード・blob）のリポジトリ層の
+//! 結合テスト。
 //!
 //! ```sh
 //! POSTGRES_USER=seiran_e2e POSTGRES_PASSWORD=seiran_e2e POSTGRES_DB=seiran_e2e DB_PORT=5433 \
@@ -9,7 +10,7 @@ mod support;
 
 use seiran_common::repository::at_migration;
 use seiran_common::repository::{
-    AtMigrationRepository, NewMigrationRequest, PgAtMigrationRepository,
+    AtMigrationRepository, NewMigrationRequest, PgAtMigrationRepository, StagedRecord,
 };
 use support::{test_db_pool, unique_suffix};
 
@@ -47,7 +48,7 @@ async fn migration_with_blobs(pool: &sqlx::PgPool, cids: &[&str]) -> i64 {
 }
 
 /// 後回しにした blob は時刻が来るまで取られず、他の blob が先に取られる。諦めた blob は
-/// 二度と取られない。すべて諦めれば取り込み待ちは0件になる。
+/// 二度と取られない。打ち切ると残りはすべて諦めになり、二度目の打ち切りは成立しない。
 #[tokio::test]
 #[ignore = "実DBが必要"]
 async fn deferred_and_given_up_blobs_are_skipped() {
@@ -58,8 +59,6 @@ async fn deferred_and_given_up_blobs_are_skipped() {
     assert!(at_migration::start_blob_import(&pool, id).await.unwrap());
     let row = repo.get(id).await.unwrap().unwrap();
     assert_eq!(row.status, "importing_blobs");
-    let deadline = row.blob_import_deadline.expect("期限が入っていない");
-    assert!(deadline > chrono::Utc::now() + chrono::Duration::days(6));
     // 2回目は状態が違うので何もしない。
     assert!(!at_migration::start_blob_import(&pool, id).await.unwrap());
 
@@ -95,12 +94,85 @@ async fn deferred_and_given_up_blobs_are_skipped() {
     let (done, total) = repo.import_progress(id).await.unwrap();
     assert_eq!((done, total), (2, 3));
 
-    assert_eq!(
-        at_migration::give_up_pending_blobs(&pool, id, "利用者が打ち切り")
-            .await
-            .unwrap(),
-        1
-    );
+    assert!(at_migration::abort_import(&pool, id).await.unwrap());
+    assert!(!at_migration::abort_import(&pool, id).await.unwrap());
     let (pending, _) = at_migration::pending_blobs(&pool, id).await.unwrap();
     assert_eq!(pending, 0);
+    let row = repo.get(id).await.unwrap().unwrap();
+    assert!(row.import_aborted_at.is_some());
+    assert!(row.repo_refetched_at.is_some());
+}
+
+fn record(collection: &str, rkey: &str, cid: &str) -> StagedRecord {
+    StagedRecord {
+        collection: collection.to_string(),
+        rkey: rkey.to_string(),
+        cid: cid.to_string(),
+        bytes: cid.as_bytes().to_vec(),
+    }
+}
+
+/// rkey が `self` のレコードが先に取られる。取り直しで、追加されたレコードは対象に加わり、
+/// 内容の変わった取り込み済みのレコード（投稿以外）は取り込み直しになり、取り込み前に
+/// 消されたレコードは対象から外れる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn refetch_applies_changes_and_self_records_come_first() {
+    let pool = test_db_pool().await;
+    let repo = PgAtMigrationRepository::new(pool.clone());
+    let id = migration_with_blobs(&pool, &[]).await;
+    repo.stage_records(
+        id,
+        &[
+            record("app.bsky.feed.post", "3post1", "cid-post1"),
+            record("app.bsky.feed.post", "3post2", "cid-post2"),
+            record("app.bsky.actor.profile", "self", "cid-profile-old"),
+        ],
+    )
+    .await
+    .unwrap();
+
+    let (first, collection, rkey, _, _) = repo.claim_next_record(id).await.unwrap().unwrap();
+    assert_eq!(
+        (collection.as_str(), rkey.as_str()),
+        ("app.bsky.actor.profile", "self")
+    );
+    repo.mark_record_imported(first, chrono::Utc::now())
+        .await
+        .unwrap();
+    let (post1, _, rkey, _, _) = repo.claim_next_record(id).await.unwrap().unwrap();
+    assert_eq!(rkey, "3post1");
+    repo.mark_record_imported(post1, chrono::Utc::now())
+        .await
+        .unwrap();
+
+    // 取り直し: プロフィールが変わり、post2 は取り込み前に消され、post3 が増えた。
+    // post1 は内容が変わっていても（投稿は rkey ごとに不変なので）取り込み直さない。
+    let summary = at_migration::apply_refetched_repo(
+        &pool,
+        id,
+        &[
+            record("app.bsky.feed.post", "3post1", "cid-post1-other"),
+            record("app.bsky.feed.post", "3post3", "cid-post3"),
+            record("app.bsky.actor.profile", "self", "cid-profile-new"),
+        ],
+    )
+    .await
+    .unwrap();
+    assert_eq!(summary.upserted, 2, "post3 の追加とプロフィールの変更");
+    assert_eq!(summary.removed, 1, "取り込み前に消された post2");
+    let row = repo.get(id).await.unwrap().unwrap();
+    assert!(row.repo_refetched_at.is_some());
+
+    let (profile, _, rkey, cid, _) = repo.claim_next_record(id).await.unwrap().unwrap();
+    assert_eq!((rkey.as_str(), cid.as_str()), ("self", "cid-profile-new"));
+    repo.mark_record_imported(profile, chrono::Utc::now())
+        .await
+        .unwrap();
+    let (post3, _, rkey, _, _) = repo.claim_next_record(id).await.unwrap().unwrap();
+    assert_eq!(rkey, "3post3");
+    repo.mark_record_imported(post3, chrono::Utc::now())
+        .await
+        .unwrap();
+    assert!(repo.claim_next_record(id).await.unwrap().is_none());
 }

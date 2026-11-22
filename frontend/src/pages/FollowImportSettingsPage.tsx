@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import type { FollowImportStatusResponse } from "../api/client";
 import AppShell from "../components/layout/AppShell";
+import MigrationImportSection from "./MigrationImportSection";
 import styles from "./FollowImportSettings.module.css";
 
 const POLL_INTERVAL_MS = 1500;
@@ -126,6 +127,7 @@ export default function FollowImportSettingsPage() {
 
   const center = (
     <>
+      <MigrationImportSection />
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>{t("account:importExport.followImportTitle")}</h3>
         <p className={styles.description}>{t("account:importExport.description")}</p>

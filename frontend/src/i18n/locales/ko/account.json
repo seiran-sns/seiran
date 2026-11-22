@@ -147,11 +147,20 @@
     "acceptButton": "승인",
     "rejectButton": "거부"
   },
-  "migrationBlobs": {
-    "progress": "이전한 Bluesky 계정의 이미지 등을 가져오는 중입니다({{done}} / {{total}}). 그동안에도 계정을 계속 사용할 수 있습니다.",
-    "deadline": "{{time}}까지 가져오지 못한 항목은 건너뛰고 이전을 완료합니다.",
-    "skip": "가져오기 중단",
-    "skipConfirm": "아직 가져오지 못한 이미지 등을 건너뛰고 이전을 완료할까요? 건너뛴 이미지는 이전 게시물에서 언젠가 표시되지 않게 됩니다.",
-    "deactivating": "이전 계정을 비활성화하는 중…"
+  "migrationImport": {
+    "title": "Bluesky에서 이전",
+    "description": "이전한 계정의 게시물과 이미지 등을 이전 원본에서 백그라운드로 가져오고 있습니다. 그동안에도 계정을 계속 사용할 수 있습니다.",
+    "statusRecords": "게시물 등을 가져오는 중",
+    "statusBlobs": "이미지 등을 가져오는 중",
+    "statusDeactivating": "이전 원본 계정을 비활성화하는 중",
+    "records": "게시물 등: {{done}} / {{total}}",
+    "blobs": "이미지 등: {{done}} / {{total}}",
+    "blobsGivenUp": "(그중 가져오지 못한 항목 {{count}}개)",
+    "refetchPending": "이전 절차 중에 이전 원본에서 작성된 게시물 등을 확인하고 있습니다.",
+    "waitingForSource": "이전 원본 서버가 응답하지 않아, 시간을 두고 다시 가져오고 있습니다.",
+    "aborted": "가져오기를 중단했습니다. 이미 받아 둔 데이터를 다 가져오면 이전을 완료합니다.",
+    "abortWarning": "중단하면 이전 원본에서 더 이상 가져오지 않으며 다시 시작할 수 없습니다. 아직 가져오지 못한 이미지 등은 이전 게시물에서 언젠가 표시되지 않게 됩니다.",
+    "abort": "가져오기 중단",
+    "abortConfirm": "가져오기를 중단할까요? 중단하면 다시 시작할 수 없습니다."
   }
 }

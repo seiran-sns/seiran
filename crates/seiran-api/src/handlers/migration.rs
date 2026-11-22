@@ -855,20 +855,28 @@ pub(crate) async fn create_resume_link(
     ))
 }
 
-/// ログイン後に見る、アカウント作成後でまだ完了していない転入の状態（blob の取り込み中の
-/// 案内と打ち切りボタン用）。
+/// ログイン後に見る、アカウント作成後でまだ完了していない転入の取り込み状況（設定 >
+/// インポートの表示と打ち切りボタン用）。
 #[derive(Serialize)]
 pub struct AccountMigrationResponse {
     pub status: String,
+    pub records_imported: i64,
+    pub records_total: i64,
     pub blobs_imported: i64,
     pub blobs_given_up: i64,
     pub blobs_total: i64,
-    /// 取れない blob を諦める時刻（`importing_blobs` の間だけ）。
-    pub blob_import_deadline: Option<chrono::DateTime<chrono::Utc>>,
+    /// PLC 提出後のリポジトリの取り直しが済んだか。
+    pub repo_refetched: bool,
+    /// 転入元から取れずに取り直しを待っている（リポジトリの取り直しが失敗している、または
+    /// 残りの blob がすべて後回しになっている）。
+    pub waiting_for_source: bool,
+    /// 利用者が取り込みを打ち切ったか。
+    pub aborted: bool,
 }
 
 /// `GET /api/account/migration` — ログイン中のユーザーの、アカウント作成後でまだ完了して
-/// いない転入。無ければ `null`。転入トークンではなく JWT で認可する（別の端末からでも見られる）。
+/// いない転入の取り込み状況。無ければ `null`。転入トークンではなく JWT で認可する
+/// （別の端末からでも見られる）。
 pub async fn account_migration(
     headers: HeaderMap,
     State(state): State<AppState>,
@@ -887,24 +895,38 @@ pub async fn account_migration(
     else {
         return Ok(Json(None));
     };
-    let progress = migration_repo::blob_progress(&state.db, req.id)
+    let (records_imported, records_total) = migration_repo::record_progress(&state.db, req.id)
         .await
         .map_err(internal)?;
+    let blobs = migration_repo::blob_progress(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    let (pending_blobs, next_blob_at) = migration_repo::pending_blobs(&state.db, req.id)
+        .await
+        .map_err(internal)?;
+    let now = chrono::Utc::now();
+    let refetch_failing = req.repo_refetched_at.is_none() && req.repo_refetch_attempts > 0;
+    let blobs_all_deferred = req.status == "importing_blobs"
+        && pending_blobs > 0
+        && next_blob_at.is_some_and(|t| t > now);
     Ok(Json(Some(AccountMigrationResponse {
-        blob_import_deadline: (req.status == "importing_blobs")
-            .then_some(req.blob_import_deadline)
-            .flatten(),
         status: req.status,
-        blobs_imported: progress.imported,
-        blobs_given_up: progress.given_up,
-        blobs_total: progress.total,
+        records_imported,
+        records_total,
+        blobs_imported: blobs.imported,
+        blobs_given_up: blobs.given_up,
+        blobs_total: blobs.total,
+        repo_refetched: req.repo_refetched_at.is_some(),
+        waiting_for_source: refetch_failing || blobs_all_deferred,
+        aborted: req.import_aborted_at.is_some(),
     })))
 }
 
-/// `POST /api/account/migration/skip-blobs` — 転入元からの blob の取り込みを利用者が打ち切る。
-/// まだ取れていない blob をすべて諦め、転入元の無効化へ進める（`importing_blobs` の間だけ）。
+/// `POST /api/account/migration/abort-import` — 転入の取り込みを利用者が打ち切る。以後は
+/// 転入元から何も取らない（リポジトリの取り直しをやめ、まだ取れていない blob を諦める）。
+/// 手元にあるスナップショットのレコードは取り込み、その後に転入元の無効化へ進む。再開はできない。
 /// 諦めた画像は、Bluesky の CDN のキャッシュが切れると過去の投稿に表示されなくなる。
-pub async fn skip_blobs(
+pub async fn abort_import(
     headers: HeaderMap,
     State(state): State<AppState>,
 ) -> Result<Json<MigrationStatusStub>, ApiError> {
@@ -919,14 +941,14 @@ pub async fn skip_blobs(
     let req = migration_repo::incomplete_for_user(&state.db, auth_user.user_id)
         .await
         .map_err(internal)?
-        .filter(|r| r.status == "importing_blobs")
         .ok_or(ApiError::Conflict("INVALID_STATE"))?;
-    migration_repo::give_up_pending_blobs(&state.db, req.id, "利用者が打ち切り")
+    if !migration_repo::abort_import(&state.db, req.id)
         .await
-        .map_err(internal)?;
-    // 取り直し待ちで眠っているジョブを待たずに、すぐ無効化へ進める。
+        .map_err(internal)?
+    {
+        return Err(ApiError::Conflict("INVALID_STATE"));
+    }
+    // 取り直し待ちで眠っているジョブを待たずに、すぐ先へ進める。
     state.enqueue_migration_import_process(req.id).await;
-    Ok(Json(MigrationStatusStub {
-        status: "importing_blobs",
-    }))
+    Ok(Json(MigrationStatusStub { status: "aborted" }))
 }

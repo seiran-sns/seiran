@@ -147,11 +147,20 @@
     "acceptButton": "Accepter",
     "rejectButton": "Refuser"
   },
-  "migrationBlobs": {
-    "progress": "Importation des images et autres médias de votre compte Bluesky migré ({{done}} / {{total}}). Vous pouvez continuer à utiliser votre compte en attendant.",
-    "deadline": "Ce qui n'aura pas été importé avant {{time}} sera ignoré, et la migration sera terminée.",
-    "skip": "Arrêter l'importation",
-    "skipConfirm": "Ignorer les images et médias pas encore importés et terminer la migration ? Les images ignorées finiront par ne plus s'afficher dans vos anciennes publications.",
-    "deactivating": "Désactivation de votre ancien compte…"
+  "migrationImport": {
+    "title": "Migration depuis Bluesky",
+    "description": "Vos publications, images et autres données sont importées depuis votre ancien compte en arrière-plan. Vous pouvez continuer à utiliser votre compte en attendant.",
+    "statusRecords": "Importation des publications et autres enregistrements",
+    "statusBlobs": "Importation des images et autres médias",
+    "statusDeactivating": "Désactivation de votre ancien compte",
+    "records": "Publications et enregistrements : {{done}} / {{total}}",
+    "blobs": "Images et médias : {{done}} / {{total}}",
+    "blobsGivenUp": "({{count}} n'ont pas pu être importés)",
+    "refetchPending": "Vérification des publications et autres modifications faites sur votre ancien compte pendant la migration.",
+    "waitingForSource": "Votre ancien serveur ne répond pas ; l'importation sera retentée plus tard.",
+    "aborted": "L'importation a été arrêtée. La migration sera terminée une fois les données déjà disponibles importées.",
+    "abortWarning": "Si vous arrêtez, plus rien ne sera importé depuis votre ancien compte et vous ne pourrez pas reprendre. Les images et médias pas encore importés finiront par ne plus s'afficher dans vos anciennes publications.",
+    "abort": "Arrêter l'importation",
+    "abortConfirm": "Arrêter l'importation ? Vous ne pourrez pas la reprendre."
   }
 }

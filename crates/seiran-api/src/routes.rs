@@ -307,8 +307,8 @@ fn auth_account_routes() -> Router<AppState> {
             get(handlers::migration::account_migration),
         )
         .route(
-            "/api/account/migration/skip-blobs",
-            post(handlers::migration::skip_blobs),
+            "/api/account/migration/abort-import",
+            post(handlers::migration::abort_import),
         )
         .route(
             "/api/migration/:id/submit-plc-token",
