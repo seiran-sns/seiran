@@ -593,29 +593,17 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
         </button>
       )}
 
+      {/* 取りやめると転入を打ち切り（確保したユーザー名とメールも解く）、入口のフォームへ戻る。
+          別のアカウントでの転入も通常の新規登録も、そこから選び直せる。 */}
       {statusData?.can_abandon && (
         <div style={{ marginTop: "1.5rem", textAlign: "center" }}>
-          <p style={{ color: "#a0aec0", fontSize: "0.85rem", marginBottom: "0.5rem" }}>
-            {t("auth:migrationStatus.abandonDescription")}
-          </p>
-          <button
-            type="button"
-            className={styles.button}
-            onClick={handleAbandon}
-            disabled={submitting}
-            style={{ marginBottom: "0.5rem" }}
-          >
-            {t("auth:migrationStatus.retryWithDifferentAccount")}
-          </button>
-          <button type="button" className={styles.button} onClick={handleStartOver} disabled={submitting}>
-            {t("auth:migrationStatus.startFreshInstead")}
+          <button type="button" className={styles.button} onClick={handleAbandon} disabled={submitting}>
+            {t("auth:migrationStatus.abandon")}
           </button>
         </div>
       )}
 
-      {(statusData?.status === "abandoned" ||
-        statusData?.status === "failed" ||
-        statusData?.status === "failed_post_submit") && (
+      {(statusData?.status === "abandoned" || statusData?.status === "failed_post_submit") && (
         <p className={styles.link} style={{ marginTop: "1rem" }}>
           <button type="button" className={styles.button} onClick={handleStartOver}>
             {t("auth:migrationStatus.backToRegister")}
