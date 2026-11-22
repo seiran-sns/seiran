@@ -413,7 +413,7 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 | `com.atproto.identity.requestPlcOperationSignature` | PDS A の登録メールへ確認コードを送らせる。アプリパスワードのセッションでは `InvalidToken - Bad token scope` で拒まれるので、本来のパスワードの入れ直し待ち（`awaiting_source_password`）にする（`docs/account_migration.md` 1節） |
 | `com.atproto.identity.signPlcOperation` | 確認コードを添えて PLC 操作に署名させる。`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services` は省略時の挙動が仕様上不定なので、全部明示して渡す |
 | `com.atproto.identity.submitPlcOperation` | plc.directory へ提出。この成功が転入の不可逆境界（DID の service endpoint が seiran に切り替わる） |
-| `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート） |
+| `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート）。refreshJwt の `aud` が `did:web:<ホスト>` ならその entryway（bsky.social 等）へ直接送る。entryway の後ろの PDS は repo の署名鍵で署名した service JWT を付けて entryway へ転送し、entryway は DID 文書の鍵で検証するので、PLC 送信後に PDS へ送ると必ず `BadJwtSignature` になる。entryway で失敗し、送り先が保存済みの PDS と違えば、PDS へ一度だけ送り直す |
 | `com.atproto.server.refreshSession` | accessJwt の期限切れ（`ExpiredToken`）で拒まれたとき、refreshJwt で取り直す |
 
 **セッションの更新（`atp::migration_session::call_with_refresh`）**: PDS A の accessJwt は数時間で切れるが、転入は確認コードの入力待ちやジョブの停止（ストレージの容量不足等）でそれより長くかかりうる。PDS A を呼ぶ処理（上の表の `createSession`・`submitPlcOperation` 以外すべて）は、`ExpiredToken` で拒まれたら `refreshSession` で取り直し、新しい組を `at_migration_requests` に保存してから1回だけやり直す。PDS は使った refreshJwt を失効させるので、保存は更新に使った refreshJwt がまだ DB にある場合だけ行い、別の処理が先に更新していればその組を使う（`repository::at_migration::replace_source_tokens`）。`refreshSession` はパスワードもメール2FAも要らない。期限切れで拒まれた `signPlcOperation` は確認コードを消費しないので、取り直してそのまま送り直せる。

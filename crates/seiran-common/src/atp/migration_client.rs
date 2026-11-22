@@ -61,17 +61,44 @@ impl MigrationClientError {
 /// 署名は検証しない（PDS A が発行して直接返してきたトークンを、案内のために読むだけで、
 /// 権限の判定自体は PDS A がする）。`scope` の無い・読めないトークンはアプリパスワード扱いしない。
 pub fn is_app_password_token(access_jwt: &str) -> bool {
+    jwt_claim(access_jwt, "scope").is_some_and(|scope| scope.starts_with("com.atproto.appPass"))
+}
+
+/// JWT のペイロードから文字列のクレームを読む（署名は検証しない）。
+fn jwt_claim(jwt: &str, name: &str) -> Option<String> {
     use base64::Engine;
-    let Some(payload) = access_jwt.split('.').nth(1) else {
-        return false;
-    };
-    let Ok(bytes) = base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(payload) else {
-        return false;
-    };
+    let payload = jwt.split('.').nth(1)?;
+    let bytes = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(payload)
+        .ok()?;
     serde_json::from_slice::<serde_json::Value>(&bytes)
-        .ok()
-        .and_then(|v| v.get("scope")?.as_str().map(str::to_owned))
-        .is_some_and(|scope| scope.starts_with("com.atproto.appPass"))
+        .ok()?
+        .get(name)?
+        .as_str()
+        .map(str::to_owned)
+}
+
+/// 移行元アカウントの管理操作（`deactivateAccount`）を送る先。
+///
+/// bsky.social のように entryway の後ろに PDS がある構成では、PDS は
+/// `deactivateAccount` を「repo の署名鍵で署名した service JWT」を付けて entryway へ転送し、
+/// entryway はそれを DID 文書の鍵で検証する。PLC 送信後は DID 文書の鍵が seiran の鍵に
+/// 変わっているので、PDS 経由では必ず `BadJwtSignature` になる。entryway は本人の
+/// accessJwt を直接受け付ける（`activateAccount` は PDS がトークンをそのまま転送している）
+/// ので、refreshJwt の `aud`（発行した entryway、例 `did:web:bsky.social`）へ直接送る。
+/// `aud` が `did:web:<ホスト>` でなければ（entryway の無い PDS 等）保存済みの PDS へ送る。
+pub fn account_management_endpoint(refresh_jwt: Option<&str>, source_pds_endpoint: &str) -> String {
+    refresh_jwt
+        .and_then(|jwt| jwt_claim(jwt, "aud"))
+        .and_then(|aud| aud.strip_prefix("did:web:").map(str::to_owned))
+        .filter(|host| {
+            !host.is_empty()
+                && host
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')
+        })
+        .map(|host| format!("https://{host}"))
+        .unwrap_or_else(|| source_pds_endpoint.to_string())
 }
 
 fn xrpc_error_from_body(status: u16, body: &serde_json::Value) -> MigrationClientError {
@@ -494,6 +521,32 @@ mod tests {
             enc.encode(br#"{"alg":"ES256K","typ":"at+jwt"}"#),
             enc.encode(payload.to_string())
         )
+    }
+
+    #[test]
+    fn account_management_goes_to_entryway_named_by_refresh_aud() {
+        let pds = "https://oyster.us-east.host.bsky.network";
+        let refresh = jwt_with_payload(serde_json::json!({"aud": "did:web:bsky.social"}));
+        assert_eq!(
+            account_management_endpoint(Some(&refresh), pds),
+            "https://bsky.social"
+        );
+        // did:web 以外・ホストとして不正な値・トークン無しは保存済みの PDS へ。
+        for aud in [
+            "did:plc:abc",
+            "did:web:",
+            "did:web:evil.example%2F..",
+            "did:web:a:8080",
+        ] {
+            let refresh = jwt_with_payload(serde_json::json!({ "aud": aud }));
+            assert_eq!(
+                account_management_endpoint(Some(&refresh), pds),
+                pds,
+                "{aud}"
+            );
+        }
+        assert_eq!(account_management_endpoint(None, pds), pds);
+        assert_eq!(account_management_endpoint(Some("not-a-jwt"), pds), pds);
     }
 
     #[test]
