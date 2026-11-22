@@ -44,18 +44,34 @@ pub async fn handle_fetch_repo(request_id: i64, ctx: Arc<JobContext>) -> Result<
         return Ok(());
     };
 
-    let result = process_fetch_repo(request_id, pool, &ctx).await;
+    let result = process_fetch_repo(request_id, pool).await;
 
     crate::advisory_lock::release(lock_conn, request_id).await;
 
-    result
+    // 次のジョブはロックを放してから積む。握ったまま積むと、すぐに拾われた次のジョブが同じ
+    // `request_id` のロックを取れずに「処理中」として何もせず終わり、転入が
+    // `requesting_plc_signature` のまま止まる。
+    if result? {
+        if let Err(e) = ctx
+            .queue
+            .enqueue(
+                crate::traits::Job::MigrationRequestPlcSignature { request_id },
+                crate::queue::worker::priority::NORMAL,
+            )
+            .await
+        {
+            tracing::error!(
+                "[MigrationFetchRepo] MigrationRequestPlcSignature enqueue失敗 (request_id={}): {}",
+                request_id,
+                e
+            );
+        }
+    }
+    Ok(())
 }
 
-async fn process_fetch_repo(
-    request_id: i64,
-    pool: &PgPool,
-    ctx: &JobContext,
-) -> Result<(), JobError> {
+/// リポジトリを取得してステージングする。次のジョブ（確認コードの送付）を積むべきなら `true`。
+async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<bool, JobError> {
     let repo = PgAtMigrationRepository::new(pool.clone());
 
     let Some(req) = repo.get(request_id).await.map_err(|e| {
@@ -66,7 +82,7 @@ async fn process_fetch_repo(
             "[MigrationFetchRepo] request_id={} が見つかりません（終了）",
             request_id
         );
-        return Ok(());
+        return Ok(false);
     };
 
     if req.status != "fetching_repo" {
@@ -75,7 +91,7 @@ async fn process_fetch_repo(
             request_id,
             req.status
         );
-        return Ok(());
+        return Ok(false);
     }
 
     let now = chrono::Utc::now();
@@ -156,23 +172,7 @@ async fn process_fetch_repo(
         staged_count,
         blob_count,
     );
-
-    if let Err(e) = ctx
-        .queue
-        .enqueue(
-            crate::traits::Job::MigrationRequestPlcSignature { request_id },
-            crate::queue::worker::priority::NORMAL,
-        )
-        .await
-    {
-        tracing::error!(
-            "[MigrationFetchRepo] MigrationRequestPlcSignature enqueue失敗 (request_id={}): {}",
-            request_id,
-            e
-        );
-    }
-
-    Ok(())
+    Ok(true)
 }
 
 /// `Job::MigrationRequestPlcSignature` — PDS Aへ`requestPlcOperationSignature`を呼び、
