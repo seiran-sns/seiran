@@ -47,7 +47,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 | `awaiting_dns_txt` | `signPlcOperation`済み（署名済み操作と新しい鍵を`staged_*`に保存）。`_atproto` TXT が全権威 NS に公開されるのを待つ | `seiran_common::did_provision::migration`（`submit-plc-token`内の1段・直後のキック・firehose ロールの定時処理・`/status`のポーリング） |
 | `submitting_plc` | `submitPlcOperation`実行中。★成功時にDB確定（`users`/`actors`作成）も行う | `did_provision::migration`（再入時はAPIハンドラ） |
 | `importing_data` | ステージング済みレコード/blobの実体化中 | `Job::MigrationImportProcess`（自己再enqueue） |
-| `deactivating_source` | PDS A側旧アカウントの無効化中（ベストエフォート） | `Job::MigrationDeactivateSource` |
+| `deactivating_source` | PDS A側旧アカウントの無効化中（ベストエフォート。成否は`source_deactivated_at`/`source_deactivate_error`に残す）。送り先は refreshJwt の`aud`が示す entryway（bsky.social 等。PDS 経由だと PLC 送信後は必ず`BadJwtSignature`になる。`docs/protocols.md`） | `Job::MigrationDeactivateSource` |
 | `completed` | 転入完了 | — |
 | `failed` | `submitting_plc`到達前の失敗。リトライ／別DIDで再開／新規DID立ち上げへ切替のいずれも可 | ユーザー選択待ち |
 | `failed_post_submit` | `submitting_plc`成功後の失敗。リトライのみ可 | ユーザー選択待ち |

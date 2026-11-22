@@ -197,7 +197,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
   - `did_resolve.rs` — サービス間認証 JWT 検証用の DID 解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名 JWT（ES256、low-S 正規化必須）
 - `seiran-atp-repo::firehose` — Jetstream クライアント
-- `seiran-api::handlers::xrpc::{repo,server,sync}` — repo: `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`、server: `describeServer`/`resolveHandle`/セッション・アプリパスワード系、sync: `getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`subscribeRepos`
+- `seiran-api::handlers::xrpc::{repo,server,sync}` — repo: `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`、server: `describeServer`/`resolveHandle`/セッション・アプリパスワード系、sync: `getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`getRepoStatus`/`subscribeRepos`
 
 ローカルユーザーの投稿は `AtpCommitService` がジョブキューを介さず直接コミットし、`atp_repo_events` に記録して、公式 Relay（`bsky.network`）へ `requestCrawl` を送る。`requestCrawl` の `hostname` は確定済みの自ホストドメイン（`LocalDomain`）で、`.env` の `LOCAL_DOMAIN` は見ない（初回セットアップの `Host` ヘッダーで確定したインストールは `LOCAL_DOMAIN` を持たない）。ドメインが未確定（初回セットアップ前・シングルホストモード）の間は、コミット時・起動時（`spawn_startup_tasks`）とも送らない。起動時は `requestCrawl` の前に、各 Relay へ `com.atproto.sync.getRepoStatus` でローカルアカウント（退会・凍結・DID 転出済みを除く）を1件ずつ問い合わせ、`RepoNotFound` だったものにだけ、Relay の接続を待ってから `#identity` を送り直す。Relay はアカウントを、知らない DID のイベントを受け取ったときにしか作らない。そのため、Relay に発見される前にイベントを出し終えたアカウント（`requestCrawl` が届かなかった・Relay 側でホストが作り直された・Relay を追加した等）は、これが無いと次にイベントを出すまで bsky.app に現れない。`getHostStatus` の `accountCount` は消えたアカウントも数えるので、判定には使わない。
 
@@ -241,6 +241,7 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `repo.describeRepo` — handle/did/コレクション一覧/`didDoc`（`did:plc` なら plc.directory から取得）。
 - `sync.listRepos` — `at_did` を持つアクターを id 順に返す。
 - `sync.getLatestCommit` — `at_repo_cid`/`at_repo_rev`。
+- `sync.getRepoStatus` — `active`/`status`/`rev`。状態は firehose の `#account` と揃え、退会は `deleted`、DID転出（`did_moved_out_at`）は `deactivated`。凍結は `#account` を流していない（解除を伝える手段が無い）ので active のまま返す。稼働中のときだけ `rev` を付ける。ローカルのリポジトリを持たない DID は 400 `RepoNotFound`。
 - `sync.listBlobs` — その DID がアップロードした `media_files` の CID。CID は保持せず `sha256` から再構築する（`cid_from_sha256_hex`）。
 
 ### postgate・getTrends のスタブ応答
@@ -412,7 +413,7 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 | `com.atproto.identity.requestPlcOperationSignature` | PDS A の登録メールへ確認コードを送らせる。アプリパスワードのセッションでは `InvalidToken - Bad token scope` で拒まれるので、本来のパスワードの入れ直し待ち（`awaiting_source_password`）にする（`docs/account_migration.md` 1節） |
 | `com.atproto.identity.signPlcOperation` | 確認コードを添えて PLC 操作に署名させる。`rotationKeys`/`alsoKnownAs`/`verificationMethods`/`services` は省略時の挙動が仕様上不定なので、全部明示して渡す |
 | `com.atproto.identity.submitPlcOperation` | plc.directory へ提出。この成功が転入の不可逆境界（DID の service endpoint が seiran に切り替わる） |
-| `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート） |
+| `com.atproto.server.deactivateAccount` | 転入後に PDS A 側を無効化（ベストエフォート）。refreshJwt の `aud` が `did:web:<ホスト>` ならその entryway（bsky.social 等）へ直接送る。entryway の後ろの PDS は repo の署名鍵で署名した service JWT を付けて entryway へ転送し、entryway は DID 文書の鍵で検証するので、PLC 送信後に PDS へ送ると必ず `BadJwtSignature` になる。entryway で失敗し、送り先が保存済みの PDS と違えば、PDS へ一度だけ送り直す |
 | `com.atproto.server.refreshSession` | accessJwt の期限切れ（`ExpiredToken`）で拒まれたとき、refreshJwt で取り直す |
 
 **セッションの更新（`atp::migration_session::call_with_refresh`）**: PDS A の accessJwt は数時間で切れるが、転入は確認コードの入力待ちやジョブの停止（ストレージの容量不足等）でそれより長くかかりうる。PDS A を呼ぶ処理（上の表の `createSession`・`submitPlcOperation` 以外すべて）は、`ExpiredToken` で拒まれたら `refreshSession` で取り直し、新しい組を `at_migration_requests` に保存してから1回だけやり直す。PDS は使った refreshJwt を失効させるので、保存は更新に使った refreshJwt がまだ DB にある場合だけ行い、別の処理が先に更新していればその組を使う（`repository::at_migration::replace_source_tokens`）。`refreshSession` はパスワードもメール2FAも要らない。期限切れで拒まれた `signPlcOperation` は確認コードを消費しないので、取り直してそのまま送り直せる。

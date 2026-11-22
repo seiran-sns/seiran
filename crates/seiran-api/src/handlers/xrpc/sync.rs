@@ -232,6 +232,65 @@ pub async fn xrpc_get_latest_commit(
 }
 
 #[derive(Deserialize)]
+pub struct GetRepoStatusParams {
+    pub did: String,
+}
+
+/// アクターの状態を `com.atproto.sync.getRepoStatus` の `active` / `status` に写す。
+/// firehose の `#account` で流している値（退会=`deleted`、DID転出=`deactivated`）と揃える。
+/// 凍結は `#account` を流していない（解除しても active に戻ったと伝える手段が無い）ので、
+/// ここでも active として返す。
+fn repo_status(withdrawn: bool, did_moved_out: bool) -> (bool, Option<&'static str>) {
+    if withdrawn {
+        (false, Some("deleted"))
+    } else if did_moved_out {
+        (false, Some("deactivated"))
+    } else {
+        (true, None)
+    }
+}
+
+/// `com.atproto.sync.getRepoStatus` — この PDS が持つリポジトリの稼働状態を返す。
+/// Relay などが `#account` を取りこぼしたときの確認に使う。ローカルのリポジトリを
+/// 持たない DID（リモートアクター等）は XRPC 標準どおり `RepoNotFound`。
+pub async fn xrpc_get_repo_status(
+    Query(params): Query<GetRepoStatusParams>,
+    State(state): State<AppState>,
+) -> impl IntoResponse {
+    let actor = match state.actors.find_by_did(&params.did).await {
+        Ok(Some(a)) if a.user_id.is_some() && a.at_repo_cid.is_some() => a,
+        Ok(_) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                axum::Json(serde_json::json!({
+                    "error": "RepoNotFound",
+                    "message": format!("Could not find repo for DID: {}", params.did),
+                })),
+            )
+                .into_response();
+        }
+        Err(e) => {
+            return ApiError::Internal(format!("[getRepoStatus] アクター取得失敗: {}", e))
+                .into_response();
+        }
+    };
+    let (active, status) = repo_status(
+        actor.withdrawn_at.is_some(),
+        actor.did_moved_out_at.is_some(),
+    );
+    let mut body = serde_json::json!({ "did": params.did, "active": active });
+    if let Some(status) = status {
+        body["status"] = status.into();
+    }
+    if active {
+        if let Some(rev) = actor.at_repo_rev {
+            body["rev"] = rev.into();
+        }
+    }
+    axum::Json(body).into_response()
+}
+
+#[derive(Deserialize)]
 pub struct ListBlobsParams {
     pub did: String,
     pub limit: Option<i64>,
@@ -413,5 +472,17 @@ async fn handle_subscribe_repos(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod repo_status_tests {
+    use super::repo_status;
+
+    #[test]
+    fn maps_actor_state_to_repo_status() {
+        assert_eq!(repo_status(false, false), (true, None));
+        assert_eq!(repo_status(false, true), (false, Some("deactivated")));
+        assert_eq!(repo_status(true, true), (false, Some("deleted")));
     }
 }
