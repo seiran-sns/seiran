@@ -223,7 +223,13 @@ pub async fn start(
         request_id,
         &seiran_common::repository::NewMigrationRequest {
             request_token_hash: &request_token_hash,
-            source_handle: &req.source_handle,
+            // 入力欄の文字列（`@`付き・大文字混じり等）ではなく、転入元が返す正式なハンドルを
+            // 残す（最終確認で「@旧 から @新 に変わる」と見せるため）。
+            source_handle: if session.handle.is_empty() {
+                req.source_handle.trim().trim_start_matches('@')
+            } else {
+                &session.handle
+            },
             source_pds_endpoint: &resolved.url,
             source_did: &source_did,
             source_access_jwt: &session.access_jwt,
@@ -521,10 +527,14 @@ pub struct MigrationStatusResponse {
     pub expires_at: Option<chrono::DateTime<chrono::Utc>>,
     /// 入力待ちのまま期限が来て打ち切られたなら真（`status == "abandoned"`）。
     pub expired: bool,
+    /// 転入元でのハンドルと、転入後のハンドル（最終確認で「@旧 から @新 に変わる」と見せる）。
+    pub source_handle: String,
+    pub new_handle: String,
 }
 
 fn needs_input_for(status: &str) -> Option<&'static str> {
     match status {
+        "awaiting_user_confirmation" => Some("confirm"),
         "awaiting_plc_token" => Some("plc_token"),
         "awaiting_source_password" => Some("source_password"),
         _ => None,
@@ -589,6 +599,12 @@ pub async fn get_status(
             .input_wait_since
             .map(|since| since + chrono::Duration::hours(INPUT_WAIT_EXPIRY_HOURS)),
         expired: migration_req.expired_at.is_some(),
+        new_handle: format!(
+            "{}.{}",
+            seiran_common::username::to_atp_username(&migration_req.new_username),
+            state.local_domain
+        ),
+        source_handle: migration_req.source_handle,
     }))
 }
 
@@ -753,6 +769,32 @@ pub async fn submit_source_password(
     .await
     .map_err(|e| ApiError::Internal(e.to_string()))?;
     if !resumed {
+        return Err(ApiError::Conflict("INVALID_STATE"));
+    }
+    state.enqueue_migration_request_plc_signature(id).await;
+    Ok(Json(MigrationStatusStub {
+        status: "requesting_plc_signature",
+    }))
+}
+
+/// 利用者の最終確認（`awaiting_user_confirmation`）。元のサーバーでのログインが無効化される
+/// こと・ハンドルが変わることを確かめてもらった後に、確認コードの送付へ進める。状態が
+/// 変わっていたら（打ち切り・期限切れと競合した等）何もしない。
+pub async fn confirm(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    headers: HeaderMap,
+) -> Result<Json<MigrationStatusStub>, ApiError> {
+    authorize_migration_request(&state, id, &headers).await?;
+    let moved = seiran_common::repository::at_migration::transition_status(
+        &state.db,
+        id,
+        "awaiting_user_confirmation",
+        "requesting_plc_signature",
+    )
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))?;
+    if !moved {
         return Err(ApiError::Conflict("INVALID_STATE"));
     }
     state.enqueue_migration_request_plc_signature(id).await;

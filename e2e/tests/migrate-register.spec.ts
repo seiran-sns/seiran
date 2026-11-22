@@ -46,3 +46,17 @@ test("移行元ハンドルが解決できない場合エラーメッセージ�
   await expect(page.getByText("移行元のハンドルを解決できませんでした")).toBeVisible({ timeout: 15_000 });
   await expect(page).toHaveURL(/\/register\/migrate$/);
 });
+
+test("「転入とは？」で、元のサーバーでのログインが無効化されることとハンドルの変更を説明する", async ({
+  page,
+}) => {
+  await page.goto("/register/migrate");
+  await page.getByLabel("seiranでの新しいユーザー名").fill("E2EInfo");
+  await page.getByRole("button", { name: "ℹ️ 転入とは？" }).click();
+
+  await expect(page.getByText("転入とは？", { exact: true })).toBeVisible();
+  await expect(page.getByText(/元のサーバー（bsky\.social など）ではログインできなくなります/)).toBeVisible();
+  await expect(page.getByText(/フォロー・フォロワーの関係、リプライのスレッド、メンションはそのまま保たれます/)).toBeVisible();
+  // ハンドルは入力中のユーザー名を小文字にしたもの＋このサーバーのドメインになる。
+  await expect(page.getByText(/@e2einfo\./)).toBeVisible();
+});

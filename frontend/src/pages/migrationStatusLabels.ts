@@ -5,6 +5,7 @@ import type { MigrationStatusResponse } from "../api/migration";
 // ログイン前の転入画面（`MigratePanel`）が使う。
 const STATUS_LABEL_KEYS: Record<string, string> = {
   fetching_repo: "auth:migrationStatus.step.fetchingRepo",
+  awaiting_user_confirmation: "auth:migrationStatus.step.awaitingUserConfirmation",
   requesting_plc_signature: "auth:migrationStatus.step.requestingPlcSignature",
   awaiting_source_password: "auth:migrationStatus.step.awaitingSourcePassword",
   awaiting_plc_token: "auth:migrationStatus.step.awaitingPlcToken",

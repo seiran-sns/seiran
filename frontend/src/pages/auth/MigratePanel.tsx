@@ -5,6 +5,7 @@ import { api, getErrorMessage, ApiError } from "../../api/client";
 import { isAuthResponse, type MigrationStatusResponse } from "../../api/migration";
 import { useAuth } from "../../contexts/AuthContext";
 import TermsOfServiceField from "../../components/auth/TermsOfServiceField";
+import MigrationInfoDialog from "../../components/auth/MigrationInfoDialog";
 import RegistrationUnavailableNotice from "../../components/auth/RegistrationUnavailableNotice";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import {
@@ -155,6 +156,7 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
   const { accountLimitReached, registrationClosed } = useSiteMeta();
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+  const [infoOpen, setInfoOpen] = useState(false);
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -192,9 +194,15 @@ function MigrateFormView({ state, onChange, onStarted }: MigrateFormViewProps) {
 
   return (
     <>
-      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "1rem", fontSize: "0.9rem" }}>
+      <p style={{ textAlign: "center", color: "#a0aec0", marginBottom: "0.5rem", fontSize: "0.9rem" }}>
         {t("auth:migrateRegister.description")}
       </p>
+      <p style={{ textAlign: "center", marginBottom: "1rem" }}>
+        <button type="button" className={styles.linkButton} onClick={() => setInfoOpen(true)}>
+          {t("auth:migrateRegister.infoButton")}
+        </button>
+      </p>
+      <MigrationInfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} username={state.newUsername} />
       <form onSubmit={handleSubmit} className={styles.form}>
         <label className={styles.label}>
           {t("auth:migrateRegister.sourceHandleLabel")}
@@ -372,6 +380,19 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
     }
   }
 
+  async function handleConfirm() {
+    setError("");
+    setSubmitting(true);
+    try {
+      await api.migration.confirm(stored.id, stored.token);
+      await fetchStatus();
+    } catch (err) {
+      setError(getErrorMessage(err));
+    } finally {
+      setSubmitting(false);
+    }
+  }
+
   async function handleResendPlcToken() {
     setError("");
     setSubmitting(true);
@@ -496,6 +517,15 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
       {statusData?.last_error && <p className={styles.error}>{statusData.last_error}</p>}
       {error && <p className={styles.error}>{error}</p>}
 
+      {statusData?.needs_input === "confirm" && (
+        <MigrateConfirmPanel
+          sourceHandle={statusData.source_handle}
+          newHandle={statusData.new_handle}
+          submitting={submitting}
+          onConfirm={handleConfirm}
+        />
+      )}
+
       {statusData?.needs_input === "plc_token" && (
         <form onSubmit={handleInputSubmit} className={styles.form}>
           <label className={styles.label}>
@@ -593,5 +623,58 @@ function MigrateStatusView({ stored, onReset }: MigrateStatusViewProps) {
         </p>
       )}
     </>
+  );
+}
+
+interface MigrateConfirmPanelProps {
+  sourceHandle: string;
+  newHandle: string;
+  submitting: boolean;
+  onConfirm: () => void;
+}
+
+/**
+ * 転入の最終確認。転入元の認証（求められればメール認証も）とリポジトリの取得が済んだところで、
+ * 元のサーバーでのログインが無効化されること・ハンドルが変わることを赤く目立たせて見せ、
+ * 利用者が「転入を進める」を押してから確認コードを送らせる。
+ */
+function MigrateConfirmPanel({ sourceHandle, newHandle, submitting, onConfirm }: MigrateConfirmPanelProps) {
+  const { t } = useTranslation();
+  const [infoOpen, setInfoOpen] = useState(false);
+  const warningStyle = {
+    color: "var(--danger)",
+    border: "1px solid var(--danger)",
+    borderRadius: 8,
+    padding: "10px 12px",
+    margin: "0 0 0.75rem",
+    fontWeight: 700,
+    lineHeight: 1.6,
+  } as const;
+
+  return (
+    <div className={styles.form}>
+      <p style={{ textAlign: "center", fontWeight: 700, margin: "0 0 0.75rem" }}>
+        {t("auth:migrationStatus.confirm.title")}
+      </p>
+      <p style={warningStyle}>{t("auth:migrationStatus.confirm.loginDisabled")}</p>
+      <p style={warningStyle}>
+        {t("auth:migrationStatus.confirm.handleChange", { from: sourceHandle, to: newHandle })}
+      </p>
+      <p style={{ color: "#a0aec0", fontSize: "0.9rem", margin: "0 0 0.5rem" }}>
+        {t("auth:migrationStatus.confirm.relationsKept")}
+      </p>
+      <p style={{ color: "#a0aec0", fontSize: "0.85rem", margin: "0 0 0.75rem" }}>
+        {t("auth:migrationStatus.confirm.nextStep")}
+      </p>
+      <p style={{ textAlign: "center", margin: "0 0 0.75rem" }}>
+        <button type="button" className={styles.linkButton} onClick={() => setInfoOpen(true)}>
+          {t("auth:migrateRegister.infoButton")}
+        </button>
+      </p>
+      <MigrationInfoDialog open={infoOpen} onClose={() => setInfoOpen(false)} username={newHandle.split(".")[0] ?? ""} />
+      <button type="button" className={styles.button} onClick={onConfirm} disabled={submitting}>
+        {t("auth:migrationStatus.confirm.proceed")}
+      </button>
+    </div>
   );
 }

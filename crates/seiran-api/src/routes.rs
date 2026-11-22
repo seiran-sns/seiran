@@ -332,6 +332,10 @@ fn auth_account_routes() -> Router<AppState> {
             post(handlers::migration::submit_source_password),
         )
         .route(
+            "/api/migration/:id/confirm",
+            post(handlers::migration::confirm),
+        )
+        .route(
             "/api/migration/:id/abandon",
             post(handlers::migration::abandon),
         )

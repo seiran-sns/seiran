@@ -32,7 +32,7 @@ export interface MigrationStatusResponse {
   request_id: string;
   status: string;
   last_error?: string | null;
-  /** `"plc_token"` | `"source_password"` | null。フロントが表示すべき入力欄の種類。 */
+  /** `"confirm"` | `"plc_token"` | `"source_password"` | null。フロントが表示すべき入力欄の種類。 */
   needs_input?: string | null;
   retryable: boolean;
   can_abandon: boolean;
@@ -43,6 +43,9 @@ export interface MigrationStatusResponse {
   expires_at?: string | null;
   /** 入力待ちのまま期限が来て打ち切られたなら true（`status === "abandoned"`）。 */
   expired?: boolean;
+  /** 転入元でのハンドルと、転入後のハンドル（最終確認の表示用）。 */
+  source_handle: string;
+  new_handle: string;
 }
 
 /** 途中の転入へ戻るための、発行し直した転入トークン（再開リンク・ログインの応答）。 */
@@ -121,6 +124,10 @@ export const migration = {
   },
   retry(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/retry`, requestToken);
+  },
+  /** 転入の最終確認（`awaiting_user_confirmation`）。確認コードの送付へ進める。 */
+  confirm(id: string, requestToken: string) {
+    return migrationRequest<SimpleStatus>("POST", `/migration/${id}/confirm`, requestToken);
   },
   abandon(id: string, requestToken: string) {
     return migrationRequest<SimpleStatus>("POST", `/migration/${id}/abandon`, requestToken);

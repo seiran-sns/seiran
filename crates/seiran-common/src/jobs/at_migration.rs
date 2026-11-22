@@ -48,30 +48,13 @@ pub async fn handle_fetch_repo(request_id: i64, ctx: Arc<JobContext>) -> Result<
 
     crate::advisory_lock::release(lock_conn, request_id).await;
 
-    // 次のジョブはロックを放してから積む。握ったまま積むと、すぐに拾われた次のジョブが同じ
-    // `request_id` のロックを取れずに「処理中」として何もせず終わり、転入が
-    // `requesting_plc_signature` のまま止まる。
-    if result? {
-        if let Err(e) = ctx
-            .queue
-            .enqueue(
-                crate::traits::Job::MigrationRequestPlcSignature { request_id },
-                crate::queue::worker::priority::NORMAL,
-            )
-            .await
-        {
-            tracing::error!(
-                "[MigrationFetchRepo] MigrationRequestPlcSignature enqueue失敗 (request_id={}): {}",
-                request_id,
-                e
-            );
-        }
-    }
-    Ok(())
+    result
 }
 
-/// リポジトリを取得してステージングする。次のジョブ（確認コードの送付）を積むべきなら `true`。
-async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<bool, JobError> {
+/// リポジトリを取得してステージングし、利用者の最終確認（`awaiting_user_confirmation`）を
+/// 待つ。確認コードの送付（`MigrationRequestPlcSignature`）は、利用者が確認してから
+/// `POST /api/migration/:id/confirm` が積む。
+async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<(), JobError> {
     let repo = PgAtMigrationRepository::new(pool.clone());
 
     let Some(req) = repo.get(request_id).await.map_err(|e| {
@@ -82,7 +65,7 @@ async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<bool, JobE
             "[MigrationFetchRepo] request_id={} が見つかりません（終了）",
             request_id
         );
-        return Ok(false);
+        return Ok(());
     };
 
     if req.status != "fetching_repo" {
@@ -91,7 +74,7 @@ async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<bool, JobE
             request_id,
             req.status
         );
-        return Ok(false);
+        return Ok(());
     }
 
     let now = chrono::Utc::now();
@@ -159,20 +142,21 @@ async fn process_fetch_repo(request_id: i64, pool: &PgPool) -> Result<bool, JobE
         })?;
 
     // メールは`start`時点でPDS A由来のものを既に確定済み（転入フローは独自のメール実在確認を
-    // 行わない）のため、`awaiting_seiran_email`を経由せず直接次のステップへ進む。
-    repo.set_status(request_id, "requesting_plc_signature", now)
+    // 行わない）のため、`awaiting_seiran_email`を経由しない。元のサーバーでのログインが無効化
+    // されること・ハンドルが変わることを利用者に確かめてもらってから確認コードを送らせる。
+    repo.set_status(request_id, "awaiting_user_confirmation", now)
         .await
         .map_err(|e| {
             JobError::Transient(format!("[MigrationFetchRepo] ステータス更新失敗: {e}"))
         })?;
 
     tracing::info!(
-        "[MigrationFetchRepo] request_id={} 完了 (records={}, blobs={})",
+        "[MigrationFetchRepo] request_id={} 完了 (records={}, blobs={})、利用者の確認待ち",
         request_id,
         staged_count,
         blob_count,
     );
-    Ok(true)
+    Ok(())
 }
 
 /// `Job::MigrationRequestPlcSignature` — PDS Aへ`requestPlcOperationSignature`を呼び、

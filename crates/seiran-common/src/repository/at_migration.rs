@@ -36,7 +36,7 @@ pub struct AtMigrationRequestRow {
     /// （同意した瞬間の site_settings.terms_of_service_text の文面そのもの）。
     /// `materialize_account`がアカウント確定時に`terms_of_service_agreements`へコピーする。
     pub agreed_tos_text: Option<String>,
-    /// 利用者の入力・選択待ち（[`INPUT_WAIT_STATUSES`]）に入った時刻。入力待ちでなければ
+    /// 利用者の入力・選択待ち（`INPUT_WAIT_STATUSES_SQL`）に入った時刻。入力待ちでなければ
     /// `None`。ここから [`INPUT_WAIT_EXPIRY_HOURS`] で打ち切る。
     pub input_wait_since: Option<DateTime<Utc>>,
     /// 入力待ちのまま期限が来て打ち切った時刻（`abandoned`）。利用者による打ち切りは `None`。
@@ -56,11 +56,11 @@ pub const INPUT_WAIT_WARNING_HOURS: i64 = 24;
 /// 入力待ちの転入を打ち切る（名前とメールの確保を解く）までの時間。
 pub const INPUT_WAIT_EXPIRY_HOURS: i64 = 48;
 
-/// 利用者の入力・選択を待つ状態。この状態に入った時刻から期限を数える。PLC 提出前の状態
-/// だけで、ジョブが動いている状態と DNS の公開待ち（利用者はやることを済ませている）は含めない。
-/// SQL 側（`input_wait_set` と打ち切り・案内の各文）にも同じ一覧を書いている。
-pub const INPUT_WAIT_STATUSES: [&str; 3] =
-    ["awaiting_source_password", "awaiting_plc_token", "failed"];
+/// 利用者の入力・選択を待つ状態（SQL の `IN` に使う一覧）。この状態に入った時刻から期限を
+/// 数える。PLC 提出前の状態だけで、ジョブが動いている状態と DNS の公開待ち（利用者はやることを
+/// 済ませている）は含めない。
+const INPUT_WAIT_STATUSES_SQL: &str =
+    "('awaiting_user_confirmation', 'awaiting_source_password', 'awaiting_plc_token', 'failed')";
 
 /// 状態を `new_status`（SQL 式）へ変える UPDATE に足す SET 句。入力待ちに入ったら時刻を記録し、
 /// 同じ入力待ちのままなら据え置き、入力待ちを抜けたら消す。案内メールの段階も入り直すたびに
@@ -68,7 +68,7 @@ pub const INPUT_WAIT_STATUSES: [&str; 3] =
 fn input_wait_set(new_status: &str) -> String {
     format!(
         "input_wait_since = CASE
-             WHEN {new_status}::text IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+             WHEN {new_status}::text IN {INPUT_WAIT_STATUSES_SQL}
                   AND plc_submitted_at IS NULL
              THEN CASE WHEN status = {new_status} THEN COALESCE(input_wait_since, NOW()) ELSE NOW() END
              ELSE NULL END,
@@ -809,13 +809,13 @@ pub struct ExpiredMigration {
 /// 再開リンクを解く。1文で行うので、利用者の入力（状態を条件にした遷移）と競合しても
 /// 片方だけが成立し、複数のプロセスが同時に実行しても同じ転入を二重に返さない。
 pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, sqlx::Error> {
-    sqlx::query_as(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "WITH r AS (
              UPDATE at_migration_requests
              SET status = 'abandoned', expired_at = NOW(), input_wait_since = NULL,
                  input_wait_mail_stage = 0, updated_at = NOW()
              WHERE input_wait_since < NOW() - make_interval(hours => $1)
-               AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
+               AND status IN {INPUT_WAIT_STATUSES_SQL}
                AND plc_submitted_at IS NULL
              RETURNING id, email, new_username
          ),
@@ -828,8 +828,8 @@ pub async fn expire_input_waits(pool: &PgPool) -> Result<Vec<ExpiredMigration>, 
              WHERE c.migration_request_id = r.id AND c.user_id IS NULL
          ),
          dt AS (DELETE FROM at_migration_resume_tokens t USING r WHERE t.request_id = r.id)
-         SELECT id, email, new_username FROM r",
-    )
+         SELECT id, email, new_username FROM r"
+    )))
     .bind(INPUT_WAIT_EXPIRY_HOURS as i32)
     .fetch_all(pool)
     .await
@@ -1156,12 +1156,12 @@ pub async fn consume_resume_token(
 /// 転入と、開始時刻を記録しない版のサーバーが入力待ちにした転入が対象で、見つけた時刻を
 /// 期限の起点にする（入力待ちに入った本来の時刻を使うと、案内も警告も無いまま打ち切られる）。
 pub async fn adopt_untracked_input_waits(pool: &PgPool) -> Result<(), sqlx::Error> {
-    sqlx::query(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE at_migration_requests
          SET input_wait_since = NOW(), input_wait_mail_stage = 0
          WHERE input_wait_since IS NULL AND plc_submitted_at IS NULL
-           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')",
-    )
+           AND status IN {INPUT_WAIT_STATUSES_SQL}"
+    )))
     .execute(pool)
     .await
     .map(|_| ())
@@ -1185,14 +1185,14 @@ pub async fn claim_input_wait_mails(
     stage: i16,
     min_age_hours: i64,
 ) -> Result<Vec<InputWaitMail>, sqlx::Error> {
-    sqlx::query_as(
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE at_migration_requests
          SET input_wait_mail_stage = $1
          WHERE input_wait_since <= NOW() - make_interval(hours => $2)
            AND input_wait_mail_stage < $1 AND email IS NOT NULL AND plc_submitted_at IS NULL
-           AND status IN ('awaiting_source_password', 'awaiting_plc_token', 'failed')
-         RETURNING id, status::text, email, new_username, input_wait_since",
-    )
+           AND status IN {INPUT_WAIT_STATUSES_SQL}
+         RETURNING id, status::text, email, new_username, input_wait_since"
+    )))
     .bind(stage)
     .bind(min_age_hours as i32)
     .fetch_all(pool)

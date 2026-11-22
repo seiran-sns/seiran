@@ -18,13 +18,14 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 `/register/migrate`（ログインカルーセルの「Blueskyから転入」パネル、`MigratePanel`）で移行元ハンドル・パスワードを入力すると開始する。以降は同じパネル内で「いま何を待っているか」の表示切り替えにより進行する（別画面への遷移はしない）。各ステップは入力欄0〜1個＋リトライボタンで構成される。
 
-1. `/register/migrate`でハンドル・パスワードを入力し送信
+1. `/register/migrate`でハンドル・パスワードを入力し送信。入力欄の上の「ℹ️ 転入とは？」（`MigrationInfoDialog`）で、Bluesky のアカウントはサーバー（PDS）間で引っ越せること、転入すると元のサーバーではログインできなくなること、フォロー関係・リプライのスレッド・メンションは保たれること、ハンドルが`@<ユーザー名>.<LocalDomain>`に変わることを説明する（元のアカウントが無効化される仕組みが伝わりにくいため）
 2. （PDS Aがメール2FAを要求する場合のみ）確認コード入力
 3. PDS Aのリポジトリ取得（自動、待機表示のみ）
-4. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
-5. `signPlcOperation`で署名済みの PLC 操作を得て保存し、`_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
-6. アカウントができた時点で通常のSNS画面へ（localStorageの転入トークンはここでクリアする）。取り込みは過去の投稿等を積み増すだけで今の利用には影響しないので、待たせない
-7. 取り込み（リポジトリの取り直し・レコード・blob）は裏で進む。状況は設定 > 🚚インポートの先頭に出し（`MigrationImportSection`、`GET /api/account/migration`、JWT で認可）、取り込みが続いている間はメニューの⚙️設定と🚚インポートに明滅する赤丸を付ける。「取り込みを打ち切る」（`POST /api/account/migration/abort-import`）で、再開できない旨の注意書きと確認の後に打ち切れる。取り終えるか打ち切ったら転入元を無効化して完了
+4. 最終確認（`awaiting_user_confirmation`）。「元のサーバーでのログインは無効化される」「ハンドルは @旧 から @新 に変わる」を赤く目立たせて表示し、利用者が「転入を進める」（`POST /api/migration/:id/confirm`）を押すまで確認コードを送らせない。旧ハンドルは`start`で転入元の`createSession`が返した正式なもの（入力欄の文字列ではない）、新ハンドルは`to_atp_username(new_username).LocalDomain`
+5. PLCオペレーション署名要求→PDS A登録メール宛の確認コード入力
+6. `signPlcOperation`で署名済みの PLC 操作を得て保存し、`_atproto` TXT の公開を確かめてから`submitPlcOperation`実行（★不可逆境界、後述）。その場で確定できれば応答で JWT が発行されログイン状態になる。DNS TXT の公開待ちが残った場合（Cloudflare の障害中など）は「公開待ち」を表示して`/status`をポーリングし、アカウントができたら`POST /api/migration/:id/session`（`X-Migration-Token`で認可）で JWT を受け取ってログインする
+7. アカウントができた時点で通常のSNS画面へ（localStorageの転入トークンはここでクリアする）。取り込みは過去の投稿等を積み増すだけで今の利用には影響しないので、待たせない
+8. 取り込み（リポジトリの取り直し・レコード・blob）は裏で進む。状況は設定 > 🚚インポートの先頭に出し（`MigrationImportSection`、`GET /api/account/migration`、JWT で認可）、取り込みが続いている間はメニューの⚙️設定と🚚インポートに明滅する赤丸を付ける。「取り込みを打ち切る」（`POST /api/account/migration/abort-import`）で、再開できない旨の注意書きと確認の後に打ち切れる。取り終えるか打ち切ったら転入元を無効化して完了
 
 途中で画面を離れても、次のどちらかで続きに戻れる（4節「途中の転入への復帰」）。
 
@@ -41,6 +42,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 |---|---|---|
 | `awaiting_source_2fa` | PDS Aがメール2FAを要求、`authFactorToken`待ち | ユーザー入力待ち |
 | `fetching_repo` | `getRepo`(CAR)+`listBlobs`取得中 | `Job::MigrationFetchRepo` |
+| `awaiting_user_confirmation` | 最終確認待ち（元のサーバーでのログインが無効化されること・ハンドルが変わることを見せる）。`POST /api/migration/:id/confirm`で`requesting_plc_signature`へ進み、確認コード送付のジョブを積む | ユーザー入力待ち |
 | `requesting_plc_signature` | `requestPlcOperationSignature`呼び出し中 | `Job::MigrationRequestPlcSignature` |
 | `awaiting_source_password` | 移行元にアプリパスワードでログインしていて PLC 操作に署名させられない。本来のパスワードの入れ直し待ち。入力されたら`POST /api/migration/:id/submit-source-password`が DID を識別子に`createSession`をやり直し（メール2FAを求められたら`start`と同じく`AUTH_FACTOR_TOKEN_REQUIRED`で確認コードを足して再送）、新しいセッションを保存して`requesting_plc_signature`へ戻す | ユーザー入力待ち |
 | `awaiting_plc_token` | PDS Aメールの確認コード入力待ち。コードは PDS A 側で15分で切れるので、転入画面の「確認コードを送り直す」（`POST /api/migration/:id/resend-plc-token`）で`requesting_plc_signature`へ戻して送り直せる | ユーザー入力待ち |
@@ -87,7 +89,7 @@ PDS Aがメールを返さない場合（app password での`createSession`応�
 
 ### 入力待ちの期限と案内メール
 
-利用者の入力・選択を待つ状態（`awaiting_source_password`・`awaiting_plc_token`・`failed`、いずれも PLC 提出前）に入った時刻を`input_wait_since`に記録し、そこから時間を数える。ジョブが動いている状態と`awaiting_dns_txt`（利用者はやることを済ませている）は数えない。PLC 提出後の未完了の転入は、名前を手放すと DID だけが移った状態を自分から作ることになるので、期限なしで確保し続ける。
+利用者の入力・選択を待つ状態（`awaiting_user_confirmation`・`awaiting_source_password`・`awaiting_plc_token`・`failed`、いずれも PLC 提出前）に入った時刻を`input_wait_since`に記録し、そこから時間を数える。ジョブが動いている状態と`awaiting_dns_txt`（利用者はやることを済ませている）は数えない。PLC 提出後の未完了の転入は、名前を手放すと DID だけが移った状態を自分から作ることになるので、期限なしで確保し続ける。
 
 | 経過 | 処理 |
 |---|---|
