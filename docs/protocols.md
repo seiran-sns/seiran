@@ -197,7 +197,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
   - `did_resolve.rs` — サービス間認証 JWT 検証用の DID 解決
   - `service_auth.rs` — 外部サービス呼び出し用の自己署名 JWT（ES256、low-S 正規化必須）
 - `seiran-atp-repo::firehose` — Jetstream クライアント
-- `seiran-api::handlers::xrpc::{repo,server,sync}` — repo: `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`、server: `describeServer`/`resolveHandle`/セッション・アプリパスワード系、sync: `getRepo`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`getRepoStatus`/`subscribeRepos`
+- `seiran-api::handlers::xrpc::{repo,server,sync}` — repo: `getRecord`/`listRecords`/`describeRepo`/`uploadBlob`、server: `describeServer`/`resolveHandle`/セッション・アプリパスワード系、sync: `getRepo`/`getRecord`/`getBlob`/`listBlobs`/`listRepos`/`getLatestCommit`/`getRepoStatus`/`subscribeRepos`
 
 ローカルユーザーの投稿は `AtpCommitService` がジョブキューを介さず直接コミットし、`atp_repo_events` に記録して、公式 Relay（`bsky.network`）へ `requestCrawl` を送る。`requestCrawl` の `hostname` は確定済みの自ホストドメイン（`LocalDomain`）で、`.env` の `LOCAL_DOMAIN` は見ない（初回セットアップの `Host` ヘッダーで確定したインストールは `LOCAL_DOMAIN` を持たない）。ドメインが未確定（初回セットアップ前・シングルホストモード）の間は、コミット時・起動時（`spawn_startup_tasks`）とも送らない。起動時は `requestCrawl` の前に、各 Relay へ `com.atproto.sync.getRepoStatus` でローカルアカウント（退会・凍結・DID 転出済みを除く）を1件ずつ問い合わせ、`RepoNotFound` だったものにだけ、Relay の接続を待ってから `#identity` を送り直す。Relay はアカウントを、知らない DID のイベントを受け取ったときにしか作らない。そのため、Relay に発見される前にイベントを出し終えたアカウント（`requestCrawl` が届かなかった・Relay 側でホストが作り直された・Relay を追加した等）は、これが無いと次にイベントを出すまで bsky.app に現れない。`getHostStatus` の `accountCount` は消えたアカウントも数えるので、判定には使わない。
 
@@ -242,6 +242,7 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `sync.listRepos` — `at_did` を持つアクターを id 順に返す。
 - `sync.getLatestCommit` — `at_repo_cid`/`at_repo_rev`。
 - `sync.getRepoStatus` — `active`/`status`/`rev`。状態は firehose の `#account` と揃え、退会は `deleted`、DID転出（`did_moved_out_at`）は `deactivated`。凍結は `#account` を流していない（解除を伝える手段が無い）ので active のまま返す。稼働中のときだけ `rev` を付ける。ローカルのリポジトリを持たない DID は 400 `RepoNotFound`。
+- `sync.getRecord` — `did`+`collection`+`rkey` のレコード1件を、署名付きコミットからそのレコードまでの MST の経路と一緒に CAR（`application/vnd.ipld.car`、root はコミットの CID）で返す。中身はコミット・ルートからキーまでに通る MST ノード・レコード本体（参照実装の `MST.cidsForPath` と同じ）。取得した側は `getRepo` でリポジトリ全体を落とさずに、DID の署名鍵でレコードを検証できる。レコードが無いときも、無いことを示す経路（キーが入るはずの部分木までのノード）を返す。ノードは `atp_blocks` から1段ずつ読む（`atp::mst_walk::mst_path_step`）。ローカルのリポジトリを持たない DID は `getRepoStatus` と同じく 400 `RepoNotFound`、退会済みも `RepoNotFound`、凍結中は `RepoTakendown`、DID 転出済みは `RepoDeactivated`（参照実装の `assertRepoAvailability` と同じ名前）。
 - `sync.listBlobs` — その DID がアップロードした `media_files` の CID。CID は保持せず `sha256` から再構築する（`cid_from_sha256_hex`）。
 
 ### postgate・getTrends のスタブ応答
