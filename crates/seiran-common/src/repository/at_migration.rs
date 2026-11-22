@@ -1433,22 +1433,44 @@ pub async fn blob_attempts(pool: &PgPool, blob_id: i64) -> Result<i32, sqlx::Err
         .await
 }
 
-/// ジョブが進める状態（取り込み以外）のまま `older_than_secs` 秒以上更新の無い転入の
-/// (id, status)。ジョブが何かの理由で消えていても、積み直せば進むようにするため。
-/// 取り込み（`importing_data`/`importing_blobs`）は、ジョブが自分を積み直しながら進むので
-/// 外から積むと連鎖が増えうるため含めない。
+/// 止まっているかもしれない転入の (id, status)。ジョブが何かの理由で消えていても、積み直せば
+/// 進むようにするため。
+/// - ジョブが進める状態（取り込み以外）: `older_than_secs` 秒以上更新が無いもの。
+/// - 取り込み（`importing_data`/`importing_blobs`）: 次に動く予定の時刻（`import_next_run_at`。
+///   一度も動いていなければ状態が変わった時刻）を `import_grace_secs` 秒過ぎても動いていない
+///   もの。取り込みのジョブは自分を積み直しながら進むので、予定どおり動いている連鎖に外から
+///   積むと連鎖が2本になる。キューの混雑で待たされているだけの連鎖に手を出さないよう、猶予を
+///   長めに取る。
 pub async fn list_stalled_job_migrations(
     pool: &PgPool,
     older_than_secs: i64,
+    import_grace_secs: i64,
 ) -> Result<Vec<(i64, String)>, sqlx::Error> {
     sqlx::query_as(
         "SELECT id, status::text FROM at_migration_requests
-         WHERE status IN ('fetching_repo', 'requesting_plc_signature', 'deactivating_source')
-           AND updated_at < NOW() - make_interval(secs => $1)",
+         WHERE (status IN ('fetching_repo', 'requesting_plc_signature', 'deactivating_source')
+                AND updated_at < NOW() - make_interval(secs => $1))
+            OR (status IN ('importing_data', 'importing_blobs')
+                AND COALESCE(import_next_run_at, updated_at) < NOW() - make_interval(secs => $2))",
     )
     .bind(older_than_secs as f64)
+    .bind(import_grace_secs as f64)
     .fetch_all(pool)
     .await
+}
+
+/// 取り込みのジョブが次に動く予定の時刻を記録する。
+pub async fn set_import_next_run_at(
+    pool: &PgPool,
+    id: i64,
+    at: DateTime<Utc>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("UPDATE at_migration_requests SET import_next_run_at = $2 WHERE id = $1")
+        .bind(id)
+        .bind(at)
+        .execute(pool)
+        .await
+        .map(|_| ())
 }
 
 /// 転入で取り込んだプロフィール（`app.bsky.actor.profile/self`）のステージング済みの中身

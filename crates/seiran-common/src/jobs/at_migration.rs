@@ -361,6 +361,32 @@ pub async fn handle_import_process(request_id: i64, ctx: Arc<JobContext>) -> Res
 
     crate::advisory_lock::release(lock_conn, request_id).await;
 
+    // 続きを積むときだけ、次に動く予定を残す。予定を過ぎても動いていなければ、連鎖が途切れた
+    // （積んだジョブが失われた）とみなして定期処理が積み直す（`list_stalled_job_migrations`）。
+    // 止まるとき（`Stop`）は書かない: 知らない状態を見て止まった場合（自分より新しい版が足した
+    // 状態を、無停止更新の間に拾ったとき）にも予定を消してしまうため。取り込みを終えたかは
+    // 状態で分かる（取り込み以外へ進めば積み直しの対象にならない）。
+    let next_run_at = match &result {
+        Ok(ImportNextAction::Continue) => Some(chrono::Utc::now()),
+        Ok(ImportNextAction::RetryAfter(delay)) => Some(
+            chrono::Utc::now()
+                + chrono::Duration::from_std(*delay).unwrap_or_else(|_| chrono::Duration::zero()),
+        ),
+        Ok(ImportNextAction::Stop) | Err(_) => None,
+    };
+    if let Some(next_run_at) = next_run_at {
+        if let Err(e) =
+            crate::repository::at_migration::set_import_next_run_at(pool, request_id, next_run_at)
+                .await
+        {
+            tracing::warn!(
+                "[MigrationImportProcess] request_id={} 次の予定の記録失敗: {}",
+                request_id,
+                e
+            );
+        }
+    }
+
     match result? {
         ImportNextAction::Continue => {
             if let Err(e) = ctx

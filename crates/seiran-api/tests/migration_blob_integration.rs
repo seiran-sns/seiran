@@ -280,3 +280,68 @@ async fn imported_profile_is_applied_only_while_unchanged() {
         .unwrap();
     assert_eq!(name.as_deref(), Some("Edited on seiran"));
 }
+
+/// 取り込み中の転入は、次に動く予定（一度も動いていなければ状態が変わった時刻）を猶予以上
+/// 過ぎたものだけが積み直しの対象になる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn stalled_import_chains_are_listed_by_next_run() {
+    let pool = test_db_pool().await;
+    let id = migration_with_blobs(&pool, &[]).await; // importing_data
+    let listed = |rows: Vec<(i64, String)>| rows.iter().any(|(r, _)| *r == id);
+
+    // 予定がまだ先なら対象外。
+    at_migration::set_import_next_run_at(
+        &pool,
+        id,
+        chrono::Utc::now() + chrono::Duration::minutes(5),
+    )
+    .await
+    .unwrap();
+    assert!(!listed(
+        at_migration::list_stalled_job_migrations(&pool, 180, 600)
+            .await
+            .unwrap()
+    ));
+
+    // 予定を猶予以上過ぎていれば対象。
+    at_migration::set_import_next_run_at(
+        &pool,
+        id,
+        chrono::Utc::now() - chrono::Duration::minutes(11),
+    )
+    .await
+    .unwrap();
+    assert!(listed(
+        at_migration::list_stalled_job_migrations(&pool, 180, 600)
+            .await
+            .unwrap()
+    ));
+
+    // 一度も動いていない（NULL）なら、状態が変わった時刻から数える。
+    sqlx::query(
+        "UPDATE at_migration_requests
+         SET import_next_run_at = NULL, updated_at = NOW() WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(!listed(
+        at_migration::list_stalled_job_migrations(&pool, 180, 600)
+            .await
+            .unwrap()
+    ));
+    sqlx::query(
+        "UPDATE at_migration_requests SET updated_at = NOW() - interval '11 minutes' WHERE id = $1",
+    )
+    .bind(id)
+    .execute(&pool)
+    .await
+    .unwrap();
+    assert!(listed(
+        at_migration::list_stalled_job_migrations(&pool, 180, 600)
+            .await
+            .unwrap()
+    ));
+}

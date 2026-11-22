@@ -1715,22 +1715,29 @@ pub fn spawn_gc_tasks(state: &AppState) {
     });
 }
 
-/// ジョブが進める状態（リポジトリ取得・確認コード送付の要求・転入元の無効化）のまま
-/// 止まっている DID 転入のジョブを積み直す（`docs/account_migration.md` 3節）。止まっているか
-/// どうかは経過時間でなくジョブのロックが見分ける: 取得に時間がかかっているだけなら、進行中の
-/// ジョブが `request_id` のロックを握っているので、積み直したジョブは何もせずに終わる。
-/// ジョブが消えていればロックは空いていて、積み直したジョブが続きを進める（転入元の無効化は
-/// ロックを使わないが、二重に動いても同じ結果になる）。
+/// 止まっている DID 転入のジョブを積み直す（`docs/account_migration.md` 3節）。
+/// - リポジトリ取得・確認コード送付の要求・転入元の無効化: 止まっているかどうかは経過時間で
+///   なくジョブのロックが見分ける。取得に時間がかかっているだけなら、進行中のジョブが
+///   `request_id` のロックを握っているので、積み直したジョブは何もせずに終わる。ジョブが
+///   消えていればロックは空いていて、積み直したジョブが続きを進める（転入元の無効化は
+///   ロックを使わないが、二重に動いても同じ結果になる）。
+/// - 取り込み: ジョブが自分を積み直しながら進むので、次に動く予定（`import_next_run_at`）を
+///   過ぎても動いていない連鎖だけを積み直す。
 async fn requeue_stalled_migration_jobs(state: &AppState) {
     use seiran_common::repository::at_migration as repo;
-    let stalled =
-        match repo::list_stalled_job_migrations(&state.db, MIGRATION_JOB_REQUEUE_SECS).await {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!("[migration-requeue] 止まった転入の取得に失敗: {}", e);
-                return;
-            }
-        };
+    let stalled = match repo::list_stalled_job_migrations(
+        &state.db,
+        MIGRATION_JOB_REQUEUE_SECS,
+        MIGRATION_IMPORT_GRACE_SECS,
+    )
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("[migration-requeue] 止まった転入の取得に失敗: {}", e);
+            return;
+        }
+    };
     for (request_id, status) in stalled {
         match status.as_str() {
             "fetching_repo" => state.enqueue_migration_fetch_repo(request_id).await,
@@ -1740,6 +1747,9 @@ async fn requeue_stalled_migration_jobs(state: &AppState) {
                     .await
             }
             "deactivating_source" => state.enqueue_migration_deactivate_source(request_id).await,
+            "importing_data" | "importing_blobs" => {
+                state.enqueue_migration_import_process(request_id).await
+            }
             _ => {}
         }
     }
@@ -1747,6 +1757,10 @@ async fn requeue_stalled_migration_jobs(state: &AppState) {
 
 /// 止まった DID 転入のジョブを積み直す間隔と、対象にする「更新の無い時間」。
 const MIGRATION_JOB_REQUEUE_SECS: i64 = 180;
+/// 取り込みのジョブが次に動く予定をこれだけ過ぎても動いていなければ、連鎖が途切れたとみなす。
+/// キューの混雑で低い優先度のジョブが待たされているだけの連鎖に積んで、連鎖を2本にしないよう
+/// 長めに取る（2本になっても、同時に動いてロックを取れなかった方が終わるので1本に戻る）。
+const MIGRATION_IMPORT_GRACE_SECS: i64 = 600;
 
 /// DID 転入の入力待ちを1巡する。打ち切りを先に、次に警告、最後に案内の順で処理する
 /// （24時間を過ぎてから見つかった入力待ちには、案内ではなく警告だけを送るため）。
