@@ -102,5 +102,7 @@
   "EMOJI_IMPORT_NOT_RUNNING": "No hay ninguna importación de emojis en curso",
   "ZIP_FILE_REQUIRED": "No se incluyó ningún archivo ZIP",
   "MIGRATION_EXPIRED": "Esta migración se canceló porque el plazo venció sin tu respuesta. Vuelve a empezar la migración desde el principio",
-  "MIGRATION_RESUME_TOKEN_INVALID": "Este enlace no se puede usar (ya se usó o caducó). Puedes volver introduciendo en la pantalla de inicio de sesión el nombre de usuario y la contraseña que elegiste al empezar la migración"
+  "MIGRATION_RESUME_TOKEN_INVALID": "Este enlace no se puede usar (ya se usó o caducó). Puedes volver introduciendo en la pantalla de inicio de sesión el nombre de usuario y la contraseña que elegiste al empezar la migración",
+  "PLC_TOKEN_EXPIRED": "El código de confirmación ha caducado (es válido durante 15 minutos). Usa «Reenviar el código» para obtener uno nuevo",
+  "PLC_TOKEN_INVALID": "El código de confirmación no es correcto. Introduce el código del correo más reciente de tu servidor anterior"
 }

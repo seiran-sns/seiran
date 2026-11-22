@@ -102,5 +102,7 @@
   "EMOJI_IMPORT_NOT_RUNNING": "没有正在进行的表情导入",
   "ZIP_FILE_REQUIRED": "未包含 ZIP 文件",
   "MIGRATION_EXPIRED": "由于期限已过且未收到你的输入，此迁移已被取消。请从头开始迁移",
-  "MIGRATION_RESUME_TOKEN_INVALID": "此链接无法使用（已使用或已过期）。在登录页面输入开始迁移时设定的用户名和密码即可返回"
+  "MIGRATION_RESUME_TOKEN_INVALID": "此链接无法使用（已使用或已过期）。在登录页面输入开始迁移时设定的用户名和密码即可返回",
+  "PLC_TOKEN_EXPIRED": "确认码已过期（有效期 15 分钟）。请使用“重新发送验证码”获取新的确认码",
+  "PLC_TOKEN_INVALID": "确认码不正确。请输入原服务器最新邮件中的确认码"
 }

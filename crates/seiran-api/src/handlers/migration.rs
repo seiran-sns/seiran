@@ -351,8 +351,10 @@ async fn account_auth_response(state: &AppState, id: i64) -> Result<AuthResponse
         migration_req.actor_id,
         migration_req.email.clone(),
     ) else {
+        // 転入が失敗の状態で終わっている（PLC が拒まれた・名前が使われていた等）。中継先の
+        // 一時的な失敗ではなく、この転入の結果なので 4xx で返す。
         if migration_req.status == "failed" {
-            return Err(ApiError::BadGateway("PLC_SUBMIT_FAILED".into()));
+            return Err(ApiError::Conflict("PLC_SUBMIT_FAILED"));
         }
         return Err(ApiError::Conflict("ACCOUNT_NOT_READY"));
     };
@@ -442,30 +444,40 @@ async fn stage_plc_operation(
 
     // メールのトークンを入力するまでに accessJwt が切れていることがある（期限切れで
     // 拒まれた呼び出しではトークンは消費されないので、更新してやり直せる）。
-    let operation = seiran_common::atp::migration_session::call_with_refresh(
-        &state.db,
-        id,
-        &resolved,
-        &mut session,
-        |s| {
-            let (resolved, desired) = (&resolved, &desired);
-            async move {
-                seiran_common::atp::migration_client::sign_plc_operation(
-                    resolved, &s, plc_token, desired,
-                )
-                .await
-            }
-        },
-    )
-    .await
-    .map_err(|e| {
-        tracing::warn!(
-            "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+    let operation =
+        seiran_common::atp::migration_session::call_with_refresh(
+            &state.db,
             id,
-            e
-        );
-        ApiError::BadGateway("PLC_SIGN_FAILED".into())
-    })?;
+            &resolved,
+            &mut session,
+            |s| {
+                let (resolved, desired) = (&resolved, &desired);
+                async move {
+                    seiran_common::atp::migration_client::sign_plc_operation(
+                        resolved, &s, plc_token, desired,
+                    )
+                    .await
+                }
+            },
+        )
+        .await
+        .map_err(|e| {
+            tracing::warn!(
+                "[migration:submit-plc-token] signPlcOperation失敗 (request_id={}): {}",
+                id,
+                e
+            );
+            // `call_with_refresh` はセッションを更新して送り直した後なので、ここでまだ
+            // `ExpiredToken` なのはメールの確認コード（15分）の期限切れ。転入元はセッションの
+            // 期限切れと同じコードで返す。
+            match &e {
+                e if e.is_expired_token() => ApiError::BadRequest("PLC_TOKEN_EXPIRED".into()),
+                seiran_common::atp::migration_client::MigrationClientError::Xrpc {
+                    code, ..
+                } if code == "InvalidToken" => ApiError::BadRequest("PLC_TOKEN_INVALID".into()),
+                _ => ApiError::BadGateway("PLC_SIGN_FAILED".into()),
+            }
+        })?;
 
     let staged = seiran_common::repository::at_migration::stage_plc_operation(
         &state.db,
