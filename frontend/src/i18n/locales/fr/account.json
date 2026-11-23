@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "Préférence de langue enregistrée.",
     "quickReactionsTitle": "Barre de réactions rapides",
-    "quickReactionsLabel": "Afficher la barre de réactions rapides avec vos emojis fréquents"
+    "quickReactionsLabel": "Afficher la barre de réactions rapides avec vos emojis fréquents",
+    "deviceGroupTitle": "Réglages pour cet appareil uniquement",
+    "dataSaverTitle": "Mode économie de données",
+    "dataSaverLabel": "Ne pas charger les images et vidéos des publications avant de les toucher"
   },
   "privacySettings": {
     "title": "Paramètres de confidentialité",

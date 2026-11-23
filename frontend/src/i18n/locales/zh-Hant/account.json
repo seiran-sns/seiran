@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "已儲存語言偏好設定。",
     "quickReactionsTitle": "一鍵回應列",
-    "quickReactionsLabel": "顯示常用表情符號的一鍵回應列"
+    "quickReactionsLabel": "顯示常用表情符號的一鍵回應列",
+    "deviceGroupTitle": "僅限此裝置的設定",
+    "dataSaverTitle": "流量節省模式",
+    "dataSaverLabel": "貼文中的圖片和影片在點擊前不載入"
   },
   "privacySettings": {
     "title": "隱私設定",

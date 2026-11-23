@@ -7,6 +7,8 @@ import HlsVideo from "./HlsVideo";
 import styles from "./NoteCard.module.css";
 import { mediaSources } from "../../utils/mediaProxy";
 import RemoteImg from "../common/RemoteImg";
+import { useDataSaver } from "../../stores/dataSaverStore";
+import { blurhashToDataUrl } from "../../lib/blurhashPreview";
 
 interface NoteAttachmentsProps {
   attachments?: NoteAttachment[];
@@ -102,6 +104,29 @@ function naturalSizeVars(att: NoteAttachment): CSSProperties {
   } as CSSProperties;
 }
 
+/** ギガ節約モードで、読み込む前の添付に敷く背景。blurhash があればそのぼかし、無ければ無地。 */
+function placeholderBackground(att: NoteAttachment): CSSProperties {
+  const dataUrl = att.blurhash ? blurhashToDataUrl(att.blurhash) : null;
+  return dataUrl ? { backgroundImage: `url(${dataUrl})` } : {};
+}
+
+/** NSFW 指定の画像に常に重ねる印（ぼかし中・ぼかし解除後・ギガ節約モードの読み込み前のどれでも）。
+ * ぼかしを外したあとや、元から blurhash のぼかししか見えない読み込み前でも、NSFW 指定だと分かるように。
+ * 投稿画面の NSFW 切り替えボタンと同じ表記。押せない（クリックは下の画像へ通す）。 */
+function NsfwMarker() {
+  return (
+    <span className={styles.nsfwMarker} aria-hidden>
+      <TwemojiEmoji emoji="🙈" />
+      NSFW
+    </span>
+  );
+}
+
+/** 実寸の縦横比。実寸が不明（リモート添付は0）なら undefined。 */
+function aspectRatio(att: NoteAttachment): number | undefined {
+  return att.width > 0 && att.height > 0 ? att.width / att.height : undefined;
+}
+
 /** 投稿に添付されたメディア（画像/動画/HLS/音声）一覧の表示。
  *
  * 画像は動画/音声を境目にブロック分割し、ブロック内の枚数（1/2/3/4枚以上）に応じて
@@ -110,16 +135,41 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
   const { t } = useTranslation();
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   const [revealed, setRevealed] = useState<Set<number>>(() => new Set());
+  const dataSaver = useDataSaver();
+  // ギガ節約モードで、クリックして読み込んだ添付（`attachments` 内の位置）。一度読み込んだものは
+  // モードを切り替えても読み込み済みのまま（通信は済んでいるので、隠し直す意味が無い）。
+  const [loaded, setLoaded] = useState<Set<number>>(() => new Set());
 
   if (!attachments || attachments.length === 0) return null;
 
   const images = attachments.filter(isImage);
   const blocks = buildBlocks(attachments);
+  const isLoaded = (index: number) => !dataSaver || loaded.has(index);
+  const imageLoaded = (imageIndex: number) => isLoaded(attachments.indexOf(images[imageIndex]));
+
+  /** ライトボックスで前後に移れる画像の位置。ギガ節約モードでは読み込み済みの画像だけを辿る
+   * （隣の画像は先読みのため常に描画されるので、未読み込みの画像を隣に置くと読み込んでしまう）。 */
+  function neighborIndex(from: number, step: -1 | 1): number | undefined {
+    for (let i = from + step; i >= 0 && i < images.length; i += step) {
+      if (imageLoaded(i)) return i;
+    }
+    return undefined;
+  }
 
   /** ライトボックスでスワイプ中に隣に見せる画像。範囲外なら undefined。 */
-  function lightboxImage(imageIndex: number): LightboxNeighbor | undefined {
-    const att = images[imageIndex];
+  function lightboxImage(imageIndex: number | undefined): LightboxNeighbor | undefined {
+    const att = imageIndex === undefined ? undefined : images[imageIndex];
     return att ? { src: att.url, sensitive: att.isSensitive } : undefined;
+  }
+
+  function lightboxNavigation(step: -1 | 1): (() => void) | undefined {
+    if (lightboxIndex === null) return undefined;
+    const target = neighborIndex(lightboxIndex, step);
+    return target === undefined ? undefined : () => setLightboxIndex(target);
+  }
+
+  function load(index: number) {
+    setLoaded((current) => new Set(current).add(index));
   }
 
   function reveal(index: number) {
@@ -147,6 +197,34 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
     const { attachment: att, index } = item;
     const isRevealed = revealed.has(index);
     const imageIndex = images.indexOf(att);
+    if (!isLoaded(index)) {
+      // 1枚ブロックだけはタイルの高さが画像で決まるので、実寸の縦横比で場所を取っておく。
+      const single = cellClassName === styles.imgCellSingle;
+      return (
+        <div key={index} className={cellClassName} style={radius}>
+          <button
+            type="button"
+            className={`${styles.dataSaverPlaceholder} ${single ? styles.dataSaverPlaceholderSingle : ""}`}
+            style={{
+              ...placeholderBackground(att),
+              ...(single ? { aspectRatio: aspectRatio(att) ?? 16 / 9 } : {}),
+            }}
+            aria-label={t("common:dataSaverLoadImage")}
+            onClick={(e) => {
+              e.stopPropagation();
+              // NSFW の画像も、読み込むために押した時点で見せる（もう一度👀を押させない）。
+              load(index);
+              reveal(index);
+            }}
+          >
+            <span className={styles.dataSaverBadge}>
+              <TwemojiEmoji emoji="🖼️" /> {t("common:dataSaverLoadImage")}
+            </span>
+          </button>
+          {att.isSensitive && <NsfwMarker />}
+        </div>
+      );
+    }
     return (
       <div key={index} className={cellClassName} style={radius}>
         <RemoteImg
@@ -176,6 +254,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
             <TwemojiEmoji emoji="👀" />
           </button>
         )}
+        {att.isSensitive && <NsfwMarker />}
       </div>
     );
   }
@@ -275,6 +354,25 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         const isHls =
           att.mimeType === "application/vnd.apple.mpegurl" ||
           att.mimeType === "application/x-mpegURL";
+        if ((att.mimeType.startsWith("video/") || isHls) && !isLoaded(index)) {
+          return (
+            <button
+              key={index}
+              type="button"
+              className={`${styles.dataSaverPlaceholder} ${styles.dataSaverPlaceholderVideo}`}
+              style={{ ...placeholderBackground(att), aspectRatio: aspectRatio(att) ?? 16 / 9 }}
+              aria-label={t("common:dataSaverLoadVideo")}
+              onClick={(e) => {
+                e.stopPropagation();
+                load(index);
+              }}
+            >
+              <span className={styles.dataSaverBadge}>
+                <TwemojiEmoji emoji="▶️" /> {t("common:dataSaverLoadVideo")}
+              </span>
+            </button>
+          );
+        }
         if (att.mimeType.startsWith("video/") || isHls) {
           // HLS(.m3u8)は `application/vnd.apple.mpegurl` が /proxy の許可Content-Type
           // （image/video/audio）に一致せず502になる上、プロキシ経由だとプレイリスト内の
@@ -289,6 +387,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
               poster={mediaSources(att.thumbnailUrl)[0]}
               isHls={isHls}
               isGif={att.isGif}
+              autoPlay={dataSaver}
               className={styles.attachMedia}
               onClick={(e) => e.stopPropagation()}
             />
@@ -311,18 +410,10 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
         src={lightboxIndex === null ? null : (images[lightboxIndex]?.url ?? null)}
         sensitive={lightboxIndex === null ? false : images[lightboxIndex]?.isSensitive}
         onClose={() => setLightboxIndex(null)}
-        previousImage={lightboxImage(lightboxIndex === null ? -1 : lightboxIndex - 1)}
-        nextImage={lightboxImage(lightboxIndex === null ? -1 : lightboxIndex + 1)}
-        onPrevious={
-          lightboxIndex !== null && lightboxIndex > 0
-            ? () => setLightboxIndex(lightboxIndex - 1)
-            : undefined
-        }
-        onNext={
-          lightboxIndex !== null && lightboxIndex < images.length - 1
-            ? () => setLightboxIndex(lightboxIndex + 1)
-            : undefined
-        }
+        previousImage={lightboxImage(lightboxIndex === null ? undefined : neighborIndex(lightboxIndex, -1))}
+        nextImage={lightboxImage(lightboxIndex === null ? undefined : neighborIndex(lightboxIndex, 1))}
+        onPrevious={lightboxNavigation(-1)}
+        onNext={lightboxNavigation(1)}
       />
     </div>
   );

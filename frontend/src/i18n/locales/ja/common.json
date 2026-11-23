@@ -58,5 +58,7 @@
     "admins": "管理者",
     "contact": "問い合わせ先",
     "termsOfService": "利用規約"
-  }
+  },
+  "dataSaverLoadImage": "画像を読み込む",
+  "dataSaverLoadVideo": "動画を読み込む"
 }
