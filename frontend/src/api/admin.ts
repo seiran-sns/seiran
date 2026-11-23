@@ -40,6 +40,14 @@ export const admin = {
       `/admin/reports/${encodeURIComponent(id)}/suspend-user`,
     );
   },
+  /** 通報対象のローカルユーザーを制限（silence）・隔離（quarantine）へ下げる。 */
+  restrictReportedUser(id: string, role: "silence" | "quarantine") {
+    return request<void>(
+      "POST",
+      `/admin/reports/${encodeURIComponent(id)}/restrict-user`,
+      { role },
+    );
+  },
   forwardReport(id: string) {
     return request<void>(
       "POST",

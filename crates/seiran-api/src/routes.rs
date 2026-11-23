@@ -212,6 +212,10 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             post(handlers::admin::reports::suspend_subject),
         )
         .route(
+            "/api/admin/reports/:id/restrict-user",
+            post(handlers::admin::reports::restrict_subject),
+        )
+        .route(
             "/api/admin/reports/:id/forward",
             post(handlers::admin::reports::forward_report),
         )

@@ -29,6 +29,8 @@ pub struct ReportResponse {
     pub closed_at: Option<DateTime<Utc>>,
     pub created_at: DateTime<Utc>,
     pub subject_suspended: bool,
+    /// 通報対象がローカルユーザーならそのロール（リモートは `null`）。
+    pub subject_role: Option<String>,
 }
 
 impl From<ReportRow> for ReportResponse {
@@ -50,6 +52,7 @@ impl From<ReportRow> for ReportResponse {
             closed_at: r.closed_at,
             created_at: r.created_at,
             subject_suspended: r.subject_suspended,
+            subject_role: r.subject_role,
         }
     }
 }
@@ -181,6 +184,34 @@ pub async fn suspend_subject(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RestrictRequest {
+    /// `silence`（制限）か `quarantine`（隔離）。
+    pub role: String,
+}
+
+/// 通報対象のローカルユーザーを制限（silence）・隔離（quarantine）へ下げる。既にそれ以下なら
+/// 何もせず成功にする（画面が古くても同じ結果になるため）。
+pub async fn restrict_subject(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<RestrictRequest>,
+) -> Result<StatusCode, ApiError> {
+    if !matches!(req.role.as_str(), "silence" | "quarantine") {
+        return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
+    }
+    match report::lower_subject_role(&state.db, id, &req.role)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        report::LowerRoleOutcome::Lowered | report::LowerRoleOutcome::AlreadyLower => {
+            Ok(StatusCode::NO_CONTENT)
+        }
+        report::LowerRoleOutcome::Privileged => Err(ApiError::Forbidden("SUBJECT_IS_PRIVILEGED")),
+        report::LowerRoleOutcome::NotLocal => Err(ApiError::NotFound("LOCAL_SUBJECT_NOT_FOUND")),
+    }
 }
 
 pub async fn forward_report(

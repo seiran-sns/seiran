@@ -22,6 +22,8 @@ pub struct ReportRow {
     pub created_at: DateTime<Utc>,
     /// 通報対象のアクターが凍結済みか。
     pub subject_suspended: bool,
+    /// 通報対象がローカルユーザーならそのロール（リモートは `None`）。
+    pub subject_role: Option<String>,
 }
 
 pub struct NewReport<'a> {
@@ -64,8 +66,9 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ReportRow>, sqlx::Error> {
          r.subject_type::text subject_type,r.subject_actor_id,concat(sa.username,'@',sa.domain) subject,\
          r.subject_post_id,r.reason_type,r.reason_text,r.destination::text destination,r.remote_host,\
          r.status::text status,r.forwarded_at,r.closed_at,r.created_at,\
-         (sa.suspended_at IS NOT NULL) AS subject_suspended FROM reports r \
+         (sa.suspended_at IS NOT NULL) AS subject_suspended,su.role::text subject_role FROM reports r \
          JOIN actors ra ON ra.id=r.reporter_actor_id JOIN actors sa ON sa.id=r.subject_actor_id \
+         LEFT JOIN users su ON su.id=sa.user_id \
          ORDER BY (r.status='open') DESC,r.created_at DESC",
     )
     .fetch_all(pool)
@@ -131,6 +134,58 @@ pub async fn delete_subject_post(pool: &PgPool, report_id: i64) -> Result<bool, 
     .execute(pool)
     .await?;
     Ok(done.rows_affected() > 0)
+}
+
+/// 通報対象のローカルユーザーのロールを `role`（`silence` か `quarantine`）へ下げる。
+///
+/// 下げるのは `user`・`emoji-editor` と、`quarantine` へ下げるときの `silence` だけ。
+/// admin・moderator は通報の処理では変えない（moderator が admin や他の moderator を下げられて
+/// しまうため。ユーザー管理で admin が変える）。既に `role` 以下なら何もしない。
+pub async fn lower_subject_role(
+    pool: &PgPool,
+    report_id: i64,
+    role: &str,
+) -> Result<LowerRoleOutcome, sqlx::Error> {
+    let lowerable: &[&str] = if role == "quarantine" {
+        &["user", "emoji-editor", "silence"]
+    } else {
+        &["user", "emoji-editor"]
+    };
+    // 1文で「対象を引く・今のロールを確かめる・下げる」を済ませ、結果を返す。
+    let row: Option<(Option<String>, bool)> = sqlx::query_as(
+        "WITH target AS (\
+           SELECT u.id, u.role::text AS role FROM reports r \
+           JOIN actors a ON a.id=r.subject_actor_id JOIN users u ON u.id=a.user_id \
+           WHERE r.id=$1 FOR UPDATE OF u), \
+         updated AS (\
+           UPDATE users u SET role=$2::user_role FROM target t \
+           WHERE u.id=t.id AND t.role=ANY($3) RETURNING u.id) \
+         SELECT (SELECT role FROM target), EXISTS (SELECT 1 FROM updated)",
+    )
+    .bind(report_id)
+    .bind(role)
+    .bind(lowerable)
+    .fetch_optional(pool)
+    .await?;
+    Ok(match row {
+        Some((Some(_), true)) => LowerRoleOutcome::Lowered,
+        Some((Some(current), false)) => match current.as_str() {
+            "admin" | "moderator" => LowerRoleOutcome::Privileged,
+            _ => LowerRoleOutcome::AlreadyLower,
+        },
+        _ => LowerRoleOutcome::NotLocal,
+    })
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LowerRoleOutcome {
+    Lowered,
+    /// 既に指定のロール以下だった。
+    AlreadyLower,
+    /// admin・moderator は通報の処理では下げない。
+    Privileged,
+    /// 通報が無いか、対象がリモートのアクター（ロールを持たない）。
+    NotLocal,
 }
 
 pub async fn subject_actor_id(pool: &PgPool, report_id: i64) -> Result<Option<i64>, sqlx::Error> {

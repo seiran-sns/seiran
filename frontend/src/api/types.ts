@@ -82,6 +82,8 @@ export interface AdminReport {
   created_at: string;
   /** 通報対象アクターが凍結済みか（#凍結リモート対応）。 */
   subject_suspended: boolean;
+  /** 通報対象がローカルユーザーならそのロール（リモートは null）。 */
+  subject_role: string | null;
 }
 export interface ReportComment {
   id: string;

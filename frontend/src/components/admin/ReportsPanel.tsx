@@ -13,6 +13,11 @@ import TwemojiEmoji from "../common/TwemojiEmoji";
 import TwemojiText from "../common/TwemojiText";
 import styles from "../../pages/Admin.module.css";
 
+/** 通報の処理で下げられるロール（admin・moderator はユーザー管理で変える）。 */
+const LOWERABLE_ROLES = new Set(["user", "emoji-editor", "silence", "quarantine"]);
+/** 制限（silence）以下のロール。 */
+const SILENCED_ROLES = new Set(["silence", "quarantine"]);
+
 export default function ReportsPanel() {
   const { t } = useTranslation();
   const { showError } = useToast();
@@ -161,6 +166,40 @@ export default function ReportsPanel() {
               >
                 {t("admin:reports.deletePostButton")}
               </button>
+            )}
+            {r.subject_role && LOWERABLE_ROLES.has(r.subject_role) && (
+              <>
+                {SILENCED_ROLES.has(r.subject_role) ? (
+                  <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+                    {t("admin:reports.silencedBadge")}
+                  </span>
+                ) : (
+                  <button
+                    className={styles.btnDanger}
+                    onClick={() =>
+                      act(() => api.admin.restrictReportedUser(r.id, "silence"))
+                    }
+                  >
+                    {t("admin:reports.silenceUserButton")}
+                  </button>
+                )}
+                {r.subject_role === "quarantine" ? (
+                  <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+                    {t("admin:reports.quarantinedBadge")}
+                  </span>
+                ) : (
+                  <button
+                    className={styles.btnDanger}
+                    onClick={() =>
+                      act(() =>
+                        api.admin.restrictReportedUser(r.id, "quarantine"),
+                      )
+                    }
+                  >
+                    {t("admin:reports.quarantineUserButton")}
+                  </button>
+                )}
+              </>
             )}
             {r.subject_suspended ? (
               <span className={`${styles.badge} ${styles.badgeSuspended}`}>
