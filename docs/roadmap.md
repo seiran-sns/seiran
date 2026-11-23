@@ -107,7 +107,7 @@
 - [x] **プロフィール（bio HTML・key-value・バナー・別のアカウント・生年月日）** — `docs/ui_spec.md` 2.2節、`docs/protocols.md`
 - [x] **未設定アバターの生成（#211）** — `docs/architecture.md`
 - [x] **リモートメディアプロキシ（#87）** — `docs/architecture.md`
-- [x] **OGP（投稿詳細・プロフィール）** — `docs/architecture.md` 8.1節
+- [x] **OGP（投稿詳細・プロフィール・サイト全体、多言語）** — `docs/architecture.md` 8.1節
 
 ### タイムライン・検索
 

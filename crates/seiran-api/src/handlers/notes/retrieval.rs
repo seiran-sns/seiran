@@ -175,7 +175,7 @@ pub async fn get_note_ap(
     };
 
     if crate::handlers::ogp::wants_html(&headers) {
-        return crate::handlers::ogp::note_ogp_html(post_id, &state).await;
+        return crate::handlers::ogp::note_ogp_html(post_id, &headers, &state).await;
     }
 
     let post = match state.posts.find_by_id_for_viewer(post_id, None).await {

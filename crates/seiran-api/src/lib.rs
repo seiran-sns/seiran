@@ -6,8 +6,8 @@
 
 pub mod error;
 pub mod handlers;
+pub mod i18n;
 pub mod interaction_cooldown;
-pub mod mail_i18n;
 pub mod mailer;
 pub mod middleware;
 pub mod rate_limit;
@@ -1785,7 +1785,7 @@ async fn run_migration_input_wait_sweep(state: &AppState) {
                 let Some(email) = m.email.as_deref().filter(|_| smtp) else {
                     continue;
                 };
-                let language = mail_i18n::stored_language(m.language.as_deref());
+                let language = i18n::stored_language(m.language.as_deref());
                 if let Err(e) =
                     mailer::send_migration_expired(&settings, language, email, &m.new_username)
                         .await
@@ -1830,7 +1830,7 @@ async fn run_migration_input_wait_sweep(state: &AppState) {
                     }
                 };
             let mail = mailer::MigrationInputWaitMail {
-                language: mail_i18n::stored_language(m.language.as_deref()),
+                language: i18n::stored_language(m.language.as_deref()),
                 to: &m.email,
                 status: &m.status,
                 username: &m.new_username,

@@ -1,0 +1,5 @@
+{
+  "siteDescription": "A social network connected to both Bluesky and the Fediverse",
+  "noteTitle": "Post by {{name}} ({{handle}})",
+  "profileTitle": "{{name}} ({{handle}})"
+}

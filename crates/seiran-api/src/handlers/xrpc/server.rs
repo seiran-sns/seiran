@@ -166,7 +166,7 @@ pub(crate) async fn atp_mail_language(
         .await
         .ok()
         .flatten();
-    crate::mail_i18n::request_language(preference.as_deref(), headers)
+    crate::i18n::request_language(preference.as_deref(), headers)
 }
 
 pub async fn xrpc_create_session(

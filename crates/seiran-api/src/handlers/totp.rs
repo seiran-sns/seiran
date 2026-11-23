@@ -321,7 +321,7 @@ pub async fn totp_verify(
 pub struct TotpRequestDisableEmailRequest {
     pub pending_token: String,
     /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
-    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    /// `Accept-Language` から決める（`i18n::request_language`）。
     pub language: Option<String>,
 }
 
@@ -362,7 +362,7 @@ pub async fn totp_request_disable_email(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
 
-    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let language = crate::i18n::request_language(req.language.as_deref(), &headers);
     send_totp_disable_email(&smtp_settings, language, &email, &disable_url)
         .await
         .map_err(|e| {
