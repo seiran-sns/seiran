@@ -115,3 +115,20 @@
 .stackItem.clickable:hover {
   background: linear-gradient(var(--card-bg-hover), var(--card-bg-hover)), var(--bg);
 }
+
+/* 未読だった（今回初めて表示した）通知。10秒目立たせたあと1.5秒かけて元の背景へ戻す
+ * （NotificationsPanel.tsx の FRESH_HIGHLIGHT_MS がこの合計の後にクラスを外す）。 */
+.item.fresh {
+  animation: notifFresh 11.5s ease forwards;
+}
+@keyframes notifFresh {
+  0%,
+  87% {
+    background: var(--notif-fresh-bg);
+  }
+  /* 透明な --card-bg（ライトテーマ）へ向けると途中が半透明になり、重ねたカードの裏が透けるので、
+     実際に見えている不透明な色へ向ける。終わってクラスが外れても見た目は変わらない。 */
+  100% {
+    background: var(--card-bg-opaque);
+  }
+}

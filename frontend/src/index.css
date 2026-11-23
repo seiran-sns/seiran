@@ -26,6 +26,8 @@
   --card-bg-opaque: var(--bg);
   /* 管理者権限で公開範囲外の投稿を表示しているカード（本来見えない投稿だと分かるよう無彩色にする）。 */
   --card-bg-admin-override: #e4e5e8;
+  /* 通知欄で、未読だった（今回初めて表示した）通知を目立たせる背景。 */
+  --notif-fresh-bg: #fff3bf;
   color-scheme: light;
 }
 
@@ -56,6 +58,7 @@
   --card-bg-hover: var(--bg-elev-2);
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #2c2e33;
+  --notif-fresh-bg: #4a3f12;
   color-scheme: dark;
 }
 

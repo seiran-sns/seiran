@@ -780,6 +780,10 @@ fn misskey_routes() -> Router<AppState> {
             post(handlers::misskey::endpoints::i_notifications),
         )
         .route(
+            "/api/notifications/unread-count",
+            get(handlers::misskey::endpoints::notifications_unread_count),
+        )
+        .route(
             "/api/users/reactions",
             post(handlers::misskey::endpoints::users_reactions),
         )

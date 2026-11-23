@@ -56,8 +56,13 @@ type LinkResolvedListener = (info: LinkResolvedInfo) => void;
 type NotifListener = () => void;
 
 interface StreamingValue {
+  /** 未読通知の件数（サーバーの未読数）。通知一覧を表示している間は常に0。 */
   unread: number;
   markRead: () => void;
+  /** 既読にしながら通知一覧を表示している（NotificationsPanel が絞り込み無しで出ている）間、
+   * 登録しておく。その間に届いた通知はすぐ既読になるので、未読数を取りに行かず0のままにする
+   * （取りに行くと、既読にする前の一瞬だけバッジが出てしまう）。戻り値で解除。 */
+  registerNotifViewer: () => () => void;
   /**
    * タイムラインチャンネルを購読する（HomePage が表示中タブに応じて呼ぶ）。
    * `connect`/`disconnect`メッセージの送受信を内部で扱い、該当チャンネルの新着ノートのみ
@@ -90,6 +95,7 @@ interface StreamingValue {
 const StreamingContext = createContext<StreamingValue>({
   unread: 0,
   markRead: () => {},
+  registerNotifViewer: () => () => {},
   subscribeChannel: () => () => {},
   registerReaction: () => () => {},
   registerNotifArrived: () => () => {},
@@ -138,6 +144,21 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     api.dm.unreadCount().then((r) => setDmUnreadCount(r.count)).catch(() => {});
   }, [user]);
 
+  // 未読数の取得の世代。既読にしたら進め、それより前に始めた取得の結果は捨てる
+  // （既読にした直後に、既読にする前の件数で上書きしないため）。
+  const unreadGenRef = useRef(0);
+  const notifViewersRef = useRef(0);
+  const refreshUnread = useCallback(() => {
+    if (!user || notifViewersRef.current > 0) return;
+    const gen = unreadGenRef.current;
+    api.notifications
+      .unreadCount()
+      .then((r) => {
+        if (unreadGenRef.current === gen && notifViewersRef.current === 0) setUnread(r.count);
+      })
+      .catch(() => {});
+  }, [user]);
+
   const refreshFollowRequestCount = useCallback(() => {
     if (!user) return;
     api.followRequests.count().then((r) => setFollowRequestCount(r.count)).catch(() => {});
@@ -146,6 +167,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshDmUnreadCount();
     refreshFollowRequestCount();
+    refreshUnread();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -190,7 +212,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         const info = body as LinkResolvedInfo;
         linkResolvedListeners.current.forEach((cb) => cb(info));
       } else if (NOTIF_KINDS.has(type)) {
-        setUnread((u) => u + 1);
+        refreshUnread();
         notifListeners.current.forEach((cb) => cb());
         if (type === "followRequest") {
           refreshFollowRequestCount();
@@ -271,13 +293,28 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const markRead = useCallback(() => setUnread(0), []);
+  const markRead = useCallback(() => {
+    unreadGenRef.current += 1;
+    setUnread(0);
+  }, []);
+
+  const registerNotifViewer = useCallback(() => {
+    notifViewersRef.current += 1;
+    unreadGenRef.current += 1;
+    setUnread(0);
+    return () => {
+      notifViewersRef.current -= 1;
+      // 一覧を閉じたあとに届いた分から数え直す（表示中に届いた分は既読になっている）。
+      refreshUnread();
+    };
+  }, [refreshUnread]);
 
   return (
     <StreamingContext.Provider
       value={{
         unread,
         markRead,
+        registerNotifViewer,
         subscribeChannel,
         registerReaction,
         registerNotifArrived,
