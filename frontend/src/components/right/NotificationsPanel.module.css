@@ -126,7 +126,9 @@
   87% {
     background: var(--notif-fresh-bg);
   }
+  /* 透明な --card-bg（ライトテーマ）へ向けると途中が半透明になり、重ねたカードの裏が透けるので、
+     実際に見えている不透明な色へ向ける。終わってクラスが外れても見た目は変わらない。 */
   100% {
-    background: var(--card-bg);
+    background: var(--card-bg-opaque);
   }
 }
