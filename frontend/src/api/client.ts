@@ -12,7 +12,7 @@
 export * from "./core";
 export * from "./types";
 
-import { openTarget, reports, meta, appTokens, media, emojis } from "./misc";
+import { openTarget, reports, meta, about, appTokens, media, emojis } from "./misc";
 import { setup, auth, miauth, oauth, misskeyAppAuth } from "./auth";
 import { notes, notifications, reactions } from "./notes";
 import { users, alsoKnownAs, blocks, mutes, repostMutes, actors, account } from "./users";
@@ -25,6 +25,7 @@ export const api = {
   openTarget,
   reports,
   meta,
+  about,
   setup,
   auth,
   notes,

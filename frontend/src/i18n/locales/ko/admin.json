@@ -102,7 +102,7 @@
     "siteDescriptionLabel": "사이트 설명 텍스트",
     "siteDescriptionHint": "로그인 화면에 표시됩니다. HTML 태그를 사용할 수 있으며 줄바꿈이 그대로 반영됩니다. 관리자 전용 입력이므로 정제(sanitize)되지 않습니다.",
     "termsOfServiceLabel": "이용약관 텍스트",
-    "termsOfServiceHint": "신규 가입 화면(Bluesky에서 전입하는 경우 포함)에 동의 체크박스로 표시됩니다. HTML 태그를 사용할 수 있으며 줄바꿈은 그대로 반영됩니다(white-space: pre-wrap). 비워두면 체크박스 자체가 표시되지 않습니다. 관리자 전용 입력이므로 살균(이스케이프)되지 않습니다.",
+    "termsOfServiceHint": "신규 가입 화면(Bluesky에서 전입하는 경우 포함)의 동의 체크박스와 '이 사이트에 대해'(/about)에 표시됩니다. HTML 태그를 사용할 수 있으며 줄바꿈은 그대로 반영됩니다(white-space: pre-wrap). 비워두면 체크박스 자체가 표시되지 않습니다. 관리자 전용 입력이므로 살균(이스케이프)되지 않습니다.",
     "loginBackgroundLabel": "로그인 화면 배경",
     "loginBackgroundHint": "이미지와 동영상 모두 업로드할 수 있습니다. 동영상은 로그인 화면에서 자동 재생 및 반복 재생됩니다(음소거). 설정하지 않으면 사이트 색상을 기반으로 한 배경이 사용됩니다.",
     "selectBackgroundButton": "배경 선택",
@@ -175,7 +175,11 @@
     "oembedSectionTitle": "URL 카드 임베드 플레이어",
     "oembedAllowedDomainsLabel": "허용 도메인(줄바꿈으로 구분)",
     "oembedAllowedDomainsHint": "누구나 콘텐츠를 호스팅할 수 있는 도메인(예: github.io, amazonaws.com)을 지정하면 악성 스크립트가 사이트에 삽입될 위험이 있습니다.",
-    "oembedEndpointHint": "사이트가 oEmbed를 지원하지만 HTML에 탐지용 태그를 넣지 않은 경우, \"도메인,oEmbed 엔드포인트 URL\" 형식(예: vimeo.com,https://vimeo.com/api/oembed.json)으로 엔드포인트를 직접 지정할 수 있습니다."
+    "oembedEndpointHint": "사이트가 oEmbed를 지원하지만 HTML에 탐지용 태그를 넣지 않은 경우, \"도메인,oEmbed 엔드포인트 URL\" 형식(예: vimeo.com,https://vimeo.com/api/oembed.json)으로 엔드포인트를 직접 지정할 수 있습니다.",
+    "operatorNameLabel": "운영자 이름",
+    "operatorUrlLabel": "운영자 URL",
+    "contactEmailLabel": "문의용 이메일 주소",
+    "aboutFieldsHint": "모두 선택 사항입니다. 설정한 항목만 '이 사이트에 대해'(/about)에 표시됩니다. 운영자 이름과 이메일 주소는 Misskey·Mastodon 호환 API의 운영자 정보로도 사용됩니다. 운영자 URL은 http:// 또는 https://로 시작해야 합니다."
   },
   "storageProvidersPanel": {
     "title": "객체 스토리지",

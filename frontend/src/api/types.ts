@@ -116,6 +116,9 @@ export interface SiteSettings {
   media_proxy_url: string;
   site_description: string;
   terms_of_service_text: string;
+  operator_name: string;
+  operator_url: string;
+  contact_email: string;
   login_bg_url: string;
   login_bg_type: string;
   login_bg_media_file_id: string;
@@ -1053,3 +1056,21 @@ export interface MetaResponse {
   registrationClosed?: boolean;
 }
 
+
+/** `GET /api/about`（「このサイトについて」の運営者・管理者一覧・問い合わせ先）。 */
+export interface AboutAdmin {
+  username: string;
+  displayName: string | null;
+  avatarUrl: string | null;
+  emojis: Record<string, string>;
+}
+
+export interface AboutResponse {
+  /** 未設定なら空文字列。 */
+  operatorName: string;
+  /** http/https の URL。未設定なら空文字列。 */
+  operatorUrl: string;
+  admins: AboutAdmin[];
+  /** 未設定なら空文字列。 */
+  contactEmail: string;
+}

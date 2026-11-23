@@ -51,5 +51,12 @@
   },
   "filterField": {
     "clear": "Borrar todo"
+  },
+  "aboutPage": {
+    "title": "Acerca de este sitio",
+    "operator": "Operador",
+    "admins": "Administradores",
+    "contact": "Contacto",
+    "termsOfService": "Términos del servicio"
   }
 }

@@ -32,6 +32,13 @@ pub struct SiteSettingsResponse {
     /// 利用規約テキスト。HTML可・改行保持、サニタイズしない（管理者専用入力のため）。
     /// 空文字列なら登録画面は同意チェックボックス自体を表示しない。
     pub terms_of_service_text: String,
+    // 「このサイトについて」（`handlers::about`）。いずれも任意。
+    /// 運営者名。
+    pub operator_name: String,
+    /// 運営者の URL（http/https のみ）。
+    pub operator_url: String,
+    /// 問い合わせ先メールアドレス。
+    pub contact_email: String,
     /// ログイン画面背景メディアのURL（画像/動画どちらも可）。
     pub login_bg_url: String,
     /// "image" | "video"。login_bg_url のメディア種別。
@@ -114,6 +121,9 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("terms_of_service_text")
             .cloned()
             .unwrap_or_default(),
+        operator_name: settings.get("operator_name").cloned().unwrap_or_default(),
+        operator_url: settings.get("operator_url").cloned().unwrap_or_default(),
+        contact_email: settings.get("contact_email").cloned().unwrap_or_default(),
         login_bg_url: settings.get("login_bg_url").cloned().unwrap_or_default(),
         login_bg_type: settings.get("login_bg_type").cloned().unwrap_or_default(),
         login_bg_media_file_id: settings
@@ -257,6 +267,9 @@ pub struct UpdateSiteSettingsRequest {
     pub media_proxy_url: Option<String>,
     pub site_description: Option<String>,
     pub terms_of_service_text: Option<String>,
+    pub operator_name: Option<String>,
+    pub operator_url: Option<String>,
+    pub contact_email: Option<String>,
     pub login_bg_url: Option<String>,
     pub login_bg_type: Option<String>,
     pub login_bg_media_file_id: Option<String>,
@@ -291,6 +304,22 @@ pub struct UpdateSiteSettingsRequest {
     pub registration_closed: Option<String>,
 }
 
+/// `mailto:` リンクにしても壊れない程度のメールアドレスか（`@` の前後が空でなく、空白や
+/// `mailto:` の区切りになる文字を含まない）。厳密な検証はしない。
+fn is_plausible_email(value: &str) -> bool {
+    let Some((local, domain)) = value.split_once('@') else {
+        return false;
+    };
+    !local.is_empty()
+        && domain.contains('.')
+        && !domain.starts_with('.')
+        && !domain.ends_with('.')
+        && !value
+            .chars()
+            .any(|c| c.is_whitespace() || matches!(c, '?' | '&' | '#' | '<' | '>' | '"' | '/'))
+        && !domain.contains('@')
+}
+
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
 
 /// GET /api/admin/site-settings
@@ -320,6 +349,30 @@ pub async fn update_site_settings(
             .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()))?;
         if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
             return Err(ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()));
+        }
+    }
+
+    if let Some(value) = req
+        .operator_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        // `/about` でリンクにするので、`javascript:` 等を入れさせない
+        let url = url::Url::parse(value)
+            .map_err(|_| ApiError::BadRequest("INVALID_OPERATOR_URL".to_string()))?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            return Err(ApiError::BadRequest("INVALID_OPERATOR_URL".to_string()));
+        }
+    }
+    if let Some(value) = req
+        .contact_email
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if !is_plausible_email(value) {
+            return Err(ApiError::BadRequest("INVALID_CONTACT_EMAIL".to_string()));
         }
     }
 
@@ -453,6 +506,15 @@ pub async fn update_site_settings(
         req.terms_of_service_text
             .as_deref()
             .map(|v| ("terms_of_service_text", v.to_string())),
+        req.operator_name
+            .as_deref()
+            .map(|v| ("operator_name", v.trim().to_string())),
+        req.operator_url
+            .as_deref()
+            .map(|v| ("operator_url", v.trim().to_string())),
+        req.contact_email
+            .as_deref()
+            .map(|v| ("contact_email", v.trim().to_string())),
         req.login_bg_url
             .as_deref()
             .map(|v| ("login_bg_url", v.to_string())),
@@ -781,6 +843,24 @@ pub async fn test_turnstile(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn plausible_email() {
+        assert!(is_plausible_email("admin@example.com"));
+        assert!(is_plausible_email("a.b+c@sub.example.jp"));
+        for bad in [
+            "admin",
+            "@example.com",
+            "admin@",
+            "admin@localhost",
+            "a b@example.com",
+            "a@example.com?subject=x",
+            "a@b@example.com",
+            "a@.example.com",
+        ] {
+            assert!(!is_plausible_email(bad), "{bad}");
+        }
+    }
 
     #[test]
     fn overrides_replace_saved_values_but_empty_password_keeps_saved() {

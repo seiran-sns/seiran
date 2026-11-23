@@ -796,6 +796,33 @@ pub async fn ogp_profile(
     .await
 }
 
+/// 「このサイトについて」に載せる管理者（ロール `admin`）のローカルアクター。
+#[derive(Debug, sqlx::FromRow)]
+pub struct PublicAdminRow {
+    pub actor_id: i64,
+    pub username: String,
+    pub display_name: Option<String>,
+    pub avatar_url: Option<String>,
+    pub emoji_map: Option<serde_json::Value>,
+}
+
+/// ロールが `admin` の、未退会・未凍結のローカルアクターを登録順に返す。
+pub async fn public_admins(pool: &sqlx::PgPool) -> Result<Vec<PublicAdminRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.id AS actor_id, a.username, a.display_name, \
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url, \
+                a.emoji_map \
+         FROM users u \
+         JOIN actors a ON a.user_id = u.id AND a.actor_type = 'local' \
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id \
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id \
+         WHERE u.role = 'admin' AND a.withdrawn_at IS NULL AND a.suspended_at IS NULL \
+         ORDER BY u.id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// ATP プロフィールの再コミットに必要な、表示名・自己紹介・プロフィール項目とアバター・
 /// バナーの blob 情報（`sha256`・`mime_type`・`size`）。
 #[derive(Debug, sqlx::FromRow)]

@@ -119,7 +119,7 @@
     "siteDescriptionLabel": "サイト説明テキスト",
     "siteDescriptionHint": "ログイン画面に表示されます。HTMLタグが使え、改行はそのまま反映されます。管理者専用の入力のためサニタイズは行われません。",
     "termsOfServiceLabel": "利用規約テキスト",
-    "termsOfServiceHint": "新規登録画面（Blueskyからの転入含む）に同意チェックボックスとして表示されます。HTMLタグが使え、改行はそのまま反映されます（white-space: pre-wrap）。空にするとチェックボックス自体が表示されなくなります。管理者専用の入力のためサニタイズは行われません。",
+    "termsOfServiceHint": "新規登録画面（Blueskyからの転入含む）の同意チェックボックスと、「このサイトについて」（/about）に表示されます。HTMLタグが使え、改行はそのまま反映されます（white-space: pre-wrap）。空にするとチェックボックス自体が表示されなくなります。管理者専用の入力のためサニタイズは行われません。",
     "loginBackgroundLabel": "ログイン画面背景",
     "loginBackgroundHint": "画像・動画のどちらもアップロードできます。動画の場合はログイン画面で自動再生・ループ再生（音声なし）されます。未設定の場合はサイトカラーを基にした背景になります。",
     "selectBackgroundButton": "背景を選択",
@@ -192,7 +192,11 @@
     "oembedSectionTitle": "URLカード埋め込みプレーヤー",
     "oembedAllowedDomainsLabel": "許可ドメイン（1行1ドメイン）",
     "oembedAllowedDomainsHint": "不特定多数がサイトをホスティングできるドメイン（例：github.io, amazonaws.com など）を指定すると悪意あるスクリプトをサイト上に埋め込まれるおそれがあります",
-    "oembedEndpointHint": "サイトがoEmbedを提供していてもHTMLに検出用タグを載せていない場合、「ドメイン,oEmbedエンドポイントURL」の形式（例: vimeo.com,https://vimeo.com/api/oembed.json）でエンドポイントを直接指定できます"
+    "oembedEndpointHint": "サイトがoEmbedを提供していてもHTMLに検出用タグを載せていない場合、「ドメイン,oEmbedエンドポイントURL」の形式（例: vimeo.com,https://vimeo.com/api/oembed.json）でエンドポイントを直接指定できます",
+    "operatorNameLabel": "運営者名",
+    "operatorUrlLabel": "運営者のURL",
+    "contactEmailLabel": "問い合わせ先メールアドレス",
+    "aboutFieldsHint": "いずれも任意です。設定したものだけが「このサイトについて」（/about）に表示されます。運営者名とメールアドレスは Misskey・Mastodon 互換 API の運営者情報にも使われます。運営者のURLは http:// または https:// で始まるものに限ります。"
   },
   "storageProvidersPanel": {
     "title": "オブジェクトストレージ",

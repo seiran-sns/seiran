@@ -51,5 +51,12 @@
   },
   "filterField": {
     "clear": "Alle zurücksetzen"
+  },
+  "aboutPage": {
+    "title": "Über diese Website",
+    "operator": "Betreiber",
+    "admins": "Administratoren",
+    "contact": "Kontakt",
+    "termsOfService": "Nutzungsbedingungen"
   }
 }

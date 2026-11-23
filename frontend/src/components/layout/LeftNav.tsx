@@ -73,56 +73,62 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
         <span className={styles.logoText}>{site.name}</span>
       </div>
 
-      <ul className={styles.navList}>
-        {navItems.map((item) => (
-          <Fragment key={item.to}>
-            <li>
-              <NavLink
-                to={item.to}
-                end={item.to === "/"}
-                className={({ isActive }) =>
-                  `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
-                }
-                onClick={() => onItemClick?.()}
-              >
-                <TwemojiEmoji emoji={item.icon} className={styles.navIcon} />
-                <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
-                <span className={styles.navTooltip}>{t(`nav:${item.labelKey}`)}</span>
-                {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
-                {!item.badge && item.dot && <span className={styles.navDot} aria-hidden="true" />}
-              </NavLink>
-            </li>
-            {item.to === "/search" && (
+      {/* 未ログインでは、ホーム〜投稿のユーザー向け項目はどれもログインを求めるだけなので出さない
+          （ログインボタンと「このサイトについて」だけを残す）。 */}
+      {user && (
+        <>
+        <ul className={styles.navList}>
+          {navItems.map((item) => (
+            <Fragment key={item.to}>
               <li>
-                <button
-                  type="button"
-                  className={styles.navLink}
-                  onClick={() => {
-                    onItemClick?.();
-                    onOpenTarget();
-                  }}
+                <NavLink
+                  to={item.to}
+                  end={item.to === "/"}
+                  className={({ isActive }) =>
+                    `${styles.navLink} ${isActive ? styles.navLinkActive : ""}`
+                  }
+                  onClick={() => onItemClick?.()}
                 >
-                  <TwemojiEmoji emoji="🔗" className={styles.navIcon} />
-                  <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
-                  <span className={styles.navTooltip}>{t("nav:leftNav.openTarget")}</span>
-                </button>
+                  <TwemojiEmoji emoji={item.icon} className={styles.navIcon} />
+                  <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
+                  <span className={styles.navTooltip}>{t(`nav:${item.labelKey}`)}</span>
+                  {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
+                  {!item.badge && item.dot && <span className={styles.navDot} aria-hidden="true" />}
+                </NavLink>
               </li>
-            )}
-          </Fragment>
-        ))}
-      </ul>
+              {item.to === "/search" && (
+                <li>
+                  <button
+                    type="button"
+                    className={styles.navLink}
+                    onClick={() => {
+                      onItemClick?.();
+                      onOpenTarget();
+                    }}
+                  >
+                    <TwemojiEmoji emoji="🔗" className={styles.navIcon} />
+                    <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
+                    <span className={styles.navTooltip}>{t("nav:leftNav.openTarget")}</span>
+                  </button>
+                </li>
+              )}
+            </Fragment>
+          ))}
+        </ul>
 
-      <button
-        className={styles.composeBtn}
-        onClick={() => {
-          onItemClick?.();
-          onCompose();
-        }}
-      >
-        <TwemojiEmoji emoji="✏️" className={styles.navIcon} />
-        <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
-        <span className={styles.navTooltip}>{t("nav:leftNav.composeLabel")}</span>
-      </button>
+        <button
+          className={styles.composeBtn}
+          onClick={() => {
+            onItemClick?.();
+            onCompose();
+          }}
+        >
+          <TwemojiEmoji emoji="✏️" className={styles.navIcon} />
+          <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
+          <span className={styles.navTooltip}>{t("nav:leftNav.composeLabel")}</span>
+        </button>
+        </>
+      )}
 
       <div className={styles.navFooter}>
         {user ? (
@@ -162,13 +168,26 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
         )}
       </div>
 
-      <button
-        type="button"
-        className={styles.poweredBy}
-        onClick={() => setServerInfoOpen(true)}
-      >
-        {t("nav:leftNav.poweredBy")}
-      </button>
+      {/* 常用はしないが大事な入口なので、Web サイトのフッターと同じ位置に置く。幅が足りなければ
+          項目単位で2段に折り返す（`.siteLinks`）。 */}
+      <div className={styles.siteLinks}>
+        <Link
+          to="/about"
+          className={styles.siteLink}
+          onClick={() => onItemClick?.()}
+          title={t("nav:leftNav.about")}
+        >
+          <TwemojiEmoji emoji="ℹ️" className={styles.aboutIcon} />
+          <span className={styles.siteLinkLabel}>{t("nav:leftNav.about")}</span>
+        </Link>
+        <button
+          type="button"
+          className={`${styles.siteLink} ${styles.poweredBy}`}
+          onClick={() => setServerInfoOpen(true)}
+        >
+          {t("nav:leftNav.poweredBy")}
+        </button>
+      </div>
       <ServerInfoDialog open={serverInfoOpen} onClose={() => setServerInfoOpen(false)} />
     </nav>
   );

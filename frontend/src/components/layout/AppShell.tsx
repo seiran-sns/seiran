@@ -98,46 +98,52 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
           )}
         </button>
 
-        {/* #180 */}
-        <Link
-          to="/"
-          className={styles.floatingHomeBtn}
-          onClick={() => onBeforeNavigate?.()}
-          aria-label={t("nav:leftNav.home")}
-          title={t("nav:leftNav.home")}
-        >
-          <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
-        </Link>
+        {/* 未ログインでは、ホーム・通知・検索・投稿はどれもログインを求めるだけなので出さない
+            （メニューからログイン・「このサイトについて」へ行ける）。 */}
+        {user && (
+          <>
+            {/* #180 */}
+            <Link
+              to="/"
+              className={styles.floatingHomeBtn}
+              onClick={() => onBeforeNavigate?.()}
+              aria-label={t("nav:leftNav.home")}
+              title={t("nav:leftNav.home")}
+            >
+              <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
+            </Link>
 
-        {/* #75 */}
-        <Link
-          to="/notifications"
-          className={styles.floatingNotifBtn}
-          onClick={() => onBeforeNavigate?.()}
-          aria-label={t("nav:leftNav.notifications")}
-          title={t("nav:leftNav.notifications")}
-        >
-          <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
-        </Link>
+            {/* #75 */}
+            <Link
+              to="/notifications"
+              className={styles.floatingNotifBtn}
+              onClick={() => onBeforeNavigate?.()}
+              aria-label={t("nav:leftNav.notifications")}
+              title={t("nav:leftNav.notifications")}
+            >
+              <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
+            </Link>
 
-        <Link
-          to="/search"
-          className={styles.floatingSearchBtn}
-          onClick={() => onBeforeNavigate?.()}
-          aria-label={t("nav:leftNav.search")}
-          title={t("nav:leftNav.search")}
-        >
-          <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
-        </Link>
+            <Link
+              to="/search"
+              className={styles.floatingSearchBtn}
+              onClick={() => onBeforeNavigate?.()}
+              aria-label={t("nav:leftNav.search")}
+              title={t("nav:leftNav.search")}
+            >
+              <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
+            </Link>
 
-        <button
-          className={styles.floatingComposeBtn}
-          onClick={() => setComposeOpen(true)}
-          aria-label={t("nav:appShell.composeModalTitle")}
-          title={t("nav:appShell.composeModalTitle")}
-        >
-          <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
-        </button>
+            <button
+              className={styles.floatingComposeBtn}
+              onClick={() => setComposeOpen(true)}
+              aria-label={t("nav:appShell.composeModalTitle")}
+              title={t("nav:appShell.composeModalTitle")}
+            >
+              <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
+            </button>
+          </>
+        )}
       </div>
 
       {/* スマホ表示用モバイルドロワーメニュー */}

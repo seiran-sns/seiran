@@ -102,7 +102,7 @@
     "siteDescriptionLabel": "網站說明文字",
     "siteDescriptionHint": "顯示於登入畫面。可以使用HTML標籤，換行會原樣保留。由於這是僅限管理員的輸入項，不會進行任何淨化處理。",
     "termsOfServiceLabel": "服務條款文字",
-    "termsOfServiceHint": "會以同意核取方塊的形式顯示在新註冊畫面（包含從Bluesky轉入）。可使用HTML標籤，換行會原樣保留（white-space: pre-wrap）。留空則完全不顯示核取方塊。此為管理員專用輸入，不會進行消毒處理。",
+    "termsOfServiceHint": "會以同意核取方塊的形式顯示在新註冊畫面（包含從Bluesky轉入），並顯示在「關於本站」（/about）。可使用HTML標籤，換行會原樣保留（white-space: pre-wrap）。留空則完全不顯示核取方塊。此為管理員專用輸入，不會進行消毒處理。",
     "loginBackgroundLabel": "登入畫面背景",
     "loginBackgroundHint": "可以上傳圖片或影片。影片會在登入畫面自動循環播放（靜音）。未設定時，背景將根據網站顏色產生。",
     "selectBackgroundButton": "選擇背景",
@@ -175,7 +175,11 @@
     "oembedSectionTitle": "URL卡片嵌入播放器",
     "oembedAllowedDomainsLabel": "允許的網域（每行一個）",
     "oembedAllowedDomainsHint": "指定任何人都能託管內容的網域（例如 github.io、amazonaws.com）可能導致惡意指令碼被嵌入您的網站。",
-    "oembedEndpointHint": "如果某網站支援oEmbed但未在HTML中提供探索標籤，可以用「網域,oEmbed端點URL」的格式（例如 vimeo.com,https://vimeo.com/api/oembed.json）直接指定該端點。"
+    "oembedEndpointHint": "如果某網站支援oEmbed但未在HTML中提供探索標籤，可以用「網域,oEmbed端點URL」的格式（例如 vimeo.com,https://vimeo.com/api/oembed.json）直接指定該端點。",
+    "operatorNameLabel": "營運者名稱",
+    "operatorUrlLabel": "營運者網址",
+    "contactEmailLabel": "聯絡用電子郵件地址",
+    "aboutFieldsHint": "皆為選填。只有已設定的項目會顯示在「關於本站」（/about）。營運者名稱與電子郵件地址也會作為 Misskey／Mastodon 相容 API 的營運者資訊。營運者網址必須以 http:// 或 https:// 開頭。"
   },
   "storageProvidersPanel": {
     "title": "物件儲存",

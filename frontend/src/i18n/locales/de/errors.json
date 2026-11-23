@@ -104,5 +104,7 @@
   "MIGRATION_EXPIRED": "Dieser Umzug wurde abgebrochen, weil die Frist ohne deine Eingabe abgelaufen ist. Bitte beginne den Umzug von vorn",
   "MIGRATION_RESUME_TOKEN_INVALID": "Dieser Link kann nicht verwendet werden (bereits benutzt oder abgelaufen). Du kannst zurückkehren, indem du auf dem Anmeldebildschirm den Benutzernamen und das Passwort eingibst, die du beim Start des Umzugs gewählt hast",
   "PLC_TOKEN_EXPIRED": "Der Bestätigungscode ist abgelaufen (er ist 15 Minuten gültig). Fordere mit „Code erneut senden“ einen neuen an",
-  "PLC_TOKEN_INVALID": "Der Bestätigungscode ist falsch. Gib den Code aus der neuesten E-Mail deines bisherigen Servers ein"
+  "PLC_TOKEN_INVALID": "Der Bestätigungscode ist falsch. Gib den Code aus der neuesten E-Mail deines bisherigen Servers ein",
+  "INVALID_OPERATOR_URL": "Die URL des Betreibers muss mit http:// oder https:// beginnen",
+  "INVALID_CONTACT_EMAIL": "Die Kontakt-E-Mail-Adresse ist ungültig"
 }

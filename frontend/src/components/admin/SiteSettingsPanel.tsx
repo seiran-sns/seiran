@@ -39,6 +39,10 @@ export default function SiteSettingsPanel() {
   // ログイン画面デザイン（#243）
   const [siteDescription, setSiteDescription] = useState("");
   const [termsOfServiceText, setTermsOfServiceText] = useState("");
+  // 「このサイトについて」（/about）
+  const [operatorName, setOperatorName] = useState("");
+  const [operatorUrl, setOperatorUrl] = useState("");
+  const [contactEmail, setContactEmail] = useState("");
   const [loginBgUrl, setLoginBgUrl] = useState("");
   const [loginBgType, setLoginBgType] = useState("");
   const [loginBgMediaFileId, setLoginBgMediaFileId] = useState("");
@@ -93,6 +97,9 @@ export default function SiteSettingsPanel() {
         setMediaProxyUrl(s.media_proxy_url);
         setSiteDescription(s.site_description);
         setTermsOfServiceText(s.terms_of_service_text);
+        setOperatorName(s.operator_name);
+        setOperatorUrl(s.operator_url);
+        setContactEmail(s.contact_email);
         setLoginBgUrl(s.login_bg_url);
         setLoginBgType(s.login_bg_type);
         setLoginBgMediaFileId(s.login_bg_media_file_id);
@@ -243,6 +250,9 @@ export default function SiteSettingsPanel() {
         media_proxy_url: mediaProxyUrl,
         site_description: siteDescription,
         terms_of_service_text: termsOfServiceText,
+        operator_name: operatorName,
+        operator_url: operatorUrl,
+        contact_email: contactEmail,
         login_bg_url: loginBgUrl,
         login_bg_type: loginBgType,
         login_bg_media_file_id: loginBgMediaFileId,
@@ -313,6 +323,30 @@ export default function SiteSettingsPanel() {
             />
           </label>
           <p className={styles.hint}>{t("admin:siteSettingsPanel.termsOfServiceHint")}</p>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.operatorNameLabel")}
+            <input className={styles.input} value={operatorName} onChange={(e) => setOperatorName(e.target.value)} />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.operatorUrlLabel")}
+            <input
+              className={styles.input}
+              type="url"
+              value={operatorUrl}
+              onChange={(e) => setOperatorUrl(e.target.value)}
+              placeholder="https://example.com/"
+            />
+          </label>
+          <label className={styles.label}>
+            {t("admin:siteSettingsPanel.contactEmailLabel")}
+            <input
+              className={styles.input}
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+            />
+          </label>
+          <p className={styles.hint}>{t("admin:siteSettingsPanel.aboutFieldsHint")}</p>
           <label className={styles.label}>
             {t("admin:siteSettingsPanel.loginBackgroundLabel")}
             <span className={styles.actions} style={{ marginTop: 4 }}>

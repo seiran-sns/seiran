@@ -104,5 +104,7 @@
   "MIGRATION_EXPIRED": "Cette migration a été annulée car le délai a expiré sans action de votre part. Recommencez la migration depuis le début",
   "MIGRATION_RESUME_TOKEN_INVALID": "Ce lien ne peut pas être utilisé (déjà utilisé ou expiré). Vous pouvez revenir en saisissant sur l'écran de connexion le nom d'utilisateur et le mot de passe choisis au début de la migration",
   "PLC_TOKEN_EXPIRED": "Le code de confirmation a expiré (il est valable 15 minutes). Utilisez « Renvoyer le code » pour en obtenir un nouveau",
-  "PLC_TOKEN_INVALID": "Le code de confirmation est incorrect. Saisissez le code du dernier e-mail envoyé par votre ancien serveur"
+  "PLC_TOKEN_INVALID": "Le code de confirmation est incorrect. Saisissez le code du dernier e-mail envoyé par votre ancien serveur",
+  "INVALID_OPERATOR_URL": "L’URL de l’opérateur doit commencer par http:// ou https://",
+  "INVALID_CONTACT_EMAIL": "L’adresse e-mail de contact n’est pas valide"
 }

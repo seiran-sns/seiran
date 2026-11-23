@@ -102,7 +102,7 @@
     "siteDescriptionLabel": "Texto de descripción del sitio",
     "siteDescriptionHint": "Se muestra en la pantalla de inicio de sesión. Se permiten etiquetas HTML y los saltos de línea se conservan tal cual. Al ser una entrada exclusiva para administradores, no se sanea.",
     "termsOfServiceLabel": "Texto de los términos del servicio",
-    "termsOfServiceHint": "Se muestra como una casilla de aceptación en las pantallas de registro (incluida la migración desde Bluesky). Se permiten etiquetas HTML y los saltos de línea se conservan tal cual (white-space: pre-wrap). Déjelo vacío para ocultar la casilla por completo. Esta entrada es solo para administradores, por lo que no se sanitiza.",
+    "termsOfServiceHint": "Se muestra como una casilla de aceptación en las pantallas de registro (incluida la migración desde Bluesky) y en «Acerca de este sitio» (/about). Se permiten etiquetas HTML y los saltos de línea se conservan tal cual (white-space: pre-wrap). Déjelo vacío para ocultar la casilla por completo. Esta entrada es solo para administradores, por lo que no se sanitiza.",
     "loginBackgroundLabel": "Fondo de la pantalla de inicio de sesión",
     "loginBackgroundHint": "Puedes subir una imagen o un vídeo. Los vídeos se reproducen automáticamente en bucle (sin sonido) en la pantalla de inicio de sesión. Si no se establece, el fondo se deriva del color del sitio.",
     "selectBackgroundButton": "Seleccionar fondo",
@@ -175,7 +175,11 @@
     "oembedSectionTitle": "Reproductor incrustado de tarjetas URL",
     "oembedAllowedDomainsLabel": "Dominios permitidos (uno por línea)",
     "oembedAllowedDomainsHint": "Especificar un dominio donde cualquiera puede alojar contenido (p. ej. github.io, amazonaws.com) puede permitir que se incrusten scripts maliciosos en tu sitio.",
-    "oembedEndpointHint": "Si un sitio soporta oEmbed pero no lo anuncia mediante una etiqueta de descubrimiento HTML, puedes indicar el endpoint directamente con el formato \"dominio,url-del-endpoint-oembed\" (p. ej. vimeo.com,https://vimeo.com/api/oembed.json)."
+    "oembedEndpointHint": "Si un sitio soporta oEmbed pero no lo anuncia mediante una etiqueta de descubrimiento HTML, puedes indicar el endpoint directamente con el formato \"dominio,url-del-endpoint-oembed\" (p. ej. vimeo.com,https://vimeo.com/api/oembed.json).",
+    "operatorNameLabel": "Nombre del operador",
+    "operatorUrlLabel": "URL del operador",
+    "contactEmailLabel": "Correo de contacto",
+    "aboutFieldsHint": "Todos son opcionales. Solo se muestran en «Acerca de este sitio» (/about) los que configures. El nombre del operador y el correo también se devuelven como datos del operador en las API compatibles con Misskey y Mastodon. La URL del operador debe empezar por http:// o https://."
   },
   "storageProvidersPanel": {
     "title": "Almacenamiento de objetos",
