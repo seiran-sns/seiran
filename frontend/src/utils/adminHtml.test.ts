@@ -33,6 +33,11 @@ describe("trimBlockBoundaryNewlines", () => {
     );
   });
 
+  it("treats br like a block", () => {
+    expect(trimBlockBoundaryNewlines("一行目<br>\n二行目")).toBe("一行目<br>二行目");
+    expect(trimBlockBoundaryNewlines("一行目<br />\n\n三行目")).toBe("一行目<br />\n三行目");
+  });
+
   it("leaves plain text untouched", () => {
     expect(trimBlockBoundaryNewlines("第1条\n\n本規約は…\n")).toBe("第1条\n\n本規約は…\n");
   });
