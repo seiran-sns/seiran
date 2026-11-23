@@ -448,7 +448,11 @@ fn auth_account_routes() -> Router<AppState> {
 fn notes_routes() -> Router<AppState> {
     Router::new()
         // 投稿
-        .route("/api/notes/create", post(handlers::notes::create_note))
+        // seiran UI と Misskey 互換 API の共用。応答に Misskey の `createdNote` を足す。
+        .route(
+            "/api/notes/create",
+            post(handlers::misskey::endpoints::notes_create),
+        )
         // 同じパスの POST は Misskey 互換 API（`notes_local_timeline`）。
         .route(
             "/api/notes/local-timeline",
