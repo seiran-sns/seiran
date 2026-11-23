@@ -106,13 +106,7 @@ pub async fn suspend_user(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .users
-        .set_suspended(id, true)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    Ok(StatusCode::NO_CONTENT)
+    super::actors::suspend_response(state.users.set_suspended(id, true).await, "USER_NOT_FOUND")
 }
 
 /// POST /api/admin/users/:id/unsuspend
@@ -120,13 +114,7 @@ pub async fn unsuspend_user(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .users
-        .set_suspended(id, false)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-
-    Ok(StatusCode::NO_CONTENT)
+    super::actors::suspend_response(state.users.set_suspended(id, false).await, "USER_NOT_FOUND")
 }
 
 /// POST /api/admin/users/:id/role

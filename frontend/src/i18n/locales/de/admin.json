@@ -221,6 +221,10 @@
     "deletePostButton": "Beitrag löschen",
     "suspendUserButton": "Benutzer sperren",
     "suspendedBadge": "Gesperrt",
+    "silenceUserButton": "Benutzer stummschalten",
+    "silencedBadge": "Stummgeschaltet",
+    "quarantineUserButton": "Benutzer isolieren",
+    "quarantinedBadge": "Isoliert",
     "commentsButton": "Interne Kommentare",
     "addCommentButton": "Kommentar hinzufügen",
     "modalTitle": "⚠️ Bericht",
@@ -307,7 +311,11 @@
       "reasonRuleBanEvasion": "Umgehung verbieten",
       "reasonRuleOther": "Sonstiger Regelverstoß",
       "reasonOther": "Andere"
-    }
+    },
+    "deletePostConfirm": "Den gemeldeten Beitrag von {{subject}} löschen? Dies kann nicht rückgängig gemacht werden.",
+    "suspendUserConfirm": "{{subject}} sperren? Gesperrte Benutzer können sich nicht anmelden und die API nicht nutzen; ihre Beiträge werden ausgeblendet.",
+    "silenceUserConfirm": "{{subject}} stummschalten? Öffentliche Beiträge sind dann nicht mehr möglich.",
+    "quarantineUserConfirm": "{{subject}} isolieren? Öffentliche Beiträge sowie Antworten, Erwähnungen und Reaktionen gegenüber Nicht-Followern sind dann nicht mehr möglich."
   },
   "suspendedActors": {
     "title": "Gesperrte Nutzer",
@@ -329,7 +337,11 @@
     "totpDisabled": "TOTP: deaktiviert",
     "passkeyCount": "Passschlüssel: {{count}}",
     "disableTotpButton": "TOTP zwangsweise deaktivieren",
-    "disableTotpConfirm": "TOTP für {{username}} erzwingen?"
+    "disableTotpConfirm": "TOTP für {{username}} erzwingen?",
+    "changeRoleTitle": "Rolle ändern",
+    "changeRoleConfirm": "Die Rolle von {{user}} von {{from}} zu {{to}} ändern?",
+    "suspendConfirm": "{{user}} sperren? Gesperrte Benutzer können sich nicht anmelden und die API nicht nutzen; ihre Beiträge werden ausgeblendet.",
+    "unsuspendConfirm": "Die Sperre von {{user}} aufheben?"
   },
   "serverBlocksPanel": {
     "deniedTitle": "Abgelehnte Server",

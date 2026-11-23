@@ -6,7 +6,7 @@
 //! ローカル・リモート混在の「凍結済みユーザー」一覧タブ用の read model を提供する。
 
 use axum::{
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     http::StatusCode,
     Json,
 };
@@ -14,6 +14,7 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::error::ApiError;
+use crate::middleware::AuthUser;
 use crate::AppState;
 
 use seiran_common::repository::actor::SuspendedActorRow;
@@ -84,12 +85,10 @@ pub async fn suspend_actor(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .actors
-        .set_suspended(id, true)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+    suspend_response(
+        state.actors.set_suspended(id, true).await,
+        "ACTOR_NOT_FOUND",
+    )
 }
 
 /// POST /api/admin/actors/:id/unsuspend
@@ -97,10 +96,125 @@ pub async fn unsuspend_actor(
     State(state): State<AppState>,
     Path(id): Path<i64>,
 ) -> Result<StatusCode, ApiError> {
-    state
-        .actors
-        .set_suspended(id, false)
+    suspend_response(
+        state.actors.set_suspended(id, false).await,
+        "ACTOR_NOT_FOUND",
+    )
+}
+
+/// 凍結状態の更新結果を応答にする。admin・moderator は凍結しない（403 `SUBJECT_IS_PRIVILEGED`）。
+pub fn suspend_response(
+    outcome: Result<seiran_common::repository::actor::SuspendOutcome, sqlx::Error>,
+    not_found: &'static str,
+) -> Result<StatusCode, ApiError> {
+    use seiran_common::repository::actor::SuspendOutcome;
+    match outcome.map_err(|e| ApiError::Internal(e.to_string()))? {
+        SuspendOutcome::Applied => Ok(StatusCode::NO_CONTENT),
+        SuspendOutcome::Privileged => Err(ApiError::Forbidden("SUBJECT_IS_PRIVILEGED")),
+        SuspendOutcome::NotFound => Err(ApiError::NotFound(not_found)),
+    }
+}
+
+/// 全ロール（弱い順）。
+const ALL_ROLES: &[&str] = &[
+    "quarantine",
+    "silence",
+    "user",
+    "emoji-editor",
+    "moderator",
+    "admin",
+];
+/// moderator が変えられる（対象の今のロール・変更後のロールとも）ロール。moderator 以上には
+/// 触れない（moderator が admin や他の moderator を降格・昇格できないように）。
+const MODERATOR_CHANGEABLE_ROLES: &[&str] = &["quarantine", "silence", "user", "emoji-editor"];
+
+#[derive(Debug, Serialize)]
+pub struct ActorModerationResponse {
+    pub suspended: bool,
+    /// ローカルユーザーならロール（リモートは `null`）。
+    pub role: Option<String>,
+    /// 操作者が付けられるロール（ローカルユーザーで、操作者がこの対象のロールを変えられるときだけ）。
+    pub assignable_roles: Vec<String>,
+}
+
+/// 操作者が対象のロールを変えるときに、触れてよい対象のロール（＝付けてよいロール）。
+async fn changeable_roles(
+    state: &AppState,
+    requester_user_id: i64,
+) -> Result<&'static [&'static str], ApiError> {
+    let role = state
+        .users
+        .find_role_by_user_id(requester_user_id)
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+    Ok(if role.as_deref() == Some("admin") {
+        ALL_ROLES
+    } else {
+        MODERATOR_CHANGEABLE_ROLES
+    })
+}
+
+/// GET /api/admin/actors/:id/moderation
+///
+/// ユーザー操作メニューに凍結・ロール変更の項目を出すための、対象の今の状態。
+pub async fn moderation_state(
+    Extension(me): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> Result<Json<ActorModerationResponse>, ApiError> {
+    let (suspended, role) = seiran_common::repository::moderation::actor_state(&state.db, id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .ok_or(ApiError::NotFound("ACTOR_NOT_FOUND"))?;
+    let changeable = changeable_roles(&state, me.user_id).await?;
+    let is_self = state
+        .actors
+        .find_local_by_user_id(me.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+        .is_some_and(|a| a.id == id);
+    let assignable_roles = match &role {
+        Some(r) if !is_self && changeable.contains(&r.as_str()) => {
+            changeable.iter().map(|s| (*s).to_owned()).collect()
+        }
+        _ => Vec::new(),
+    };
+    Ok(Json(ActorModerationResponse {
+        suspended,
+        role,
+        assignable_roles,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ChangeActorRoleRequest {
+    pub role: String,
+}
+
+/// POST /api/admin/actors/:id/role
+///
+/// ローカルユーザーのロールを変える。admin はすべて、moderator は moderator 未満の相手を
+/// moderator 未満のロールの間でだけ変えられる。自分自身は変えられない。
+pub async fn change_actor_role(
+    Extension(me): Extension<AuthUser>,
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+    Json(req): Json<ChangeActorRoleRequest>,
+) -> Result<StatusCode, ApiError> {
+    if !ALL_ROLES.contains(&req.role.as_str()) {
+        return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
+    }
+    let changeable = changeable_roles(&state, me.user_id).await?;
+    if !changeable.contains(&req.role.as_str()) {
+        return Err(ApiError::Forbidden("ROLE_NOT_ASSIGNABLE"));
+    }
+    use seiran_common::repository::moderation::{self, ChangeRoleOutcome};
+    match moderation::change_actor_role(&state.db, id, &req.role, changeable, me.user_id)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?
+    {
+        ChangeRoleOutcome::Changed => Ok(StatusCode::NO_CONTENT),
+        ChangeRoleOutcome::Forbidden => Err(ApiError::Forbidden("ROLE_NOT_CHANGEABLE")),
+        ChangeRoleOutcome::NotLocal => Err(ApiError::NotFound("LOCAL_USER_NOT_FOUND")),
+    }
 }

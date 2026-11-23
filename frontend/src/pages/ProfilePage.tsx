@@ -31,6 +31,7 @@ import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
 import { useUserRelationshipMenu } from "../hooks/useUserRelationshipMenu";
+import ModerationDialogs from "../components/note/ModerationDialogs";
 import { profilePath, profileQuery, remoteProfileUrl, remoteServerBadgeInfo } from "../lib/format";
 import { getRemoteFollowSummary } from "../lib/remoteFollowSummaryCache";
 import { setRelationship } from "../stores/userRelationshipStore";
@@ -608,7 +609,7 @@ export default function ProfilePage() {
               )}
               <ActionsMenu
                 triggerTitle={t("profile:profilePage.actionsMenuTitle")}
-                onOpen={menu.loadListMemberships}
+                onOpen={menu.loadMenuData}
                 items={menu.items.map((item) =>
                   item.key === "follow"
                     ? {
@@ -842,6 +843,12 @@ export default function ProfilePage() {
         />
       )}
 
+      {profile && (
+        <ModerationDialogs
+          menu={menu}
+          subjectLabel={`@${profile.username}${profile.domain ? `@${profile.domain}` : ""}`}
+        />
+      )}
       <Modal
         open={menu.blockConfirmOpen}
         onClose={menu.closeBlockConfirm}

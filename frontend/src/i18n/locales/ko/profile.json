@@ -109,5 +109,19 @@
       "video": "동영상",
       "audio": "오디오"
     }
+  },
+  "moderation": {
+    "suspendItem": "정지",
+    "unsuspendItem": "정지 해제",
+    "changeRoleItem": "역할 변경 (현재: {{role}})",
+    "suspendTitle": "사용자 정지",
+    "suspendBody": "{{subject}} 님을 정지할까요? 정지 중에는 로그인과 API 사용이 불가능하며 게시물이 숨겨집니다.",
+    "suspendConfirm": "정지",
+    "unsuspendTitle": "정지 해제",
+    "unsuspendBody": "{{subject}} 님의 정지를 해제할까요?",
+    "unsuspendConfirm": "정지 해제",
+    "changeRoleTitle": "역할 변경",
+    "changeRoleBody": "{{subject}} 님의 역할(현재: {{role}})을 변경합니다.",
+    "changeRoleConfirm": "변경"
   }
 }

@@ -408,7 +408,8 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 ## 11. 横断機能の構成メモ
 
 - **「開く」**（`handlers/open_target.rs`）は薄いオーケストレーション層で、Bsky は `seiran-common::atp`、AP Actor は `target_resolve`、AP 投稿は受信 Create ジョブを再利用する。外部の ActivityStreams 文書の取得はメディアプロキシと同じ検証（DNS 固定・非公開IP拒否・リダイレクト再検証）を通す。フロントの `OpenTargetDialog` は QR を同期認識し、重い OCR Worker は読み取り開始後に動的 import する。
-- **通報**は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bsky を統一し、管理画面の「通報」タブで台帳閲覧・クローズ・内部コメント・凍結/投稿削除・リモート転送を行う（転送の仕様は `docs/protocols.md`「通報配送」）。
+- **通報**は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bsky を統一し、管理画面の「通報」タブで台帳閲覧・クローズ・内部コメント・制限/隔離/凍結/投稿削除・リモート転送を行う（転送の仕様は `docs/protocols.md`「通報配送」）。
+- **調停者を止めない**: admin・moderator のローカルユーザーは凍結できない（`actors.suspended_at` を更新する `set_suspended` が対象のロールを1文の中で確かめ、`SUBJECT_IS_PRIVILEGED` を返す。通報・ユーザー管理・ユーザー操作メニューのどの経路でも同じ）。通報からの制限・隔離もしない。ロールを変えるのは、ユーザー管理（admin）と、ユーザー操作メニューの `POST /api/admin/actors/:id/role`（admin はすべて、moderator は moderator 未満の相手を moderator 未満のロールの間でだけ。自分自身は変えない）。moderator が admin や他の moderator を止めたり降格・昇格したりできないようにするため。
 - **Snowflake ID** はブラウザで精度を失わないよう、API では文字列で受け渡す。
 - **サーバーの文言の言語**（`seiran-api/src/i18n.rs`）: メールの件名・本文は `crates/seiran-api/locales/{言語}/mail.json`、OGP のタイトル書式・既定の説明文は同じ場所の `ogp.json` に、表示言語の8言語分を置き、`include_str!` でバイナリへ埋め込む。形式はフロントの `i18n/locales` と同じ（入れ子のキー、`{{name}}` の差し込み）で、ユーザー製の言語ファイルを配るときにフロントと同じ形で扱えるようにしている。全言語のキーと差し込み名の一致はファイルごとに単体テストが検査し、欠けたキーは英語で補う。OGP の言語は `Accept-Language` → `en`（8.1節）。メールを送る言語は次のとおり決める。
   - ブラウザの操作が契機のメール（登録のメール確認・メール変更・2FA解除・パスワードリセット・管理画面のテスト送信）: リクエストの `language`（フロントの `mailLanguage()` が送る、画面に出ている表示言語）→ `Accept-Language` を表示言語へ丸めた値 → `en`。中国語の丸めはフロントの `normalizeDetectedLanguage` と同じ。

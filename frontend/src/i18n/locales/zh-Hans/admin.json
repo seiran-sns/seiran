@@ -221,6 +221,10 @@
     "deletePostButton": "删除帖子",
     "suspendUserButton": "暂停用户",
     "suspendedBadge": "已冻结",
+    "silenceUserButton": "限制用户",
+    "silencedBadge": "已限制",
+    "quarantineUserButton": "隔离用户",
+    "quarantinedBadge": "已隔离",
     "commentsButton": "内部备注",
     "addCommentButton": "添加备注",
     "modalTitle": "⚠️举报",
@@ -307,7 +311,11 @@
       "reasonRuleBanEvasion": "规避封禁",
       "reasonRuleOther": "其他违规行为",
       "reasonOther": "其他"
-    }
+    },
+    "deletePostConfirm": "要删除 {{subject}} 被举报的帖子吗？此操作无法撤销。",
+    "suspendUserConfirm": "要冻结 {{subject}} 吗？冻结期间无法登录或使用 API，其帖子也会被隐藏。",
+    "silenceUserConfirm": "要限制 {{subject}} 吗？将无法公开发帖。",
+    "quarantineUserConfirm": "要隔离 {{subject}} 吗？将无法公开发帖，也无法对关注者以外的人回复、提及或回应。"
   },
   "suspendedActors": {
     "title": "已冻结用户",
@@ -329,7 +337,11 @@
     "totpDisabled": "TOTP：已禁用",
     "passkeyCount": "密钥：{{count}}",
     "disableTotpButton": "强制禁用 TOTP",
-    "disableTotpConfirm": "强制禁用 {{username}} 的 TOTP？"
+    "disableTotpConfirm": "强制禁用 {{username}} 的 TOTP？",
+    "changeRoleTitle": "更改角色",
+    "changeRoleConfirm": "要将 {{user}} 的角色从 {{from}} 更改为 {{to}} 吗？",
+    "suspendConfirm": "要冻结 {{user}} 吗？冻结期间无法登录或使用 API，其帖子也会被隐藏。",
+    "unsuspendConfirm": "要解除 {{user}} 的冻结吗？"
   },
   "serverBlocksPanel": {
     "deniedTitle": "拒绝的服务器",

@@ -109,5 +109,19 @@
       "video": "動画",
       "audio": "音声"
     }
+  },
+  "moderation": {
+    "suspendItem": "凍結",
+    "unsuspendItem": "凍結解除",
+    "changeRoleItem": "ロール変更（現在: {{role}}）",
+    "suspendTitle": "ユーザーを凍結",
+    "suspendBody": "{{subject}} を凍結します。凍結中はログインもAPIの利用もできず、投稿も表示されなくなります。よろしいですか？",
+    "suspendConfirm": "凍結する",
+    "unsuspendTitle": "凍結を解除",
+    "unsuspendBody": "{{subject}} の凍結を解除します。よろしいですか？",
+    "unsuspendConfirm": "凍結を解除する",
+    "changeRoleTitle": "ロールを変更",
+    "changeRoleBody": "{{subject}} のロール（現在: {{role}}）を変更します。",
+    "changeRoleConfirm": "変更する"
   }
 }

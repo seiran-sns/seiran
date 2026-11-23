@@ -43,6 +43,7 @@ pub mod link_resolution;
 pub mod list;
 pub mod maintenance;
 pub mod media_file;
+pub mod moderation;
 pub mod mute;
 pub mod note_extras;
 pub mod notification;

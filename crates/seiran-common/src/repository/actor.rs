@@ -312,7 +312,48 @@ pub trait ActorRepository: Send + Sync {
 
     /// ユーザー凍結。`actor_id` はローカル・リモートを問わない（ローカル・リモート共通
     /// enforcementの一本化、通報画面からの凍結・凍結解除、管理画面「凍結済みユーザー」タブが使う）。
-    async fn set_suspended(&self, actor_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
+    /// admin・moderator のローカルユーザーは凍結しない（`SuspendOutcome::Privileged`）。
+    async fn set_suspended(
+        &self,
+        actor_id: i64,
+        suspended: bool,
+    ) -> Result<SuspendOutcome, sqlx::Error>;
+}
+
+/// 凍結状態の更新の結果。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuspendOutcome {
+    Applied,
+    /// 対象が admin・moderator なので凍結しなかった（調停者が調停者を止められないように。
+    /// 外すときは自分のロールを下げてもらう）。
+    Privileged,
+    NotFound,
+}
+
+/// 凍結状態を更新する1文。`{target}` は対象の `actors` 行を絞る条件（`a.` で参照、`$2` が ID）。
+/// 対象の確認・admin/moderator の除外・更新を1文で行う。
+macro_rules! set_suspended_sql {
+    ($target:literal) => {
+        concat!(
+            "WITH target AS (SELECT a.id, u.role::text AS role FROM actors a \
+             LEFT JOIN users u ON u.id = a.user_id WHERE ",
+            $target,
+            " FOR UPDATE OF a), \
+             updated AS (UPDATE actors SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END, \
+               updated_at = NOW() FROM target t WHERE actors.id = t.id \
+               AND NOT ($1 AND COALESCE(t.role IN ('admin', 'moderator'), false)) RETURNING actors.id) \
+             SELECT EXISTS (SELECT 1 FROM target), EXISTS (SELECT 1 FROM updated)"
+        )
+    };
+}
+pub(crate) use set_suspended_sql;
+
+pub(crate) fn suspend_outcome((found, updated): (bool, bool)) -> SuspendOutcome {
+    match (found, updated) {
+        (_, true) => SuspendOutcome::Applied,
+        (true, false) => SuspendOutcome::Privileged,
+        (false, false) => SuspendOutcome::NotFound,
+    }
 }
 
 pub struct PgActorRepository {
@@ -658,15 +699,17 @@ impl ActorRepository for PgActorRepository {
             .map(|r| r.unwrap_or(false))
     }
 
-    async fn set_suspended(&self, actor_id: i64, suspended: bool) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE actors SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END, updated_at = NOW() WHERE id = $2",
-        )
-        .bind(suspended)
-        .bind(actor_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+    async fn set_suspended(
+        &self,
+        actor_id: i64,
+        suspended: bool,
+    ) -> Result<SuspendOutcome, sqlx::Error> {
+        sqlx::query_as(set_suspended_sql!("a.id = $2"))
+            .bind(suspended)
+            .bind(actor_id)
+            .fetch_one(&self.pool)
+            .await
+            .map(suspend_outcome)
     }
 }
 

@@ -221,6 +221,10 @@
     "deletePostButton": "게시물 삭제",
     "suspendUserButton": "사용자 정지",
     "suspendedBadge": "정지됨",
+    "silenceUserButton": "사용자 제한",
+    "silencedBadge": "제한됨",
+    "quarantineUserButton": "사용자 격리",
+    "quarantinedBadge": "격리됨",
     "commentsButton": "내부 의견",
     "addCommentButton": "댓글 추가",
     "modalTitle": "⚠️ 신고",
@@ -307,7 +311,11 @@
       "reasonRuleBanEvasion": "회피 금지",
       "reasonRuleOther": "기타 규칙 위반",
       "reasonOther": "다른"
-    }
+    },
+    "deletePostConfirm": "{{subject}} 님의 신고된 게시물을 삭제할까요? 되돌릴 수 없습니다.",
+    "suspendUserConfirm": "{{subject}} 님을 정지할까요? 정지 중에는 로그인과 API 사용이 불가능하며 게시물이 숨겨집니다.",
+    "silenceUserConfirm": "{{subject}} 님을 제한할까요? 공개 게시를 할 수 없게 됩니다.",
+    "quarantineUserConfirm": "{{subject}} 님을 격리할까요? 공개 게시를 할 수 없고, 팔로워가 아닌 사람에게 답글·멘션·리액션 등을 할 수 없게 됩니다."
   },
   "suspendedActors": {
     "title": "정지된 사용자",
@@ -329,7 +337,11 @@
     "totpDisabled": "TOTP: 비활성화됨",
     "passkeyCount": "패스키: {{count}}",
     "disableTotpButton": "TOTP 강제 비활성화",
-    "disableTotpConfirm": "{{username}}에 대한 TOTP를 강제로 비활성화하시겠습니까?"
+    "disableTotpConfirm": "{{username}}에 대한 TOTP를 강제로 비활성화하시겠습니까?",
+    "changeRoleTitle": "역할 변경",
+    "changeRoleConfirm": "{{user}} 님의 역할을 {{from}}에서 {{to}}(으)로 변경할까요?",
+    "suspendConfirm": "{{user}} 님을 정지할까요? 정지 중에는 로그인과 API 사용이 불가능하며 게시물이 숨겨집니다.",
+    "unsuspendConfirm": "{{user}} 님의 정지를 해제할까요?"
   },
   "serverBlocksPanel": {
     "deniedTitle": "거부 서버",

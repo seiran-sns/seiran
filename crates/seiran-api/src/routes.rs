@@ -212,6 +212,10 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             post(handlers::admin::reports::suspend_subject),
         )
         .route(
+            "/api/admin/reports/:id/restrict-user",
+            post(handlers::admin::reports::restrict_subject),
+        )
+        .route(
             "/api/admin/reports/:id/forward",
             post(handlers::admin::reports::forward_report),
         )
@@ -226,6 +230,14 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
         .route(
             "/api/admin/actors/:id/unsuspend",
             post(handlers::admin::actors::unsuspend_actor),
+        )
+        .route(
+            "/api/admin/actors/:id/moderation",
+            get(handlers::admin::actors::moderation_state),
+        )
+        .route(
+            "/api/admin/actors/:id/role",
+            post(handlers::admin::actors::change_actor_role),
         )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),

@@ -238,6 +238,10 @@
     "deletePostButton": "Delete post",
     "suspendUserButton": "Suspend user",
     "suspendedBadge": "Suspended",
+    "silenceUserButton": "Silence user",
+    "silencedBadge": "Silenced",
+    "quarantineUserButton": "Quarantine user",
+    "quarantinedBadge": "Quarantined",
     "commentsButton": "Internal comments",
     "addCommentButton": "Add comment",
     "modalTitle": "⚠️ Report",
@@ -324,7 +328,11 @@
       "reasonRuleBanEvasion": "Ban evasion",
       "reasonRuleOther": "Other rule violation",
       "reasonOther": "Other"
-    }
+    },
+    "deletePostConfirm": "Delete the reported post by {{subject}}? This cannot be undone.",
+    "suspendUserConfirm": "Suspend {{subject}}? While suspended, they cannot log in or use the API, and their posts are hidden.",
+    "silenceUserConfirm": "Silence {{subject}}? They will no longer be able to post publicly.",
+    "quarantineUserConfirm": "Quarantine {{subject}}? They will not be able to post publicly or reply to, mention or react to anyone other than their followers."
   },
   "suspendedActors": {
     "title": "Suspended Users",
@@ -346,7 +354,11 @@
     "totpDisabled": "TOTP: disabled",
     "passkeyCount": "Passkeys: {{count}}",
     "disableTotpButton": "Force-disable TOTP",
-    "disableTotpConfirm": "Force-disable TOTP for {{username}}?"
+    "disableTotpConfirm": "Force-disable TOTP for {{username}}?",
+    "changeRoleTitle": "Change role",
+    "changeRoleConfirm": "Change the role of {{user}} from {{from}} to {{to}}?",
+    "suspendConfirm": "Suspend {{user}}? While suspended, they cannot log in or use the API, and their posts are hidden.",
+    "unsuspendConfirm": "Lift the suspension of {{user}}?"
   },
   "roleRateLimitPanel": {
     "title": "Role-based rate limits",

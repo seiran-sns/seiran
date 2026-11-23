@@ -148,7 +148,12 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<Vec<AdminUserRow>, sqlx::Error>;
 
     /// アカウントの凍結状態を更新する（実体は対応するローカル `actors.suspended_at`）。
-    async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error>;
+    /// admin・moderator は凍結しない（`ActorRepository::set_suspended` と同じ）。
+    async fn set_suspended(
+        &self,
+        user_id: i64,
+        suspended: bool,
+    ) -> Result<crate::repository::actor::SuspendOutcome, sqlx::Error>;
 
     /// ロール（`quarantine` / `silence` / `user` / `emoji-editor` / `moderator` / `admin`）を更新する。
     async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error>;
@@ -385,16 +390,20 @@ impl UserRepository for PgUserRepository {
         .await
     }
 
-    async fn set_suspended(&self, user_id: i64, suspended: bool) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE actors SET suspended_at = CASE WHEN $1 THEN NOW() ELSE NULL END, updated_at = NOW()
-             WHERE user_id = $2 AND actor_type::text = 'local'",
-        )
+    async fn set_suspended(
+        &self,
+        user_id: i64,
+        suspended: bool,
+    ) -> Result<crate::repository::actor::SuspendOutcome, sqlx::Error> {
+        use crate::repository::actor::{set_suspended_sql, suspend_outcome};
+        sqlx::query_as(set_suspended_sql!(
+            "a.user_id = $2 AND a.actor_type::text = 'local'"
+        ))
         .bind(suspended)
         .bind(user_id)
-        .execute(&self.pool)
+        .fetch_one(&self.pool)
         .await
-        .map(|_| ())
+        .map(suspend_outcome)
     }
 
     async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error> {

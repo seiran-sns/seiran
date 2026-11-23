@@ -76,10 +76,14 @@ test("管理者はユーザーを凍結・凍結解除できる", async ({ page,
   await expect(usernameCell).toBeVisible({ timeout: 10_000 });
   const row = usernameCell.locator("xpath=../..");
 
+  // 凍結・凍結解除は確認ダイアログを経てから行う（ConfirmModal）。
+  const dialog = page.getByRole("dialog");
   await row.getByRole("button", { name: "凍結", exact: true }).click();
+  await dialog.getByRole("button", { name: "凍結", exact: true }).click();
   await expect(row.getByText("凍結中")).toBeVisible({ timeout: 10_000 });
 
   await row.getByRole("button", { name: "凍結解除" }).click();
+  await dialog.getByRole("button", { name: "凍結解除" }).click();
   await expect(row.getByText("凍結中")).toHaveCount(0, { timeout: 10_000 });
 });
 

@@ -40,6 +40,14 @@ export const admin = {
       `/admin/reports/${encodeURIComponent(id)}/suspend-user`,
     );
   },
+  /** 通報対象のローカルユーザーを制限（silence）・隔離（quarantine）へ下げる。 */
+  restrictReportedUser(id: string, role: "silence" | "quarantine") {
+    return request<void>(
+      "POST",
+      `/admin/reports/${encodeURIComponent(id)}/restrict-user`,
+      { role },
+    );
+  },
   forwardReport(id: string) {
     return request<void>(
       "POST",
@@ -93,6 +101,16 @@ export const admin = {
   /** actor_id起点の凍結・凍結解除（ローカル・リモート共通）。 */
   suspendActor(id: string) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/suspend`);
+  },
+  /** ユーザー操作メニュー用の、アクターの凍結状態・ロール・操作者が付けられるロール。 */
+  actorModeration(id: string) {
+    return request<{ suspended: boolean; role: string | null; assignable_roles: string[] }>(
+      "GET",
+      `/admin/actors/${encodeURIComponent(id)}/moderation`,
+    );
+  },
+  changeActorRole(id: string, role: string) {
+    return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/role`, { role });
   },
   unsuspendActor(id: string) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/unsuspend`);
