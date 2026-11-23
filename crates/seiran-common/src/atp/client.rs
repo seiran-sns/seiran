@@ -52,6 +52,22 @@ pub struct BskyPost {
     /// あれば `embed`・`is_sensitive` の代わりにこちらを保存する
     /// （`crate::seiran_post::SeiranPost::received_attachments`）。
     pub seiran_attachments: Option<Vec<(crate::atp::ParsedAttachment, bool)>>,
+    /// AppView の PostView に付いてきた threadgate の `allow`（threadgate が無い、または
+    /// PostView から読み取っていなければ `None`）。`upsert_bsky_post_deferring_gates` が
+    /// 後追いのジョブを待たずに返信制限を保存するのに使う。
+    pub threadgate_allow: Option<serde_json::Value>,
+}
+
+/// PostView の `threadgate.record.allow`（`BskyPost::threadgate_allow`）。threadgate があって
+/// `allow` が無ければ「誰も返信不可」の `[]`（`fetch_bsky_gates` と同じ正規化）。
+fn threadgate_allow_of_post_view(post_view: &serde_json::Value) -> Option<serde_json::Value> {
+    let record = post_view.get("threadgate")?.get("record")?;
+    Some(
+        record
+            .get("allow")
+            .cloned()
+            .unwrap_or_else(|| serde_json::json!([])),
+    )
 }
 
 /// `record.seiranPost` の添付（`BskyPost::seiran_attachments`）。
@@ -252,6 +268,7 @@ pub async fn fetch_atp_history(
                 bridged_original_url,
                 is_sensitive: crate::atp::record_has_media_self_label(record),
                 seiran_attachments: seiran_attachments_of(record),
+                threadgate_allow: None,
             });
 
             if posts.len() >= max_posts {
@@ -332,6 +349,7 @@ pub async fn fetch_single_bsky_post(
         bridged_original_url,
         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
         seiran_attachments: seiran_attachments_of(&p["record"]),
+        threadgate_allow: None,
     }))
 }
 
@@ -541,6 +559,40 @@ pub async fn upsert_bsky_post(
     actor_id: i64,
     post: &BskyPost,
 ) -> Result<i64, sqlx::Error> {
+    upsert_bsky_post_with(pool, queue, http, actor_id, post, GateFetch::Inline).await
+}
+
+/// `upsert_bsky_post` と同じだが、返信許可・引用可否の取得（投稿1件ごとに `getRecord` 2回）を
+/// 待たずに `Job::BskyGatesFetch` へ回す。検索結果のように多数の投稿をまとめて取り込み、
+/// その応答を利用者が待っている場合に使う。PostView に threadgate が付いていれば返信制限は
+/// その場で保存する（引用可否はジョブが取るまで「制限なし」）。
+pub async fn upsert_bsky_post_deferring_gates(
+    pool: &sqlx::PgPool,
+    queue: &Arc<dyn JobQueue>,
+    http: &reqwest::Client,
+    actor_id: i64,
+    post: &BskyPost,
+) -> Result<i64, sqlx::Error> {
+    upsert_bsky_post_with(pool, queue, http, actor_id, post, GateFetch::Deferred).await
+}
+
+/// 返信許可・引用可否をいつ取得するか。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GateFetch {
+    /// 保存の中で取得する（取り込んだ投稿にすぐ返信・引用しうる経路）。
+    Inline,
+    /// `Job::BskyGatesFetch` に回す。
+    Deferred,
+}
+
+async fn upsert_bsky_post_with(
+    pool: &sqlx::PgPool,
+    queue: &Arc<dyn JobQueue>,
+    http: &reqwest::Client,
+    actor_id: i64,
+    post: &BskyPost,
+    gate_fetch: GateFetch,
+) -> Result<i64, sqlx::Error> {
     if let Some(id) = sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
         .bind(&post.uri)
         .fetch_optional(pool)
@@ -729,18 +781,38 @@ pub async fn upsert_bsky_post(
         // 返信許可（threadgate）・引用可否（postgate）を取得して保存する（#返信/引用グレーアウト）。
         // 取得失敗時は両方とも「制限なし」のまま（デフォルト値: bsky_reply_allow=NULL,
         // bsky_quote_disabled=false）にしておくのが安全（誤ってボタンをグレーアウトしない）。
-        let (reply_allow, quote_disabled) =
-            fetch_bsky_gates(http, &post.author_did, &post.uri).await;
-        if let Err(e) = sqlx::query(
-            "UPDATE posts SET bsky_reply_allow = $1, bsky_quote_disabled = $2 WHERE id = $3",
-        )
-        .bind(&reply_allow)
-        .bind(quote_disabled)
-        .bind(final_id)
-        .execute(pool)
-        .await
-        {
-            tracing::error!("[upsert_bsky_post] gate情報保存失敗（スキップ）: {}", e);
+        let gates = match gate_fetch {
+            GateFetch::Inline => Some(fetch_bsky_gates(http, &post.author_did, &post.uri).await),
+            GateFetch::Deferred => {
+                if let Err(e) = queue
+                    .enqueue(
+                        Job::BskyGatesFetch {
+                            post_id: final_id,
+                            author_did: post.author_did.clone(),
+                            at_uri: post.uri.clone(),
+                        },
+                        priority::NORMAL,
+                    )
+                    .await
+                {
+                    tracing::error!("[upsert_bsky_post] BskyGatesFetch enqueue失敗: {}", e);
+                }
+                post.threadgate_allow
+                    .clone()
+                    .map(|allow| (Some(allow), false))
+            }
+        };
+        if let Some((reply_allow, quote_disabled)) = gates {
+            if let Err(e) = crate::repository::bsky_ingest::set_bsky_gates(
+                pool,
+                final_id,
+                reply_allow.as_ref(),
+                quote_disabled,
+            )
+            .await
+            {
+                tracing::error!("[upsert_bsky_post] gate情報保存失敗（スキップ）: {}", e);
+            }
         }
     }
 
@@ -929,6 +1001,7 @@ pub async fn search_appview_posts(
                             .map(str::to_string),
                         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
                         seiran_attachments: seiran_attachments_of(&p["record"]),
+                        threadgate_allow: threadgate_allow_of_post_view(p),
                     })
                 })
                 .collect()

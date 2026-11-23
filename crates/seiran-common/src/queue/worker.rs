@@ -569,6 +569,13 @@ async fn dispatch_job(job: Job, ctx: Arc<JobContext>) -> Result<(), JobError> {
         } => jobs::link_card_embed_resolve::handle(post_id, position, url, ctx)
             .await
             .map_err(JobError::from),
+        Job::BskyGatesFetch {
+            post_id,
+            author_did,
+            at_uri,
+        } => jobs::bsky_gates_fetch::handle(post_id, author_did, at_uri, ctx)
+            .await
+            .map_err(JobError::from),
         Job::RemoteInstanceInfoResolve { domain } => {
             jobs::remote_instance_info_resolve::handle(domain, ctx)
                 .await
@@ -653,6 +660,7 @@ fn job_name(job: &Job) -> &'static str {
         Job::RelayFollowSync { .. } => "RelayFollowSync",
         Job::OgpFetch { .. } => "OgpFetch",
         Job::LinkCardEmbedResolve { .. } => "LinkCardEmbedResolve",
+        Job::BskyGatesFetch { .. } => "BskyGatesFetch",
         Job::RemoteInstanceInfoResolve { .. } => "RemoteInstanceInfoResolve",
         Job::FollowImportProcess { .. } => "FollowImportProcess",
         Job::EmojiImportProcess { .. } => "EmojiImportProcess",
@@ -808,6 +816,13 @@ fn retry_config_for(job: &Job) -> RetryConfig {
         Job::LinkCardEmbedResolve { .. } => RetryConfig {
             // OgpFetch と同様の軽量ベストエフォート取得。取得できなければembed_src無しの
             // まま諦めてよい（一般URLカード表示にフォールバック、投稿自体は保存済み）。
+            max_attempts: 3,
+            base_delay_ms: 2000,
+            max_delay_ms: 30_000,
+        },
+        Job::BskyGatesFetch { .. } => RetryConfig {
+            // 取得失敗は「制限なし」として保存する（同期取得していたときと同じ扱い）ので、
+            // リトライするのは DB 保存の失敗だけ。
             max_attempts: 3,
             base_delay_ms: 2000,
             max_delay_ms: 30_000,

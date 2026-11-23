@@ -289,7 +289,8 @@ pub(crate) async fn persist_appview_posts(
                 continue;
             }
         };
-        match seiran_common::atp::upsert_bsky_post(
+        // 返信許可・引用可否の取得は検索の応答を待たせないようジョブへ回す
+        match seiran_common::atp::upsert_bsky_post_deferring_gates(
             &state.db,
             &state.job_queue,
             &state.http_client,
