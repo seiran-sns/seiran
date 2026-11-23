@@ -9,6 +9,7 @@ import ServerInfoDialog from "../common/ServerInfoDialog";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import { useMigrationImportActive } from "../../hooks/useMigrationImport";
 import styles from "./AppShell.module.css";
+import { useBackgroundImports } from "../../contexts/BackgroundImportsContext";
 
 interface NavItem {
   to: string;
@@ -39,6 +40,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { user, logout } = useAuth();
   const site = useSiteMeta();
   const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
+  const { followImportActive, emojiImportActive } = useBackgroundImports();
   const location = useLocation();
   const [serverInfoOpen, setServerInfoOpen] = useState(false);
   // Bluesky からの転入の取り込みが裏で続いている間は、設定 > インポートへ誘う印を出す。
@@ -48,12 +50,12 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
     if (item.to === "/messages") return { ...item, badge: dmUnreadCount };
     if (item.to === "/notifications") return { ...item, badge: unread };
     if (item.to === "/settings") {
-      return { ...item, badge: followRequestCount, dot: migrationImportActive };
+      return { ...item, badge: followRequestCount, dot: migrationImportActive || followImportActive };
     }
     return item;
   });
   const navItems = canAccessAdminPage(user?.role)
-    ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin", badge: openReportCount }]
+    ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin", badge: openReportCount, dot: emojiImportActive }]
     : baseItems;
 
   function handleLogout() {

@@ -15,6 +15,7 @@ import AuthIpBlocksPanel from "../components/admin/AuthIpBlocksPanel";
 import ServerBlocksPanel from "../components/admin/ServerBlocksPanel";
 import { useAuth } from "../contexts/AuthContext";
 import { useStreamingContext } from "../contexts/StreamingContext";
+import { useBackgroundImports } from "../contexts/BackgroundImportsContext";
 import { AdminTopic, canAccessAdminPage, getAdminTopics } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
 import panel from "../components/common/Panel.module.css";
@@ -43,11 +44,13 @@ export default function AdminPage() {
   const navigate = useNavigate();
   const { slug } = useParams<{ slug: string }>();
   const { openReportCount } = useStreamingContext();
+  const { emojiImportActive } = useBackgroundImports();
 
   const allowedTopics = useMemo(() => new Set(getAdminTopics(user?.role)), [user?.role]);
   const visibleTabDefs = useMemo(() => TAB_DEFS.filter((def) => allowedTopics.has(def.topic)), [allowedTopics]);
   const tabs = visibleTabDefs.map((def) => t(def.labelKey));
   const badges = visibleTabDefs.map((def) => (def.topic === "reports" ? openReportCount : undefined));
+  const dots = visibleTabDefs.map((def) => def.topic === "emojis" && emojiImportActive);
 
   const tab = visibleTabDefs.findIndex((def) => def.slug === slug);
 
@@ -84,7 +87,7 @@ export default function AdminPage() {
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
-      <Tabs tabs={tabs} active={tab} onChange={goToTab} sticky top={0} scrollable badges={badges} />
+      <Tabs tabs={tabs} active={tab} onChange={goToTab} sticky top={0} scrollable badges={badges} dots={dots} />
       <ActivePanel />
     </div>
   );

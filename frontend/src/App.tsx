@@ -7,6 +7,7 @@ import { HomeFeedProvider } from "./contexts/HomeFeedContext";
 import { ComposerProvider } from "./contexts/ComposerContext";
 import { SiteMetaProvider } from "./contexts/SiteMetaContext";
 import { StreamingProvider } from "./contexts/StreamingContext";
+import { BackgroundImportsProvider } from "./contexts/BackgroundImportsContext";
 import { ThemeProvider } from "./contexts/ThemeContext";
 import { ToastProvider } from "./contexts/ToastContext";
 import ReloadRequiredDialog from "./components/common/ReloadRequiredDialog";
@@ -350,15 +351,17 @@ export default function App() {
         <ToastProvider>
           <AuthProvider>
             <StreamingProvider>
-              <RightPaneProvider>
-                <HomeFeedProvider>
-                  <ComposerProvider>
-                    <AppRoutes />
-                    <ReloadRequiredDialog />
-                    <ServerUnavailableDialog />
-                  </ComposerProvider>
-                </HomeFeedProvider>
-              </RightPaneProvider>
+              <BackgroundImportsProvider>
+                <RightPaneProvider>
+                  <HomeFeedProvider>
+                    <ComposerProvider>
+                      <AppRoutes />
+                      <ReloadRequiredDialog />
+                      <ServerUnavailableDialog />
+                    </ComposerProvider>
+                  </HomeFeedProvider>
+                </RightPaneProvider>
+              </BackgroundImportsProvider>
             </StreamingProvider>
           </AuthProvider>
         </ToastProvider>

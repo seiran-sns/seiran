@@ -6,6 +6,7 @@ import type { FollowImportStatusResponse } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import MigrationImportSection from "./MigrationImportSection";
 import styles from "./FollowImportSettings.module.css";
+import { useBackgroundImports } from "../contexts/BackgroundImportsContext";
 
 const POLL_INTERVAL_MS = 1500;
 
@@ -17,6 +18,11 @@ export default function FollowImportSettingsPage() {
 
   const [text, setText] = useState("");
   const [status, setStatus] = useState<FollowImportStatusResponse | null>(null);
+  // 取り直した進捗をメニューの明滅ドットにもすぐ反映する（開始・完了の直後に消える/点くように）。
+  const { reportFollowImportStatus } = useBackgroundImports();
+  useEffect(() => {
+    if (status) reportFollowImportStatus(status.status);
+  }, [status, reportFollowImportStatus]);
   const [starting, setStarting] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState("");

@@ -7,6 +7,7 @@ import { useStreamingContext } from "../contexts/StreamingContext";
 import TwemojiEmoji from "../components/common/TwemojiEmoji";
 import { useMigrationImportActive } from "../hooks/useMigrationImport";
 import styles from "./SettingsMenu.module.css";
+import { useBackgroundImports } from "../contexts/BackgroundImportsContext";
 
 interface SettingsMenuItem {
   to?: string;
@@ -37,6 +38,7 @@ export default function SettingsMenuPage() {
   const { followRequestCount } = useStreamingContext();
   const [isLocked, setIsLocked] = useState(false);
   const migrationImportActive = useMigrationImportActive();
+  const { followImportActive } = useBackgroundImports();
 
   useEffect(() => {
     api.account.getLock().then((r) => setIsLocked(r.is_locked)).catch(() => {});
@@ -45,7 +47,7 @@ export default function SettingsMenuPage() {
   // 承認制フォロー（鍵アカウント）中のみ「承認待ちフォロー」項目を表示する。
   // Bluesky からの転入の取り込みが裏で続いている間は、インポートの項目に印を出す。
   const baseItems = BASE_ITEMS.map((item) =>
-    item.to === "/settings/follow-import" ? { ...item, dot: migrationImportActive } : item,
+    item.to === "/settings/follow-import" ? { ...item, dot: migrationImportActive || followImportActive } : item,
   );
   const items: SettingsMenuItem[] = isLocked
     ? [
