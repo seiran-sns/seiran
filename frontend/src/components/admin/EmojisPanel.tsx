@@ -6,6 +6,7 @@ import EmojiImportDialog from "./EmojiImportDialog";
 import panel from "../common/Panel.module.css";
 import TwemojiText from "../common/TwemojiText";
 import styles from "../../pages/Admin.module.css";
+import { useBackgroundImports } from "../../contexts/BackgroundImportsContext";
 
 type EmojiTab = "local" | "remote";
 
@@ -43,6 +44,11 @@ export default function EmojisPanel() {
   const importFileRef = useRef<HTMLInputElement>(null);
   const [uploadingZip, setUploadingZip] = useState(false);
   const [importStatus, setImportStatus] = useState<EmojiImportStatus | null>(null);
+  // 取り直した進捗をメニュー・タブの明滅ドットにもすぐ反映する。
+  const { reportEmojiImportStatus } = useBackgroundImports();
+  useEffect(() => {
+    if (importStatus) reportEmojiImportStatus(importStatus.status);
+  }, [importStatus, reportEmojiImportStatus]);
   const [importError, setImportError] = useState("");
   const [cancellingImport, setCancellingImport] = useState(false);
   const [exporting, setExporting] = useState(false);

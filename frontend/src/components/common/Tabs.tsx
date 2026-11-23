@@ -19,10 +19,12 @@ interface TabsProps {
   scrollable?: boolean;
   /** タブごとの件数バッジ（`tabs` と同じ並び）。0・未指定のタブには出さない。 */
   badges?: (number | undefined)[];
+  /** タブごとの明滅ドット（裏で続く処理がある印。件数バッジがあればそちらを優先）。 */
+  dots?: boolean[];
 }
 
 /** 右ペイン等で使う横並びタブ。選択状態は呼び出し側が保持する。 */
-export default function Tabs({ tabs, active, onChange, sticky, top, scrollable, badges }: TabsProps) {
+export default function Tabs({ tabs, active, onChange, sticky, top, scrollable, badges, dots }: TabsProps) {
   const containerRef = useRef<HTMLDivElement>(null);
 
   // 選択中のタブが見えるよう、タブコンテナだけを横移動する（scrollIntoViewはwindowも縦に動かし
@@ -50,6 +52,7 @@ export default function Tabs({ tabs, active, onChange, sticky, top, scrollable, 
         >
           {label}
           {!!badges?.[i] && <span className={styles.badge}>{badges[i]! > 99 ? "99+" : badges[i]}</span>}
+          {!badges?.[i] && dots?.[i] && <span className={styles.dot} aria-hidden="true" />}
         </button>
       ))}
     </div>

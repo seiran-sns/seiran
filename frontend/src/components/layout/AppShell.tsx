@@ -13,6 +13,7 @@ import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
 import { useMigrationImportActive, useMigrationImportWatcher } from "../../hooks/useMigrationImport";
 import styles from "./AppShell.module.css";
+import { useBackgroundImports } from "../../contexts/BackgroundImportsContext";
 
 interface AppShellProps {
   /** 中央ペイン（メインコンテンツストリーム）。 */
@@ -37,6 +38,8 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   // 開くまで気づけない件数を、閉じたままでも見えるようにする（通知は🔔にも出すが、メニューの
   // 中の「通知」にもバッジがあるので合計に含める）。
   const menuBadgeCount = unread + dmUnreadCount + followRequestCount + openReportCount;
+  // ☰ の明滅ドットも、メニューの中の項目（設定・管理）のドットをまとめたもの。
+  const { followImportActive, emojiImportActive } = useBackgroundImports();
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -97,7 +100,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               {menuBadgeCount > 99 ? "99+" : menuBadgeCount}
             </span>
           )}
-          {menuBadgeCount === 0 && migrationImportActive && (
+          {menuBadgeCount === 0 && (migrationImportActive || followImportActive || emojiImportActive) && (
             <span className={styles.floatingMenuDot} aria-hidden="true" />
           )}
         </button>

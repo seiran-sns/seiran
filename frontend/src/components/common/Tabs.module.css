@@ -62,3 +62,31 @@
   padding: 3px 6px;
   border-radius: 999px;
 }
+
+/* タブの明滅ドット（左メニューの .navDot と同じ見た目）。 */
+.dot {
+  display: inline-block;
+  margin-left: 6px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #dc2626;
+  vertical-align: 1px;
+  animation: tabDotBlink 1.6s ease-in-out infinite;
+}
+
+@keyframes tabDotBlink {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.25;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dot {
+    animation: none;
+  }
+}
