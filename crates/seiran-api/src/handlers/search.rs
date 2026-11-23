@@ -3,6 +3,10 @@
 //! GET /api/notes/search?q=<query>&limit=<n>&session_id=<id>&until_id=<id>&since_id=<id>
 //!
 //! ローカル DB と Bsky AppView（public.api.bsky.app）を並行検索してブレンドする。
+//!
+//! 検索はログイン必須（Misskey・Mastodon 互換 API も同じ）。全文検索はクエリによって重く、
+//! AppView の結果の保存（外部への問い合わせを伴う）も起きるので、回数制限の掛からない
+//! 未ログインのリクエストには開かない。共通関数は閲覧者を必須の引数に取る。
 
 use axum::{
     extract::{Query, State},
@@ -12,7 +16,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 
 use super::notes::NoteResponse;
-use crate::middleware::MaybeAuthedUser;
+use crate::middleware::AuthedUser;
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -38,7 +42,7 @@ pub struct SearchResponse {
 pub async fn search_notes(
     Query(q): Query<SearchQuery>,
     State(state): State<AppState>,
-    MaybeAuthedUser(user): MaybeAuthedUser,
+    user: AuthedUser,
 ) -> impl IntoResponse {
     let raw_query = q.q.as_deref().unwrap_or("").trim().to_string();
     if raw_query.is_empty() {
@@ -52,25 +56,21 @@ pub async fn search_notes(
     // スクロールによる続き取得（session_id/until_id/since_idのいずれかを指定）は
     // レート制限の回数に含めない（issue #223）。
     let is_initial_search = q.session_id.is_none() && q.until_id.is_none() && q.since_id.is_none();
-    if let Some(actor_id) = user.as_ref().map(|u| u.actor_id) {
-        if let Err(e) =
-            crate::rate_limit::check_search_rate_limit(&state, actor_id, is_initial_search).await
-        {
-            return e.into_response();
-        }
+    if let Err(e) =
+        crate::rate_limit::check_search_rate_limit(&state, user.actor_id, is_initial_search).await
+    {
+        return e.into_response();
     }
 
     let limit = q.limit.unwrap_or(30).clamp(1, 100) as usize;
-    let viewer = user
-        .as_ref()
-        .map(|user| (user.actor_id, user.username.as_str()));
+    let viewer = (user.actor_id, user.username.as_str());
 
     // since/until指定（Misskey互換のカーソルページング）はセッションを使わない。
     if q.since_id.is_some() || q.until_id.is_some() {
         let ids =
             search_post_ids_by_cursor(&state, &raw_query, limit, q.until_id, q.since_id, viewer)
                 .await;
-        return fetch_and_respond(&state, ids, None, viewer.map(|(id, _)| id)).await;
+        return fetch_and_respond(&state, ids, None, Some(viewer.0)).await;
     }
 
     // ── セッション継続（過去掘り） ────────────────────────────────────────────
@@ -83,8 +83,7 @@ pub async fn search_notes(
                 state
                     .search_store
                     .put_buffer(sid, buf, local_until_id, appview_cursor);
-                return fetch_and_respond(&state, ids, Some(sid.clone()), viewer.map(|(id, _)| id))
-                    .await;
+                return fetch_and_respond(&state, ids, Some(sid.clone()), Some(viewer.0)).await;
             }
 
             // バッファ不足: ローカル DB を追加フェッチ
@@ -123,8 +122,7 @@ pub async fn search_notes(
             state
                 .search_store
                 .put_buffer(sid, remaining, new_local_until, new_appview_cursor);
-            return fetch_and_respond(&state, ids, Some(sid.clone()), viewer.map(|(id, _)| id))
-                .await;
+            return fetch_and_respond(&state, ids, Some(sid.clone()), Some(viewer.0)).await;
         }
         // セッション消滅 → ローカル DB のみフォールバック
     }
@@ -152,13 +150,7 @@ pub async fn search_notes(
         appview_cursor,
     );
 
-    fetch_and_respond(
-        &state,
-        return_ids,
-        Some(new_session_id),
-        viewer.map(|(id, _)| id),
-    )
-    .await
+    fetch_and_respond(&state, return_ids, Some(new_session_id), Some(viewer.0)).await
 }
 
 /// カーソル（`until_id`/`since_id`）指定の検索で、表示すべき post_id を新しい順に最大
@@ -172,7 +164,7 @@ pub(crate) async fn search_post_ids_by_cursor(
     limit: usize,
     until_id: Option<i64>,
     since_id: Option<i64>,
-    viewer: Option<(i64, &str)>,
+    viewer: (i64, &str),
 ) -> Vec<i64> {
     if since_id.is_some() {
         let ids = search_local_db(&state.db, query, limit as i64, None, since_id, viewer).await;
@@ -237,7 +229,7 @@ pub(crate) async fn search_local_db(
     fetch_limit: i64,
     until_id: Option<i64>,
     since_id: Option<i64>,
-    me: Option<(i64, &str)>,
+    me: (i64, &str),
 ) -> Vec<i64> {
     seiran_common::repository::post_search::search_local_post_ids(
         db,
@@ -245,7 +237,7 @@ pub(crate) async fn search_local_db(
         fetch_limit,
         until_id,
         since_id,
-        me,
+        Some(me),
     )
     .await
     .unwrap_or_default()
