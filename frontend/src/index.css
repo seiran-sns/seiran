@@ -8,7 +8,7 @@
   --text: #16203a;
   --text-dim: #5b6782;
   --text-faint: #98a1b5;
-  --accent: #2563eb;
+  --accent: #2563eb; /* サイトカラー未設定時の既定色。バックエンドの seiran_common::DEFAULT_SITE_COLOR と揃える */
   --accent-strong: #1d4ed8;
   --accent-hover: #1e40af;
   --accent-deep: #dbeafe;
