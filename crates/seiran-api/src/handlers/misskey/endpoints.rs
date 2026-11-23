@@ -763,6 +763,29 @@ pub async fn i_notifications(
     Ok(Json(build_notifications(&state, rows, user.actor_id).await))
 }
 
+/// 未読通知の件数を数える上限。表示は「99+」で足りる。
+const UNREAD_NOTIFICATION_COUNT_CAP: i64 = 100;
+
+#[derive(Serialize)]
+pub struct UnreadNotificationCount {
+    pub count: i64,
+}
+
+/// GET /api/notifications/unread-count
+/// 未読通知の件数（seiran UI のメニュー「通知」と🔔のバッジ用）。既読にするのは通知一覧の
+/// 取得（`i/notifications` の `markAsRead`）だけで、ここでは変えない。
+pub async fn notifications_unread_count(
+    user: AuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<UnreadNotificationCount>, ApiError> {
+    let count = state
+        .notifications
+        .count_unread(user.actor_id, UNREAD_NOTIFICATION_COUNT_CAP)
+        .await
+        .map_err(internal)?;
+    Ok(Json(UnreadNotificationCount { count }))
+}
+
 // ─── フォロー ────────────────────────────────────────────────────────
 
 /// POST /api/following/create

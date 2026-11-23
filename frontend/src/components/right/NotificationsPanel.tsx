@@ -37,6 +37,8 @@ function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, stri
 }
 
 const PAGE_SIZE = 20;
+/** 未読だった通知を目立たせておく時間（10秒＋元の背景へ戻る1.5秒。CSS の notifFresh と揃える）。 */
+const FRESH_HIGHLIGHT_MS = 11_500;
 
 /** 2行で出す通知種別。2行目に対象ポストを出し、どのポストへの反応かを一目でわかるようにする。 */
 const TWO_LINE_TYPES = new Set(["reaction", "renote"]);
@@ -199,7 +201,7 @@ export default function NotificationsPanel({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
-  const { registerNotifArrived, markRead } = useStreamingContext();
+  const { registerNotifArrived, markRead, registerNotifViewer } = useStreamingContext();
   const { showError } = useToast();
   // キャッシュがあれば初回レンダーの時点から復元済みの内容を表示する（`useEffect`経由で
   // `setItems`すると、そのeffectが走るまでの最初の1回のレンダーが空一覧になり、その一瞬だけ
@@ -265,6 +267,33 @@ export default function NotificationsPanel({
     onScrollYChange(el ? el.scrollTop : window.scrollY);
   }, [onScrollYChange, getScrollContainer]);
 
+  // 未読だった（今回の取得で初めて表示した）通知。少しの間だけ背景色で目立たせる。
+  // 既読にした取得の結果だけを対象にする（絞り込み中は既読にしないので、次に開いても未読のまま
+  // また目立ってしまう）。キャッシュから戻した一覧は前に表示済みなので目立たせない。
+  const [freshIds, setFreshIds] = useState<ReadonlySet<string>>(() => new Set());
+  const freshTimersRef = useRef<number[]>([]);
+  const highlightFresh = useCallback((rows: NotificationItem[]) => {
+    const ids = rows.filter((r) => r.isRead === false).map((r) => r.id);
+    if (ids.length === 0) return;
+    setFreshIds((current) => new Set([...current, ...ids]));
+    const timer = window.setTimeout(() => {
+      freshTimersRef.current = freshTimersRef.current.filter((t) => t !== timer);
+      setFreshIds((current) => {
+        const next = new Set(current);
+        ids.forEach((id) => next.delete(id));
+        return next;
+      });
+    }, FRESH_HIGHLIGHT_MS);
+    freshTimersRef.current.push(timer);
+  }, []);
+  useEffect(() => () => freshTimersRef.current.forEach((t) => window.clearTimeout(t)), []);
+
+  // 既読にしながら表示している間は、未読バッジを出さない（StreamingContext.registerNotifViewer）。
+  useEffect(() => {
+    if (filterActive) return;
+    return registerNotifViewer();
+  }, [filterActive, registerNotifViewer]);
+
   // 指定ID（無ければ先頭ページ相当）より新しい通知を取得して先頭へ差し込み、既読マークする。
   // 初回マウント時（キャッシュ復元時の補完）とWS新着シグナル受信時の両方で共有する。
   // 絞り込み中は、一覧に出ていない通知まで既読にしてしまわないよう既読化しない。
@@ -278,10 +307,13 @@ export default function NotificationsPanel({
           const fresh = rows.filter((r) => !seen.has(r.id));
           return fresh.length > 0 ? [...fresh, ...prev] : prev;
         });
-        if (markAsRead) markRead();
+        if (markAsRead) {
+          markRead();
+          highlightFresh(rows);
+        }
       });
     },
-    [setItems, markRead]
+    [setItems, markRead, highlightFresh]
   );
 
   useEffect(() => {
@@ -302,6 +334,7 @@ export default function NotificationsPanel({
         replaceItems(rows);
         setHasMore(rows.length >= PAGE_SIZE);
         markRead();
+        highlightFresh(rows);
       })
       .catch((e) => !cancelled && onError(e))
       .finally(() => !cancelled && setLoadingInitial(false));
@@ -324,7 +357,10 @@ export default function NotificationsPanel({
         if (cancelled) return;
         replaceItems(rows);
         setHasMore(rows.length >= PAGE_SIZE);
-        if (!filterActive) markRead();
+        if (!filterActive) {
+          markRead();
+          highlightFresh(rows);
+        }
       })
       .catch((e) => !cancelled && onError(e))
       .finally(() => !cancelled && setLoadingInitial(false));
@@ -487,7 +523,12 @@ export default function NotificationsPanel({
       </>
     );
     const Tag = stacked ? "div" : "li";
-    const className = [styles.item, clickNoteId && styles.clickable, stacked && styles.stackItem]
+    const className = [
+      styles.item,
+      clickNoteId && styles.clickable,
+      stacked && styles.stackItem,
+      freshIds.has(n.id) && styles.fresh,
+    ]
       .filter(Boolean)
       .join(" ");
     return (

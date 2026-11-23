@@ -258,6 +258,9 @@ pub struct MisskeyNotification {
     /// クライアントはラッパーの投稿ページではなくリポスト元へ遷移させる。
     #[serde(skip_serializing_if = "std::ops::Not::not")]
     pub repost_withdrawn: bool,
+    /// 取得した時点で既読だったか。`markAsRead: true` の取得でも既読にする前の状態を返すので、
+    /// クライアントは今回初めて見せる通知を見分けられる（seiran UI は新着として目立たせる）。
+    pub is_read: bool,
 }
 
 /// `POST /api/users/following`（フォロー中一覧）の要素。Misskey 本家の `Following` エンティティ

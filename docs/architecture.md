@@ -318,7 +318,7 @@ React 19 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<Brow
   - `AuthContext`: 起動時のセッション確認は `authSession.ts::resolveSession()`。`GET /api/auth/me` が明示的な 401 のときだけトークンを捨ててログアウトし、それ以外（再起動中の接続断・5xx）は 1s/2s/4s でリトライしても駄目ならトークンを保ったまま `sessionUnresolved` にする（バックエンドの再起動でログインが失われないように）。その間 `RequireAuth` はログイン画面へ誘導せず、`ServerUnavailableDialog` が5秒間隔で再試行して復旧したら閉じる。任意の API の 401 でも即ログアウトせず、同じ方針で `/auth/me` を1本にまとめて再確認する。
   - `ComposerContext`: 返信モーダルと、`openCompose(initialText)` による本文プリフィル付き投稿モーダル。
   - `RightPaneContext`: 右ペインのサブタブ状態と、ポスト詳細「前後のポスト」のスクロール位置（ポストIDごと）。
-  - `StreamingContext`: WebSocket の集約。タイムライン新着はチャンネル購読（`subscribeChannel(spec, onNote)`）で受け、閲覧者権限付きの `GET /api/notes/:id` で完全な `NoteResponse` に補完してから渡す（`resolveStreamNote`。失敗時はストリームのペイロードを使う）。購読中のチャンネルは再接続時（`onOpen`）に全部 `connect` し直す。`HomePage` は表示タブが変わるたびに購読を切り替える。DM 新着は `registerDirectMessage` で振り分け、未読数 `dmUnreadCount` を LeftNav のバッジに渡す。`followAccepted` で `followStatusStore` を更新する。
+  - `StreamingContext`: WebSocket の集約。タイムライン新着はチャンネル購読（`subscribeChannel(spec, onNote)`）で受け、閲覧者権限付きの `GET /api/notes/:id` で完全な `NoteResponse` に補完してから渡す（`resolveStreamNote`。失敗時はストリームのペイロードを使う）。購読中のチャンネルは再接続時（`onOpen`）に全部 `connect` し直す。`HomePage` は表示タブが変わるたびに購読を切り替える。DM 新着は `registerDirectMessage` で振り分け、未読数 `dmUnreadCount` を LeftNav のバッジに渡す。通知の未読数 `unread` も同様に LeftNav とスマホ下部の🔔のバッジに渡す（通知一覧の表示中は `registerNotifViewer` で0に保つ）。`followAccepted` で `followStatusStore` を更新する。
   - `ToastContext`: トースト通知。
 - `stores/` — モジュールスコープの `Map` + `useSyncExternalStore` の外部ストア。同じ対象が画面内の複数コンポーネントに同時に出るので、ローカル state で持たずここを購読する。
   - `followStatusStore.ts`（`userRelationshipStore` のファサード）: フォロー状態。キーは `lib/format.ts` の `profileQuery(username, domain)`。

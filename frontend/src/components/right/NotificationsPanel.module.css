@@ -115,3 +115,18 @@
 .stackItem.clickable:hover {
   background: linear-gradient(var(--card-bg-hover), var(--card-bg-hover)), var(--bg);
 }
+
+/* 未読だった（今回初めて表示した）通知。10秒目立たせたあと1.5秒かけて元の背景へ戻す
+ * （NotificationsPanel.tsx の FRESH_HIGHLIGHT_MS がこの合計の後にクラスを外す）。 */
+.item.fresh {
+  animation: notifFresh 11.5s ease forwards;
+}
+@keyframes notifFresh {
+  0%,
+  87% {
+    background: var(--notif-fresh-bg);
+  }
+  100% {
+    background: var(--card-bg);
+  }
+}

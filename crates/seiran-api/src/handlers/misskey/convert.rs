@@ -844,6 +844,7 @@ pub async fn build_notifications(
                     .related_actor_id
                     .and_then(|id| notifier_users.get(&id).cloned()),
                 repost_withdrawn: r.repost_withdrawn,
+                is_read: r.is_read,
             }
         })
         .collect()

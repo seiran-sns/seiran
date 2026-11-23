@@ -32,7 +32,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
-  const { dmUnreadCount } = useStreamingContext();
+  const { dmUnreadCount, unread } = useStreamingContext();
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -122,6 +122,9 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               title={t("nav:leftNav.notifications")}
             >
               <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
+              {unread > 0 && (
+                <span className={styles.floatingMenuBadge}>{unread > 99 ? "99+" : unread}</span>
+              )}
             </Link>
 
             <Link

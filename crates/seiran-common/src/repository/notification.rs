@@ -160,6 +160,10 @@ pub trait NotificationRepository: Send + Sync {
 
     /// 自分宛ての未読通知をすべて既読にする（Misskey `markAsRead` 相当）。
     async fn mark_all_read(&self, recipient_actor_id: i64) -> Result<(), sqlx::Error>;
+
+    /// 自分宛ての未読通知の件数。`cap` 件で数えるのを止める（表示は「99+」で足りるので、
+    /// 通知を読まないまま溜めた利用者で未読を全件数えない）。
+    async fn count_unread(&self, recipient_actor_id: i64, cap: i64) -> Result<i64, sqlx::Error>;
 }
 
 /// 連打抑制の対象なら、抑制期間の始まり（これより大きい id の通知を「直近」とみなす）を返す。
@@ -301,5 +305,20 @@ impl NotificationRepository for PgNotificationRepository {
         .execute(&self.pool)
         .await
         .map(|_| ())
+    }
+
+    async fn count_unread(&self, recipient_actor_id: i64, cap: i64) -> Result<i64, sqlx::Error> {
+        let (count,): (i64,) = sqlx::query_as(
+            "SELECT COUNT(*) FROM (
+                 SELECT 1 FROM notifications
+                 WHERE recipient_actor_id = $1 AND NOT is_read
+                 LIMIT $2
+             ) unread",
+        )
+        .bind(recipient_actor_id)
+        .bind(cap)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok(count)
     }
 }

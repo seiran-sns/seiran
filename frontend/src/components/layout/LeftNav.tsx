@@ -38,7 +38,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
-  const { dmUnreadCount, followRequestCount } = useStreamingContext();
+  const { dmUnreadCount, followRequestCount, unread } = useStreamingContext();
   const location = useLocation();
   const [serverInfoOpen, setServerInfoOpen] = useState(false);
   // Bluesky からの転入の取り込みが裏で続いている間は、設定 > インポートへ誘う印を出す。
@@ -46,6 +46,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
 
   const baseItems = NAV_ITEMS.map((item) => {
     if (item.to === "/messages") return { ...item, badge: dmUnreadCount };
+    if (item.to === "/notifications") return { ...item, badge: unread };
     if (item.to === "/settings") {
       return { ...item, badge: followRequestCount, dot: migrationImportActive };
     }

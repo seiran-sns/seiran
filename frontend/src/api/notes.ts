@@ -265,6 +265,10 @@ export const notifications = {
       userIds: params?.userIds,
     });
   },
+  /** 未読通知の件数（100件で頭打ち）。メニュー「通知」と🔔のバッジ用。 */
+  unreadCount() {
+    return request<{ count: number }>("GET", "/notifications/unread-count");
+  },
 };
 
 export const reactions = {
