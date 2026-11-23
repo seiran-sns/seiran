@@ -192,7 +192,7 @@ export default function ReportsPanel() {
             {r.subject_role && !isPrivilegedRole(r.subject_role) && (
               <>
                 {SILENCED_ROLES.has(r.subject_role) ? (
-                  <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+                  <span className={styles.dangerDone}>
                     {t("admin:reports.silencedBadge")}
                   </span>
                 ) : (
@@ -208,7 +208,7 @@ export default function ReportsPanel() {
                   </button>
                 )}
                 {r.subject_role === "quarantine" ? (
-                  <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+                  <span className={styles.dangerDone}>
                     {t("admin:reports.quarantinedBadge")}
                   </span>
                 ) : (
@@ -226,7 +226,7 @@ export default function ReportsPanel() {
               </>
             )}
             {r.subject_suspended ? (
-              <span className={`${styles.badge} ${styles.badgeSuspended}`}>
+              <span className={styles.dangerDone}>
                 {t("admin:reports.suspendedBadge")}
               </span>
             ) : isPrivilegedRole(r.subject_role) ? null : (

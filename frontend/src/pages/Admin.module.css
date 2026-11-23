@@ -173,6 +173,26 @@
   color: #fff;
 }
 
+/* 処分ボタン（.btnDanger）を済ませた後の表示。ボタンと同じ大きさ・形のまま塗りつぶし、
+   押された状態に見せる（小さなバッジにすると、同じ場所のボタンと別物に見えるため）。押せない。 */
+.dangerDone {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: var(--danger);
+  border: 1px solid var(--danger);
+  color: #fff;
+  border-radius: 8px;
+  padding: 7px 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: default;
+}
+
+.dangerDone::before {
+  content: "✓";
+}
+
 .error {
   color: var(--danger);
   font-size: 0.82rem;
