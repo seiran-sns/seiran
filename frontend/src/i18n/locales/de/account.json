@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "Spracheinstellung gespeichert.",
     "quickReactionsTitle": "Schnellreaktionsleiste",
-    "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen"
+    "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen",
+    "deviceGroupTitle": "Einstellungen nur für dieses Gerät",
+    "dataSaverTitle": "Datensparmodus",
+    "dataSaverLabel": "Bilder und Videos in Beiträgen erst beim Antippen laden"
   },
   "privacySettings": {
     "title": "Datenschutzeinstellungen",

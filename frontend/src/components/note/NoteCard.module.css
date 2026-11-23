@@ -416,6 +416,41 @@
 }
 
 .attachBlurred { filter: blur(18px); }
+
+/* ギガ節約モードで読み込む前の添付。blurhash（8x8 を引き伸ばしてぼかす）か無地を敷き、
+ * 押すと読み込む。複数枚ブロックのタイルは箱の大きさが決まっているので全面を埋める。 */
+.dataSaverPlaceholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 1px solid var(--border);
+  background-color: var(--bg-elev);
+  background-size: cover;
+  background-position: center;
+  cursor: pointer;
+  font: inherit;
+}
+/* 1枚ブロックは画像の高さで決まるので、縦横比で場所を取る（最大は通常表示と同じ正方形）。 */
+.dataSaverPlaceholderSingle {
+  height: auto;
+  max-height: 100cqw;
+}
+.dataSaverPlaceholderVideo {
+  height: auto;
+  max-height: 300px;
+  border-radius: 8px;
+}
+.dataSaverBadge {
+  border: 1px solid rgba(255, 255, 255, 0.8);
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  padding: 5px 10px;
+  font-size: 0.8rem;
+}
 .sensitiveReveal {
   position: absolute;
   top: 8px;

@@ -143,6 +143,10 @@ pub struct AttachmentResponse {
     /// （`is_gif`が別途カバーする）。Bsky embed選択（#227）で「静止画」と
     /// 「アニメGIF」のラジオボタン項目を分けるために使う。
     pub is_animated_image: bool,
+    /// 読み込み前のプレースホルダ用（`media_files.blurhash`）。フロントのギガ節約モードが、
+    /// クリックで読み込むまでの間に表示する。リモート添付と uploadBlob 由来は `None`。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blurhash: Option<String>,
 }
 
 /// URLカード（`app.bsky.embed.external`、GIFピッカー由来を除く）。

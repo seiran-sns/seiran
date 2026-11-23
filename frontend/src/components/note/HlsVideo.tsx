@@ -14,6 +14,9 @@ interface HlsVideoProps {
   /** true の場合GIFアニメ（Tenor/Klipy由来、またはBskyのGIF直接アップロード由来
    * `presentation:"gif"`）として扱い、自動再生・ミュート・ループ・コントロール無しで表示する。 */
   isGif?: boolean;
+  /** true の場合、読み込み次第そのまま再生する（ギガ節約モードで、プレースホルダを押して
+   * 読み込んだとき。もう一度再生ボタンを押させないため）。 */
+  autoPlay?: boolean;
   onClick?: (e: React.MouseEvent) => void;
 }
 
@@ -35,10 +38,12 @@ export default function HlsVideo({
   className,
   isHls,
   isGif,
+  autoPlay,
   onClick,
 }: HlsVideoProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const src = sources[0];
+  const playOnLoad = isGif || autoPlay;
 
   useEffect(() => {
     const video = videoRef.current;
@@ -48,7 +53,7 @@ export default function HlsVideo({
       const hls = new Hls();
       hls.loadSource(src);
       hls.attachMedia(video);
-      if (isGif) {
+      if (playOnLoad) {
         hls.on(Hls.Events.MANIFEST_PARSED, () => {
           video.play().catch(() => {});
         });
@@ -61,11 +66,11 @@ export default function HlsVideo({
       // HLSはsrcをJS側で遅延セットするため、マウント時点のautoPlay属性だけでは
       // 再生が始まらない（srcが無い状態でブラウザに解釈されるため）。GIF表示は
       // 明示的にplay()を呼んで開始する。
-      if (isGif) {
+      if (playOnLoad) {
         video.play().catch(() => {});
       }
     }
-  }, [src, isHls, isGif]);
+  }, [src, isHls, playOnLoad]);
 
   const hasFallback = !isHls && sources.length > 1;
 
@@ -75,7 +80,7 @@ export default function HlsVideo({
       src={isHls || hasFallback ? undefined : src}
       poster={poster}
       controls={!isGif}
-      autoPlay={isGif}
+      autoPlay={playOnLoad}
       muted={isGif}
       loop={isGif}
       playsInline={isGif}

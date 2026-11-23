@@ -58,5 +58,7 @@
     "admins": "관리자",
     "contact": "문의처",
     "termsOfService": "이용약관"
-  }
+  },
+  "dataSaverLoadImage": "이미지 불러오기",
+  "dataSaverLoadVideo": "동영상 불러오기"
 }

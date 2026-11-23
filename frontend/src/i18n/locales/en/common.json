@@ -58,5 +58,7 @@
     "admins": "Administrators",
     "contact": "Contact",
     "termsOfService": "Terms of service"
-  }
+  },
+  "dataSaverLoadImage": "Load image",
+  "dataSaverLoadVideo": "Load video"
 }

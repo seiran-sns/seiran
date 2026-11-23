@@ -162,6 +162,13 @@
 * WebSocket で出てきた新着も通常 API の完全なデータで補完するので、アンケート・添付・引用がリロード無しで出る。
 * 外部メディアは直リンクとメディアプロキシ経由の両方を候補として持ち、読み込みに失敗したら次の候補へ切り替える（`RemoteImg`／`HlsVideo`／`mediaSources`）。直リンクはCORS・ホットリンク拒否・混在コンテンツで、プロキシは想定外形式の拒否・サイズ上限で、それぞれ別の理由で失敗するため。優先順は、SNSサーバー由来（アバター・カスタム絵文字・添付・リアクション絵文字）は一斉アクセスを想定済みなので直リンク優先、OGPサムネイル（`LinkCard`）の出元は想定していないのでプロキシ優先。同一オリジンの画像は候補1本で直接出す（`docs/architecture.md` 7節）。
 
+#### ギガ節約モード
+* 端末ごとの設定（設定画面「表示」＞「この端末だけの設定」、`localStorage` の `seiran_data_saver`、`stores/dataSaverStore.ts`）。オンの間、投稿の添付の画像・動画（GIF アニメの動画も、動画のポスター画像も）をクリックするまで読み込まない。通信量を気にするかは回線次第なので、アカウントでなく端末に持つ。アバター・カスタム絵文字・URLカードのサムネイルは対象外。
+* 読み込む前は、添付の `blurhash`（このサーバーにアップロードされたメディアだけが持つ。`media_files.blurhash`）のぼかしを、無ければ無地を、本来のタイルの場所に敷き、「画像を読み込む」「動画を読み込む」を重ねる。複数枚のブロックはタイルの大きさが決まっているのでそのまま埋め、1枚の画像と動画は実寸の縦横比（不明なら16:9）で場所を取る。
+* 押すとその添付だけを読み込み、以後は普通の添付と同じに振る舞う（再び押すとライトボックスを開く）。NSFW の画像は押した時点でぼかしも外す。そこからもう一度押すとぼかしに戻るのは通常の NSFW と同じ。動画は読み込んだらそのまま再生する（`HlsVideo` の `autoPlay`）。
+* ライトボックスの前後移動は、読み込み済みの画像だけを辿る（隣の画像はスワイプに備えて常に描画するので、未読み込みの画像を隣に置くと読み込んでしまうため）。
+* 一度読み込んだ添付は、モードを切っても入れ直しても読み込み済みのまま（通信は済んでいるため）。
+
 #### GIFアニメの自動再生表示
 * `NoteAttachment.isGif` が真の動画（GIF ピッカー由来、または `presentation:"gif"`）は `HlsVideo` を自動再生・ミュート・ループ・コントロール無し（`autoplay muted loop playsinline`）にする。通常の動画は `controls` 付きで、再生するまでポスター画像のまま。
 * HLS（`.m3u8`、Bsky 動画全般）はメディアプロキシを通さず動画CDN（`video.bsky.app`、CORS 許可済み）を直接参照する。プロキシは `application/vnd.apple.mpegurl` を許可せず、プロキシ経由だとプレイリスト内のセグメントの相対パスも解決できないため（`NoteAttachments.tsx`）。ポスターは通常の画像なので他の添付と同じ候補順（直リンク優先）の先頭を使う。
@@ -318,10 +325,11 @@
 * **`/oauth-connect`**: Mastodon 互換 OAuth の承認画面（要ログイン、`GET /oauth/authorize` からリダイレクトされる）。アプリ名はクエリではなく `GET /api/oauth/apps/:client_id` の登録内容から出す。「承認する」で `POST /api/oauth/authorize` を呼び、登録済み `redirect_uri` へ遷移する。OOB（`urn:ietf:wg:oauth:2.0:oob`）なら認可コードを読み取り専用の入力欄に表示する。見た目・文言は MiAuth の `/connect/:sessionId` と共通（`miauth` 名前空間）。
 * **`/settings/app-tokens`**（#60）: 発行済みアプリトークン（MiAuth・Mastodon 互換 OAuth・画面から直接発行した分。自社ログインは対象外）の一覧と個別無効化。上部の「用途（任意）」と発行ボタンでその場で発行できる。トークン本体は発行直後の応答にしか無い（DB には `jti` だけ）ので、警告文とコピーできるコードブロックで一度だけ見せる。
 * **`/settings/guides`**（`GuidesSettingsPage`）: 「おせっかいなガイドの非表示」。確認ダイアログの「今後は表示しない」で非表示にしたガイド（`users.hidden_guides`）を、ガイドごとのトグルで再び表示できる。ガイドの一覧は `seiran_common::guides::HIDEABLE_GUIDES`。
-* **`/settings/appearance`**: 
+* **`/settings/appearance`**: アカウントに保存する設定（言語・ワンタッチリアクションバー）を上に、端末ごとに保存する設定（テーマ・ギガ節約モード）を「この端末だけの設定」の見出しの下にまとめる。
   * テーマ（環境に従う/常にライト/常にダーク）は `localStorage`（`seiran_theme`）だけに保存する。`ThemeProvider` が `<html data-theme>` を切り替え、CSS 変数で全画面に反映する。「環境に従う」は `prefers-color-scheme` の変化をリアルタイムに反映する。ちらつきを防ぐため React のマウント前に `index.html` のインラインスクリプトで `data-theme` を決める。
   * 言語（自動/日本語/English/繁體中文/简体中文/한국어/Español/Deutsch/Français）は選んだ時点で `users.language_preference` に保存し、`i18n.changeLanguage()` で反映する（`docs/architecture.md` 8節の i18n）。
   * ワンタッチリアクションバー（2.2b節のクイックリアクションのポップアップ）を出すかのチェックボックス。切り替えた時点で `POST /api/account/quick-reactions` で `users.show_quick_reactions` に保存し、ログイン中ユーザーの情報へ即反映する。
+  * ギガ節約モード（2.2b節の「ギガ節約モード」）のチェックボックス。`localStorage`（`seiran_data_saver`）に保存し、開いている他のタブにも `storage` イベントで反映する。
 
 ### 2.8 【管理画面】（`/admin`）表示時
 管理者・モデレーター専用（`isAdminRole`）。右ペインはプレースホルダで、中央ペインが本体。

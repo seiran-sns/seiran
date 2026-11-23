@@ -9,6 +9,7 @@ import i18n, {
   isDisplayLanguage,
   type DisplayLanguage,
 } from "../i18n";
+import { setDataSaver, useDataSaver } from "../stores/dataSaverStore";
 import styles from "./AppearanceSettings.module.css";
 
 type LanguageOption = "auto" | DisplayLanguage;
@@ -46,13 +47,14 @@ function detectAutoLanguage(): string {
   return "en";
 }
 
-/** 設定画面「表示」（#55, #127）。テーマ（環境に従う/常にライト/常にダーク）・言語（自動/日本語/英語）・
- * ワンタッチリアクションバーの表示を選択する。 */
+/** 設定画面「表示」（#55, #127）。アカウントに保存する言語・ワンタッチリアクションバーの表示と、
+ * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・ギガ節約モードを選択する。 */
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
   const { preference: themePreference, setPreference: setThemePreference } =
     useTheme();
+  const dataSaver = useDataSaver();
 
   const [selected, setSelected] = useState<LanguageOption>(
     isDisplayLanguage(user?.language_preference ?? "")
@@ -105,25 +107,6 @@ export default function AppearanceSettingsPage() {
     <>
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
-          {t("account:appearanceSettings.themeTitle")}
-        </h3>
-        <div className={styles.themeOptions}>
-          {THEME_OPTIONS.map((option) => (
-            <button
-              key={option}
-              type="button"
-              className={`${styles.themeOption} ${themePreference === option ? styles.themeOptionActive : ""}`}
-              aria-pressed={themePreference === option}
-              onClick={() => setThemePreference(option)}
-            >
-              {t(`account:${THEME_LABEL_KEYS[option]}`)}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.languageTitle")}
         </h3>
         {error && <p className={styles.error}>{error}</p>}
@@ -161,6 +144,43 @@ export default function AppearanceSettingsPage() {
             onChange={(e) => toggleQuickReactions(e.target.checked)}
           />
           {t("account:appearanceSettings.quickReactionsLabel")}
+        </label>
+      </div>
+
+      <h2 className={styles.groupTitle}>
+        {t("account:appearanceSettings.deviceGroupTitle")}
+      </h2>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.themeTitle")}
+        </h3>
+        <div className={styles.themeOptions}>
+          {THEME_OPTIONS.map((option) => (
+            <button
+              key={option}
+              type="button"
+              className={`${styles.themeOption} ${themePreference === option ? styles.themeOptionActive : ""}`}
+              aria-pressed={themePreference === option}
+              onClick={() => setThemePreference(option)}
+            >
+              {t(`account:${THEME_LABEL_KEYS[option]}`)}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.dataSaverTitle")}
+        </h3>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            checked={dataSaver}
+            onChange={(e) => setDataSaver(e.target.checked)}
+          />
+          {t("account:appearanceSettings.dataSaverLabel")}
         </label>
       </div>
     </>

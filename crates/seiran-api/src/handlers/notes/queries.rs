@@ -166,6 +166,7 @@ pub async fn fetch_attachments_map(
                 is_sensitive: row.is_sensitive,
                 is_gif: row.is_gif,
                 is_animated_image: row.is_animated_image,
+                blurhash: row.blurhash,
             });
     }
     map

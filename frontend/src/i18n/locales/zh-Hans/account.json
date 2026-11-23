@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "已保存语言首选项。",
     "quickReactionsTitle": "一键回应栏",
-    "quickReactionsLabel": "显示常用表情符号的一键回应栏"
+    "quickReactionsLabel": "显示常用表情符号的一键回应栏",
+    "deviceGroupTitle": "仅限此设备的设置",
+    "dataSaverTitle": "流量节省模式",
+    "dataSaverLabel": "帖子中的图片和视频在点击前不加载"
   },
   "privacySettings": {
     "title": "隐私设置",

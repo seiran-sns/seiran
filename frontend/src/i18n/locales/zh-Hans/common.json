@@ -58,5 +58,7 @@
     "admins": "管理员",
     "contact": "联系方式",
     "termsOfService": "使用条款"
-  }
+  },
+  "dataSaverLoadImage": "加载图片",
+  "dataSaverLoadVideo": "加载视频"
 }

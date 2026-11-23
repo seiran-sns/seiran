@@ -25,6 +25,8 @@ pub struct AttachmentRow {
     pub is_sensitive: bool,
     pub is_gif: bool,
     pub is_animated_image: bool,
+    /// 読み込み前のプレースホルダ用（`media_files.blurhash`）。リモート添付と uploadBlob 由来は `None`。
+    pub blurhash: Option<String>,
 }
 
 /// 投稿ごとの添付を `position` 順に返す。
@@ -51,7 +53,8 @@ pub async fn attachments_for_posts(
                 mf.created_at AS media_created_at,
                 pa.is_sensitive,
                 pa.is_gif,
-                COALESCE(mf.is_animated_image, FALSE) AS is_animated_image
+                COALESCE(mf.is_animated_image, FALSE) AS is_animated_image,
+                mf.blurhash AS blurhash
          FROM post_attachments pa
          LEFT JOIN media_files mf ON mf.id = pa.media_file_id
          LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id

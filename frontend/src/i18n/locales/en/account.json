@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "Language preference saved.",
     "quickReactionsTitle": "One-tap reaction bar",
-    "quickReactionsLabel": "Show the one-tap reaction bar with your frequently used emoji"
+    "quickReactionsLabel": "Show the one-tap reaction bar with your frequently used emoji",
+    "deviceGroupTitle": "Settings for this device only",
+    "dataSaverTitle": "Data saver mode",
+    "dataSaverLabel": "Don't load images and videos in posts until tapped"
   },
   "privacySettings": {
     "title": "Privacy settings",

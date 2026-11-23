@@ -305,6 +305,8 @@ export interface NoteAttachment {
   /** ローカルアップロードのアニメーション画像（GIF/APNG/WebPアニメ）由来かどうか。
    * リモート受信添付は常にfalse（`isGif`が別途カバーする）。Bsky embed選択（#227）で使う。 */
   isAnimatedImage: boolean;
+  /** 読み込み前のプレースホルダ用（ギガ節約モード）。このサーバーにアップロードされたメディアだけが持つ。 */
+  blurhash?: string;
 }
 
 /** NoteResponse（バックエンドは `#[serde(rename_all = "camelCase")]`）。 */

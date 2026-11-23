@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "言語設定を保存しました。",
     "quickReactionsTitle": "ワンタッチリアクションバー",
-    "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する"
+    "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する",
+    "deviceGroupTitle": "この端末だけの設定",
+    "dataSaverTitle": "ギガ節約モード",
+    "dataSaverLabel": "投稿の画像・動画をタップするまで読み込まない"
   },
   "privacySettings": {
     "title": "プライバシー設定",

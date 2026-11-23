@@ -932,6 +932,7 @@ mod tests {
             is_sensitive: true,
             is_gif: false,
             is_animated_image: false,
+            blurhash: None,
         };
 
         let note = to_misskey_note(

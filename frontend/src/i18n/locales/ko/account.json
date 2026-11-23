@@ -32,7 +32,10 @@
     "languageFr": "Français",
     "saved": "언어 환경설정이 저장되었습니다.",
     "quickReactionsTitle": "원터치 리액션 바",
-    "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시"
+    "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시",
+    "deviceGroupTitle": "이 기기 전용 설정",
+    "dataSaverTitle": "데이터 절약 모드",
+    "dataSaverLabel": "게시물의 이미지·동영상을 탭하기 전까지 불러오지 않음"
   },
   "privacySettings": {
     "title": "개인정보 보호 설정",
