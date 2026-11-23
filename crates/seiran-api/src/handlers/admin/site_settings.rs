@@ -684,7 +684,7 @@ pub async fn send_smtp_test_email(
         .ok_or_else(|| ApiError::BadRequest("SMTP_TEST_RECIPIENT_REQUIRED".to_string()))?
         .to_string();
     let settings = smtp_settings_for_test(&state, &req).await?;
-    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let language = crate::i18n::request_language(req.language.as_deref(), &headers);
     let result = crate::mailer::send_test_email(&settings, language, &to).await;
     Ok(Json(SmtpTestResponse::from_result(result)))
 }

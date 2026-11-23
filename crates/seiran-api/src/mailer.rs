@@ -3,9 +3,9 @@
 //! SMTP 設定は DB の `site_settings` テーブルから取得する。
 //! キー: `smtp_host`, `smtp_port`, `smtp_username`, `smtp_password`, `smtp_from`, `smtp_tls`
 //!
-//! 件名・本文は `locales/<lang>/mail.json` から引く（`crate::mail_i18n`）。どの関数も送る言語を
-//! 引数に取り、言語の決め方は呼び出し側が `mail_i18n::request_language` /
-//! `mail_i18n::stored_language` で決める。
+//! 件名・本文は `locales/<lang>/mail.json` から引く（`crate::i18n`）。どの関数も送る言語を
+//! 引数に取り、言語の決め方は呼び出し側が `i18n::request_language` /
+//! `i18n::stored_language` で決める。
 
 use lettre::message::header::ContentType;
 use lettre::transport::smtp::authentication::Credentials;
@@ -13,7 +13,12 @@ use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor};
 use std::collections::HashMap;
 use std::time::Duration;
 
-use crate::mail_i18n::text;
+use crate::i18n::Namespace;
+
+/// メールの文言（`locales/<lang>/mail.json`）。
+fn text(language: &str, key: &str, vars: &[(&str, &str)]) -> String {
+    crate::i18n::text(Namespace::Mail, language, key, vars)
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum MailError {

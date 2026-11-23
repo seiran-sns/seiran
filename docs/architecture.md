@@ -345,8 +345,11 @@ React 19 + Vite + TypeScript。react-router-dom v7 を declarative mode（`<Brow
 
 SPA の index.html には投稿・プロフィールごとの `<meta>` が無い。User-Agent で既知の bot だけを出し分けると未知のクローラーを取りこぼすので、`/notes/:id`・`/@:handle`（AP の `Accept` を除く）は常に、index.html の `<head>` に OGP を注入したものを返す。ブラウザはそのまま SPA が起動し、クローラーは `<meta>` だけを読む。
 
+- それ以外の SPA のページ（トップページ等、`handlers::frontend` が index.html を返すとき）は、サイト全体の OGP を注入する（`ogp::site_ogp_html`）。タイトル・`og:site_name` はサイト名（タグ除去、未設定なら `seiran`）、説明はサイト説明（タグ除去・1行化・140字で切る）、画像はアップロードしたサイトアイコンの 512px 版（`/api/site-icon/{sha256}/512`。`/favicon.ico` の 32px はカードに小さすぎる）、無ければ URL 指定のアイコン。正方形の画像なので `twitter:card` は `summary`（プロフィールのアバターも同じ。`summary_large_image` は投稿の添付画像だけ）。`/` もディレクトリの index.html を自動で返させず注入側へ回す。注入は `SEIRAN_FRONTEND_DIR` でバックエンドがフロントエンドを配る構成だけで効く（別の Web サーバーが index.html を配る構成では素の index.html のまま）。
+- 言語: 投稿・プロフィールのタイトルの書式と、サイト説明が未設定のときの既定文は `Accept-Language` の言語で出す（`locales/{言語}/ogp.json`、無ければ `en`。11節「サーバーの文言の言語」）。リンクカードを作るクローラーの多くは `Accept-Language` を送らないので、実際には英語になることが多い。サイト説明・投稿本文は書かれた言語のまま。注入した応答には `Vary: Accept-Language` と `Cache-Control: no-cache` を付ける。
+
 - `handlers/ogp.rs` が DB から投稿/アクターを取り、`SEIRAN_FRONTEND_DIR` の index.html（未設定なら `state.frontend_origin`、既定 `http://frontend:5173`、`FRONTEND_ORIGIN` で変更可、から取得）に `<title>`・OGP・Twitter Card を注入する。`GET /notes/:id` は `get_note_ap` が `Accept` で AP の JSON-LD と出し分け、`GET /@:handle` はプロフィール専用。
-- 見つからない・DB エラー時は注入せず index.html をそのまま返す（404 を返すと SPA が起動できず、「見つかりません」表示やリモートアクターの取得が動かない）。
+- 見つからない・DB エラー時はサイト全体の OGP を注入した index.html を返す（404 を返すと SPA が起動できず、「見つかりません」表示やリモートアクターの取得が動かない）。
 - 可視性は通常の閲覧と同じ判定（`find_by_id_for_viewer` を viewer 無しで呼ぶ）。
 - nginx と Vite の proxy は `/notes`・`/@`・`/announces` を常にバックエンドへ転送する。
 - リポスト（Announce）の AP の URL は `/announces/:id`。ブラウザで開かれたら `get_announce_redirect` が `/notes/:id` へリダイレクトする（AP クライアント向けの Announce 応答は未実装で 404）。
@@ -406,7 +409,7 @@ SPA の index.html には投稿・プロフィールごとの `<meta>` が無い
 - **「開く」**（`handlers/open_target.rs`）は薄いオーケストレーション層で、Bsky は `seiran-common::atp`、AP Actor は `target_resolve`、AP 投稿は受信 Create ジョブを再利用する。外部の ActivityStreams 文書の取得はメディアプロキシと同じ検証（DNS 固定・非公開IP拒否・リダイレクト再検証）を通す。フロントの `OpenTargetDialog` は QR を同期認識し、重い OCR Worker は読み取り開始後に動的 import する。
 - **通報**は `ReportModal` と `POST /api/reports` でローカル・Fedi・Bsky を統一し、管理画面の「通報」タブで台帳閲覧・クローズ・内部コメント・凍結/投稿削除・リモート転送を行う（転送の仕様は `docs/protocols.md`「通報配送」）。
 - **Snowflake ID** はブラウザで精度を失わないよう、API では文字列で受け渡す。
-- **メールの言語**（`seiran-api/src/mail_i18n.rs`）: 件名・本文は `crates/seiran-api/locales/{言語}/mail.json` に表示言語の8言語分を置き、`include_str!` でバイナリへ埋め込む。形式はフロントの `i18n/locales` と同じ（入れ子のキー、`{{name}}` の差し込み）で、ユーザー製の言語ファイルを配るときにフロントと同じ形で扱えるようにしている。全言語のキーと差し込み名の一致は単体テストが検査し、欠けたキーは英語で補う。送る言語は次のとおり決める。
+- **サーバーの文言の言語**（`seiran-api/src/i18n.rs`）: メールの件名・本文は `crates/seiran-api/locales/{言語}/mail.json`、OGP のタイトル書式・既定の説明文は同じ場所の `ogp.json` に、表示言語の8言語分を置き、`include_str!` でバイナリへ埋め込む。形式はフロントの `i18n/locales` と同じ（入れ子のキー、`{{name}}` の差し込み）で、ユーザー製の言語ファイルを配るときにフロントと同じ形で扱えるようにしている。全言語のキーと差し込み名の一致はファイルごとに単体テストが検査し、欠けたキーは英語で補う。OGP の言語は `Accept-Language` → `en`（8.1節）。メールを送る言語は次のとおり決める。
   - ブラウザの操作が契機のメール（登録のメール確認・メール変更・2FA解除・パスワードリセット・管理画面のテスト送信）: リクエストの `language`（フロントの `mailLanguage()` が送る、画面に出ている表示言語）→ `Accept-Language` を表示言語へ丸めた値 → `en`。中国語の丸めはフロントの `normalizeDetectedLanguage` と同じ。
   - ATP クライアントの操作が契機のメール（`createSession` のログイン確認コード・`requestPlcOperationSignature` の確認コード）: クライアントは画面の言語を送ってこないので、`users.language_preference` → `Accept-Language` → `en`。
   - 定期処理から後で送るメール（DID 転入の案内・警告・取り消し）: 保存した `at_migration_requests.language`（NULL なら `en`。`docs/account_migration.md` 4節）。ログイン済みユーザーへ非同期に送るメールを足すときは `users.language_preference`（NULL なら `en`）を使う。

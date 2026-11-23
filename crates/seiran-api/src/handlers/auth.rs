@@ -620,7 +620,7 @@ async fn login_to_migration(
             return Err(ApiError::Unauthorized("INVALID_CREDENTIALS"));
         }
         // 照合の間に完了・打ち切りされていたら、通常のログイン失敗と同じに扱う。
-        let language = crate::mail_i18n::request_language(req.language.as_deref(), headers);
+        let language = crate::i18n::request_language(req.language.as_deref(), headers);
         return match crate::handlers::migration::reissue_session(state, m.id, language).await? {
             Some(session) => Ok(Json(LoginResponse::MigrationResume(
                 MigrationResumeResponse {
@@ -767,7 +767,7 @@ pub async fn me(
 pub struct RequestPasswordResetRequest {
     pub email: String,
     /// メールを送る言語（フロントが画面に出している表示言語）。無い・非対応なら
-    /// `Accept-Language` から決める（`mail_i18n::request_language`）。
+    /// `Accept-Language` から決める（`i18n::request_language`）。
     pub language: Option<String>,
 }
 
@@ -847,7 +847,7 @@ pub async fn request_password_reset(
                 state.local_domain, token
             );
             let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
-            let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+            let language = crate::i18n::request_language(req.language.as_deref(), &headers);
             if let Err(e) =
                 send_password_reset_email(&smtp_settings, language, &email, &reset_url).await
             {

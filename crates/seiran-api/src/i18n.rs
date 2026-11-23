@@ -1,10 +1,11 @@
-//! メールの文言と、送る言語の決定。
+//! サーバーが出す文言（メール・OGP）と、その言語の決定。
 //!
-//! 文言は `locales/<lang>/mail.json` に言語ごとに置き、バイナリへ埋め込む。形式はフロントの
-//! `frontend/src/i18n/locales/<lang>/*.json` と同じ（入れ子のキー、差し込みは `{{name}}`）にして、
-//! 将来ユーザーが作った言語ファイルを配るときにフロントと同じ形で扱えるようにしている。
+//! 文言は `locales/<lang>/<namespace>.json` に言語・用途ごとに置き、バイナリへ埋め込む。形式は
+//! フロントの `frontend/src/i18n/locales/<lang>/*.json` と同じ（入れ子のキー、差し込みは
+//! `{{name}}`）にして、将来ユーザーが作った言語ファイルを配るときにフロントと同じ形で扱えるように
+//! している。
 //!
-//! 送る言語は表示言語（[`SUPPORTED_DISPLAY_LANGUAGES`]）のどれか。決め方は
+//! 言語は表示言語（[`SUPPORTED_DISPLAY_LANGUAGES`]）のどれか。決め方は
 //! [`request_language`] と [`stored_language`] を参照。
 
 use std::collections::HashMap;
@@ -17,16 +18,27 @@ use serde_json::Value;
 /// どの手がかりからも言語が決まらないときの言語（フロントの `fallbackLng` と同じ）。
 pub const FALLBACK_LANGUAGE: &str = "en";
 
+/// 文言の用途。`locales/<lang>/` の下のファイル名に対応する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Namespace {
+    /// メールの件名・本文（`mail.json`、`crate::mailer`）。
+    Mail,
+    /// OGP の `<title>`・`og:title`・既定の `og:description`（`ogp.json`、`handlers::ogp`）。
+    Ogp,
+}
+
 macro_rules! locale {
     ($lang:literal) => {
         (
             $lang,
             include_str!(concat!("../locales/", $lang, "/mail.json")),
+            include_str!(concat!("../locales/", $lang, "/ogp.json")),
         )
     };
 }
 
-const LOCALE_SOURCES: [(&str, &str); SUPPORTED_DISPLAY_LANGUAGES.len()] = [
+/// （言語, `mail.json`, `ogp.json`）。
+const LOCALE_SOURCES: [(&str, &str, &str); SUPPORTED_DISPLAY_LANGUAGES.len()] = [
     locale!("ja"),
     locale!("en"),
     locale!("zh-Hant"),
@@ -37,13 +49,20 @@ const LOCALE_SOURCES: [(&str, &str); SUPPORTED_DISPLAY_LANGUAGES.len()] = [
     locale!("fr"),
 ];
 
-static MESSAGES: LazyLock<HashMap<&'static str, Value>> = LazyLock::new(|| {
+static MESSAGES: LazyLock<HashMap<(Namespace, &'static str), Value>> = LazyLock::new(|| {
     LOCALE_SOURCES
         .iter()
-        .map(|(lang, source)| {
-            let value = serde_json::from_str(source)
-                .unwrap_or_else(|e| panic!("locales/{lang}/mail.json が JSON として読めない: {e}"));
-            (*lang, value)
+        .flat_map(|(lang, mail, ogp)| {
+            [
+                (Namespace::Mail, *lang, *mail, "mail"),
+                (Namespace::Ogp, *lang, *ogp, "ogp"),
+            ]
+        })
+        .map(|(ns, lang, source, file)| {
+            let value = serde_json::from_str(source).unwrap_or_else(|e| {
+                panic!("locales/{lang}/{file}.json が JSON として読めない: {e}")
+            });
+            ((ns, lang), value)
         })
         .collect()
 });
@@ -56,7 +75,7 @@ fn supported(language: &str) -> Option<&'static str> {
         .find(|l| *l == language)
 }
 
-/// ブラウザの言語操作から呼ばれるメールの言語。`preferred`（フロントが送る、画面に出ている
+/// ブラウザの操作から決める言語（メール・OGP）。`preferred`（フロントが送る、画面に出ている
 /// 言語。ATP クライアントからの操作では `users.language_preference`）が対応言語ならそれ、
 /// 無いか非対応なら `Accept-Language` を表示言語へ丸めたもの、それでも決まらなければ
 /// [`FALLBACK_LANGUAGE`]。
@@ -121,14 +140,14 @@ fn lookup<'a>(messages: &'a Value, key: &str) -> Option<&'a str> {
         .as_str()
 }
 
-/// `key`（`verifyEmail.body` のような `.` 区切り）の文言に `vars` を差し込む。その言語に
-/// キーが無ければ [`FALLBACK_LANGUAGE`] の文言を使う（言語ファイルの欠けでメールが送れなく
-/// ならないように）。
-pub fn text(language: &str, key: &str, vars: &[(&str, &str)]) -> String {
+/// `namespace` の `key`（`verifyEmail.body` のような `.` 区切り）の文言に `vars` を差し込む。
+/// その言語にキーが無ければ [`FALLBACK_LANGUAGE`] の文言を使う（言語ファイルの欠けでメールが
+/// 送れなくならないように）。
+pub fn text(namespace: Namespace, language: &str, key: &str, vars: &[(&str, &str)]) -> String {
     let template = MESSAGES
-        .get(language)
+        .get(&(namespace, language))
         .and_then(|m| lookup(m, key))
-        .or_else(|| lookup(&MESSAGES[FALLBACK_LANGUAGE], key))
+        .or_else(|| lookup(&MESSAGES[&(namespace, FALLBACK_LANGUAGE)], key))
         .unwrap_or(key);
     interpolate(template, vars)
 }
@@ -195,13 +214,18 @@ mod tests {
 
     #[test]
     fn every_language_has_the_same_keys_and_placeholders() {
-        let mut reference = BTreeSet::new();
-        leaves(&MESSAGES["ja"], "", &mut reference);
-        assert!(!reference.is_empty());
-        for lang in SUPPORTED_DISPLAY_LANGUAGES {
-            let mut got = BTreeSet::new();
-            leaves(&MESSAGES[lang], "", &mut got);
-            assert_eq!(got, reference, "{lang} のキーか差し込み名が ja と違う");
+        for ns in [Namespace::Mail, Namespace::Ogp] {
+            let mut reference = BTreeSet::new();
+            leaves(&MESSAGES[&(ns, "ja")], "", &mut reference);
+            assert!(!reference.is_empty(), "{ns:?}");
+            for lang in SUPPORTED_DISPLAY_LANGUAGES {
+                let mut got = BTreeSet::new();
+                leaves(&MESSAGES[&(ns, lang)], "", &mut got);
+                assert_eq!(
+                    got, reference,
+                    "{ns:?}: {lang} のキーか差し込み名が ja と違う"
+                );
+            }
         }
     }
 
@@ -255,6 +279,7 @@ mod tests {
     fn text_renders_every_language() {
         for lang in SUPPORTED_DISPLAY_LANGUAGES {
             let body = text(
+                Namespace::Mail,
                 lang,
                 "verifyEmail.body",
                 &[("url", "https://example.test/v")],
@@ -262,6 +287,9 @@ mod tests {
             assert!(body.contains("https://example.test/v"), "{lang}");
             assert!(!body.contains("{{"), "{lang}");
         }
-        assert_eq!(text("ja", "no.such.key", &[]), "no.such.key");
+        assert_eq!(
+            text(Namespace::Mail, "ja", "no.such.key", &[]),
+            "no.such.key"
+        );
     }
 }

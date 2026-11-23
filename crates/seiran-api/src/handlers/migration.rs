@@ -220,7 +220,7 @@ pub async fn start(
 
     let request_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
     let (request_token, request_token_hash) = generate_request_token();
-    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let language = crate::i18n::request_language(req.language.as_deref(), &headers);
     let now = chrono::Utc::now();
 
     let repo = PgAtMigrationRepository::new(state.db.clone());
@@ -901,7 +901,7 @@ pub async fn resume(
 ) -> Result<Json<MigrationSession>, ApiError> {
     let token_hash = hex::encode(Sha256::digest(req.token.as_bytes()));
     let (request_token, request_token_hash) = generate_request_token();
-    let language = crate::mail_i18n::request_language(req.language.as_deref(), &headers);
+    let language = crate::i18n::request_language(req.language.as_deref(), &headers);
     let id =
         migration_repo::consume_resume_token(&state.db, &token_hash, &request_token_hash, language)
             .await
