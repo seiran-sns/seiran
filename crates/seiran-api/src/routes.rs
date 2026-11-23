@@ -191,6 +191,10 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             get(handlers::admin::reports::list_reports),
         )
         .route(
+            "/api/admin/reports/open-count",
+            get(handlers::admin::reports::open_count),
+        )
+        .route(
             "/api/admin/reports/:id/close",
             post(handlers::admin::reports::close_report),
         )

@@ -14,6 +14,7 @@ import RelaysPanel from "../components/admin/RelaysPanel";
 import AuthIpBlocksPanel from "../components/admin/AuthIpBlocksPanel";
 import ServerBlocksPanel from "../components/admin/ServerBlocksPanel";
 import { useAuth } from "../contexts/AuthContext";
+import { useStreamingContext } from "../contexts/StreamingContext";
 import { AdminTopic, canAccessAdminPage, getAdminTopics } from "../lib/roles";
 import { useSwipe } from "../hooks/useSwipe";
 import panel from "../components/common/Panel.module.css";
@@ -41,10 +42,12 @@ export default function AdminPage() {
   const { user, loading } = useAuth();
   const navigate = useNavigate();
   const { slug } = useParams<{ slug: string }>();
+  const { openReportCount } = useStreamingContext();
 
   const allowedTopics = useMemo(() => new Set(getAdminTopics(user?.role)), [user?.role]);
   const visibleTabDefs = useMemo(() => TAB_DEFS.filter((def) => allowedTopics.has(def.topic)), [allowedTopics]);
   const tabs = visibleTabDefs.map((def) => t(def.labelKey));
+  const badges = visibleTabDefs.map((def) => (def.topic === "reports" ? openReportCount : undefined));
 
   const tab = visibleTabDefs.findIndex((def) => def.slug === slug);
 
@@ -81,7 +84,7 @@ export default function AdminPage() {
 
   const center = (
     <div className={styles.swipeContainer} {...swipeHandlers}>
-      <Tabs tabs={tabs} active={tab} onChange={goToTab} sticky top={0} scrollable />
+      <Tabs tabs={tabs} active={tab} onChange={goToTab} sticky top={0} scrollable badges={badges} />
       <ActivePanel />
     </div>
   );

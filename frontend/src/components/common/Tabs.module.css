@@ -48,3 +48,17 @@
   flex: 0 0 auto;
   padding: 12px 16px;
 }
+
+/* タブの件数バッジ（左メニューの件数バッジと同じ見た目）。 */
+.badge {
+  display: inline-block;
+  margin-left: 6px;
+  vertical-align: 1px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  padding: 3px 6px;
+  border-radius: 999px;
+}

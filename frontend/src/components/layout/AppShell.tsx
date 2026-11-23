@@ -32,10 +32,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
-  const { dmUnreadCount, followRequestCount, unread } = useStreamingContext();
-  // ☰ のバッジはメニューの中の項目（メッセージ・設定）のバッジの合計。メニューを開くまで気づけない
-  // 件数を、閉じたままでも見えるようにする。
-  const menuBadgeCount = dmUnreadCount + followRequestCount;
+  const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
+  // ☰ のバッジはメニューの中の項目（通知・メッセージ・設定・管理）のバッジの合計。メニューを
+  // 開くまで気づけない件数を、閉じたままでも見えるようにする（通知は🔔にも出すが、メニューの
+  // 中の「通知」にもバッジがあるので合計に含める）。
+  const menuBadgeCount = unread + dmUnreadCount + followRequestCount + openReportCount;
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
