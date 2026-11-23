@@ -84,7 +84,8 @@
   overflow-wrap: anywhere;
 }
 
-/* 登録画面の利用規約ダイアログと同じく pre-wrap（HTML 中の改行も改行として出す）。 */
+/* 登録画面の利用規約ダイアログと同じく pre-wrap（HTML 中の改行も改行として出す。ブロック要素の
+   境目の改行は `trimBlockBoundaryNewlines` で1個取り除いてある）。 */
 .terms {
   white-space: pre-wrap;
   line-height: 1.6;

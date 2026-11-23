@@ -390,7 +390,7 @@ LeftNav の左下（ユーザーチップの下）に「このサイトについ
 - 運営者: `site_settings.operator_name`。`operator_url` があれば名前をそのリンクにする（名前が空なら URL を出す）。URL は http/https 以外をリンクにしない（サーバーも保存時に `INVALID_OPERATOR_URL` で弾く）。
 - 管理者: ロールが `admin` の未退会・未凍結のローカルユーザー。プロフィール（`/@username`）へのリンク。
 - 問い合わせ先: `site_settings.contact_email` の `mailto:` リンク。
-- 利用規約: `terms_of_service_text` を登録画面のダイアログと同じく `white-space: pre-wrap` で出す。
+- 利用規約: `terms_of_service_text` を登録画面のダイアログと同じく出す（`white-space: pre-wrap`、ブロック要素の境目の改行を1個取り除く。7節「利用規約同意」）。
 
 運営者・管理者・問い合わせ先は `GET /api/about`（認証不要）で取る。管理者一覧の DB 問い合わせをページを開くたびに呼ばれる `/api/meta` に足さないため、別にしている。運営者名・問い合わせ先は Misskey 互換の `/api/meta` の `maintainerName`/`maintainerEmail`、Mastodon 互換の `/api/v2/instance` の `contact.email` にも出す。
 
@@ -469,7 +469,7 @@ seiran では Bsky ポストを Fedi 方面へリポストすると、Fedi 側�
 アカウントを実際に作成する3つのフォーム（サインアップの直接登録・メール確認完了後の登録フォーム・Bluesky から転入）はいずれも、送信ボタンの直前に共通コンポーネント `TermsOfServiceField` を1つ置く。画面を増やさず、既存フォームへのチェックボックス追加だけで完結させる。
 
 - 管理画面の「利用規約テキスト」（`terms_of_service_text`）が空文字列の間は、`TermsOfServiceField` 自体が何も描画しない（同意対象が無いため）。
-- 空でない場合のみ、同意チェックボックス（`required`、ネイティブバリデーションで未チェックのまま送信できない）と「利用規約を読む」リンクボタンを表示する。ボタンを押すと `Modal`（`components/common/Modal`）がポップアップし、`terms_of_service_text` を `white-space: pre-wrap` で表示する（同じ文面は「このサイトについて」にも出る。4.2節）。HTML タグが使え、サニタイズしない（`site_name`/`site_description` と同じ、管理者専用入力のため）。
+- 空でない場合のみ、同意チェックボックス（`required`、ネイティブバリデーションで未チェックのまま送信できない）と「利用規約を読む」リンクボタンを表示する。ボタンを押すと `Modal`（`components/common/Modal`）がポップアップし、`terms_of_service_text` を `white-space: pre-wrap` で表示する（同じ文面は「このサイトについて」にも出る。4.2節）。pre-wrap のままだとブロック要素のタグの前後に入れたソース上の改行まで空行になるので、表示前に `utils/adminHtml.ts` の `trimBlockBoundaryNewlines` で、ブロック要素の開始・終了タグの直前と直後（要素内の先頭・末尾を含む）の改行を境目ごとに1個だけ取り除く。改行を2個以上続けて書けば、残った分が空行として出る。タグの間が空白と改行だけなら1つの境目として扱い、改行が残らなければインデントの空白も取り除く。HTML タグが使え、サニタイズしない（`site_name`/`site_description` と同じ、管理者専用入力のため）。
 - チェックを入れて登録すると、サーバー側が同意した瞬間の文面をそのまま `terms_of_service_agreements` に記録する（`docs/database.md`「利用規約同意」参照）。テキストが空でないのにチェックしないまま送信しようとした場合、サーバー側も `TOS_AGREEMENT_REQUIRED` で拒否する（フロントのネイティブバリデーションをすり抜けても最終防波堤になる）。
 
 ## 8. Unicode絵文字の表示（twemoji）

@@ -6,6 +6,7 @@ import type { AboutResponse } from "../api/types";
 import UserItem from "../components/common/UserItem";
 import AppShell from "../components/layout/AppShell";
 import { useSiteMeta } from "../contexts/SiteMetaContext";
+import { trimBlockBoundaryNewlines } from "../utils/adminHtml";
 import styles from "./AboutPage.module.css";
 
 /** http/https 以外（`javascript:` 等）はリンクにしない。サーバーも保存時に弾いているが、
@@ -101,7 +102,10 @@ export default function AboutPage() {
         <section className={styles.section}>
           <h2 className={styles.sectionTitle}>{t("common:aboutPage.termsOfService")}</h2>
           {/* 管理者専用入力のためサニタイズしない（登録画面の利用規約ダイアログと同じ扱い）。 */}
-          <div className={styles.terms} dangerouslySetInnerHTML={{ __html: site.termsOfServiceHtml }} />
+          <div
+            className={styles.terms}
+            dangerouslySetInnerHTML={{ __html: trimBlockBoundaryNewlines(site.termsOfServiceHtml) }}
+          />
         </section>
       )}
     </div>
