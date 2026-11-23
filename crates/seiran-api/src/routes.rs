@@ -386,6 +386,10 @@ fn auth_account_routes() -> Router<AppState> {
             post(handlers::account::update_language),
         )
         .route(
+            "/api/account/quick-reactions",
+            post(handlers::account::update_quick_reactions),
+        )
+        .route(
             "/api/account/hidden-guides",
             post(handlers::account::update_hidden_guide),
         )

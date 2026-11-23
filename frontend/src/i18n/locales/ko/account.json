@@ -30,7 +30,10 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "언어 환경설정이 저장되었습니다."
+    "saved": "언어 환경설정이 저장되었습니다.",
+    "quickReactionsTitle": "원터치 리액션 바",
+    "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시",
+    "quickReactionsDescription": "게시물 버튼 아래에 자주 쓰는 이모지를 한 줄로 표시합니다. 누르기만 하면 그 이모지로 리액션할 수 있습니다. 마우스로는 게시물에 커서를 올린 동안, 터치로는 화면 맨 위의 게시물 하나에만 표시됩니다. 이 설정은 계정에 저장되어 모든 기기에서 동일하게 적용됩니다."
   },
   "privacySettings": {
     "title": "개인정보 보호 설정",

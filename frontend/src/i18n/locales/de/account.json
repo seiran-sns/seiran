@@ -30,7 +30,10 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "Spracheinstellung gespeichert."
+    "saved": "Spracheinstellung gespeichert.",
+    "quickReactionsTitle": "Schnellreaktionsleiste",
+    "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen",
+    "quickReactionsDescription": "Zeigt unter den Schaltflächen eines Beitrags eine Zeile mit deinen häufig verwendeten Emojis. Ein Tipp genügt, um damit zu reagieren. Mit der Maus erscheint sie, solange du über dem Beitrag bist; auf Touchscreens nur beim obersten Beitrag auf dem Bildschirm. Diese Einstellung wird in deinem Konto gespeichert und gilt auf allen Geräten."
   },
   "privacySettings": {
     "title": "Datenschutzeinstellungen",

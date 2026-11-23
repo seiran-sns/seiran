@@ -46,10 +46,11 @@ function detectAutoLanguage(): string {
   return "en";
 }
 
-/** 設定画面「表示」（#55, #127）。テーマ（環境に従う/常にライト/常にダーク）と言語（自動/日本語/英語）を選択する。 */
+/** 設定画面「表示」（#55, #127）。テーマ（環境に従う/常にライト/常にダーク）・言語（自動/日本語/英語）・
+ * ワンタッチリアクションバーの表示を選択する。 */
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
-  const { user } = useAuth();
+  const { user, updateUser } = useAuth();
   const { preference: themePreference, setPreference: setThemePreference } =
     useTheme();
 
@@ -61,6 +62,23 @@ export default function AppearanceSettingsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
+  const [quickReactionsSaving, setQuickReactionsSaving] = useState(false);
+  const [quickReactionsError, setQuickReactionsError] = useState("");
+  // この項目を返さない版のサーバーでは、従来どおり表示されている。
+  const showQuickReactions = user?.show_quick_reactions ?? true;
+
+  async function toggleQuickReactions(show: boolean) {
+    setQuickReactionsSaving(true);
+    setQuickReactionsError("");
+    try {
+      await api.account.updateQuickReactions(show);
+      updateUser({ show_quick_reactions: show });
+    } catch (err) {
+      setQuickReactionsError(getErrorMessage(err));
+    } finally {
+      setQuickReactionsSaving(false);
+    }
+  }
 
   async function selectLanguage(option: LanguageOption) {
     setSelected(option);
@@ -128,6 +146,25 @@ export default function AppearanceSettingsPage() {
             {t("account:appearanceSettings.saved")}
           </p>
         )}
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.quickReactionsTitle")}
+        </h3>
+        {quickReactionsError && <p className={styles.error}>{quickReactionsError}</p>}
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            checked={showQuickReactions}
+            disabled={quickReactionsSaving}
+            onChange={(e) => toggleQuickReactions(e.target.checked)}
+          />
+          {t("account:appearanceSettings.quickReactionsLabel")}
+        </label>
+        <p className={styles.description}>
+          {t("account:appearanceSettings.quickReactionsDescription")}
+        </p>
       </div>
     </>
   );

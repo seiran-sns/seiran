@@ -30,7 +30,10 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "Language preference saved."
+    "saved": "Language preference saved.",
+    "quickReactionsTitle": "One-tap reaction bar",
+    "quickReactionsLabel": "Show the one-tap reaction bar with your frequently used emoji",
+    "quickReactionsDescription": "Shows a single row of your frequently used emoji below a post's buttons. Tap one to react with it. With a mouse it appears while you hover over a post; on touch screens it appears only on the topmost post on screen. This setting is saved to your account and applies on all devices."
   },
   "privacySettings": {
     "title": "Privacy settings",

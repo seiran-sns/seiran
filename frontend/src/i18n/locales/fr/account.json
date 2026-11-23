@@ -30,7 +30,10 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "Préférence de langue enregistrée."
+    "saved": "Préférence de langue enregistrée.",
+    "quickReactionsTitle": "Barre de réactions rapides",
+    "quickReactionsLabel": "Afficher la barre de réactions rapides avec vos emojis fréquents",
+    "quickReactionsDescription": "Affiche une ligne avec vos emojis les plus utilisés sous les boutons d'une publication. Touchez-en un pour réagir avec. À la souris, elle apparaît au survol de la publication ; sur écran tactile, uniquement sur la publication la plus haute de l'écran. Ce réglage est enregistré dans votre compte et s'applique sur tous vos appareils."
   },
   "privacySettings": {
     "title": "Paramètres de confidentialité",

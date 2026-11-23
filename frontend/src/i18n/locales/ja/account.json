@@ -30,7 +30,10 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "言語設定を保存しました。"
+    "saved": "言語設定を保存しました。",
+    "quickReactionsTitle": "ワンタッチリアクションバー",
+    "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する",
+    "quickReactionsDescription": "投稿のボタンの下に、よく使う絵文字を並べた1行のバーを出します。押すだけでその絵文字でリアクションできます。マウス操作ではカードにカーソルを乗せている間、タッチ操作では画面上端に近い投稿1件にだけ出ます。この設定はアカウントに保存され、どの端末でも同じになります。"
   },
   "privacySettings": {
     "title": "プライバシー設定",

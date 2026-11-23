@@ -55,6 +55,37 @@ pub async fn update_language(
 }
 
 #[derive(Deserialize)]
+pub struct UpdateQuickReactionsRequest {
+    pub show: bool,
+}
+
+/// `POST /api/account/quick-reactions`
+/// 設定画面「表示」＞「ワンタッチリアクションバー」から呼ばれる。
+pub async fn update_quick_reactions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateQuickReactionsRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+
+    state
+        .users
+        .update_show_quick_reactions(auth_user.user_id, req.show)
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("[update-quick-reactions] users UPDATE 失敗: {}", e))
+        })?;
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
 pub struct UpdateHiddenGuideRequest {
     /// `seiran_common::guides::HIDEABLE_GUIDES` のキー。
     pub guide: String,
