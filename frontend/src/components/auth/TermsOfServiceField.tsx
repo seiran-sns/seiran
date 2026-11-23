@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import Modal from "../common/Modal";
 import { useSiteMeta } from "../../contexts/SiteMetaContext";
+import { trimBlockBoundaryNewlines } from "../../utils/adminHtml";
 import styles from "../../pages/Auth.module.css";
 
 interface TermsOfServiceFieldProps {
@@ -34,8 +35,12 @@ export default function TermsOfServiceField({ agreed, onChange }: TermsOfService
       <Modal open={dialogOpen} onClose={() => setDialogOpen(false)} title={t("auth:termsOfService.dialogTitle")}>
         {/* 管理者専用入力のためサニタイズしない（`siteDescriptionHtml`と同じ扱い）。
          * white-space: pre-wrapにより、HTMLタグを使わないプレーンテキスト設定でも
-         * 改行がそのまま反映される。 */}
-        <div style={{ whiteSpace: "pre-wrap" }} dangerouslySetInnerHTML={{ __html: termsOfServiceHtml }} />
+         * 改行がそのまま反映される。ブロック要素の境目の改行は1個取り除く
+         * （`trimBlockBoundaryNewlines`。そのままだと見出し等の前後が空行になる）。 */}
+        <div
+          style={{ whiteSpace: "pre-wrap" }}
+          dangerouslySetInnerHTML={{ __html: trimBlockBoundaryNewlines(termsOfServiceHtml) }}
+        />
       </Modal>
     </>
   );
