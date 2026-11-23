@@ -462,6 +462,22 @@
   cursor: pointer;
   padding: 5px 8px;
 }
+/* NSFW 指定の画像の印。左上（右上はぼかし解除の👀）。押せないので下の画像へクリックを通す。 */
+.nsfwMarker {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.72);
+  color: #fff;
+  padding: 3px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  pointer-events: none;
+}
 .contentWarningWrap {
   margin: 6px 0 6px 50px;
   padding: 8px 10px;

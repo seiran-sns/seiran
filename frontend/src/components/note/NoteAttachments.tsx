@@ -110,6 +110,18 @@ function placeholderBackground(att: NoteAttachment): CSSProperties {
   return dataUrl ? { backgroundImage: `url(${dataUrl})` } : {};
 }
 
+/** NSFW 指定の画像に常に重ねる印（ぼかし中・ぼかし解除後・ギガ節約モードの読み込み前のどれでも）。
+ * ぼかしを外したあとや、元から blurhash のぼかししか見えない読み込み前でも、NSFW 指定だと分かるように。
+ * 投稿画面の NSFW 切り替えボタンと同じ表記。押せない（クリックは下の画像へ通す）。 */
+function NsfwMarker() {
+  return (
+    <span className={styles.nsfwMarker} aria-hidden>
+      <TwemojiEmoji emoji="🙈" />
+      NSFW
+    </span>
+  );
+}
+
 /** 実寸の縦横比。実寸が不明（リモート添付は0）なら undefined。 */
 function aspectRatio(att: NoteAttachment): number | undefined {
   return att.width > 0 && att.height > 0 ? att.width / att.height : undefined;
@@ -209,6 +221,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
               <TwemojiEmoji emoji="🖼️" /> {t("common:dataSaverLoadImage")}
             </span>
           </button>
+          {att.isSensitive && <NsfwMarker />}
         </div>
       );
     }
@@ -241,6 +254,7 @@ export default function NoteAttachments({ attachments }: NoteAttachmentsProps) {
             <TwemojiEmoji emoji="👀" />
           </button>
         )}
+        {att.isSensitive && <NsfwMarker />}
       </div>
     );
   }
