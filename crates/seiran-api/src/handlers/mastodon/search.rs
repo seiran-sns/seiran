@@ -37,6 +37,8 @@ fn is_url_like(q: &str) -> bool {
 }
 
 /// 投稿の全文検索。検索対象・回数制限はカスタム API（`GET /api/notes/search`）と同じ。
+/// 投稿の検索はログイン必須（`handlers::search`）なので、未ログインなら空を返す（アカウント・
+/// ハッシュタグの検索結果はそのまま返せるよう、エラーにはしない）。
 /// seiran の検索はオフセットではなく ID カーソルで続きを取るので、`offset` 指定（Mastodon
 /// クライアントの「さらに読み込む」）には `max_id` 無しなら空を返して終端とする。
 async fn search_statuses(
@@ -45,22 +47,23 @@ async fn search_statuses(
     q: &str,
     params: &SearchParams,
 ) -> Result<Vec<MastodonStatus>, ApiError> {
+    let Some(user) = me else {
+        return Ok(Vec::new());
+    };
     let page = params.page.page(20, 40);
     if params.offset.unwrap_or(0) > 0 && page.until_id.is_none() {
         return Ok(Vec::new());
     }
-    if let Some(user) = me {
-        let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
-        crate::rate_limit::check_search_rate_limit(state, user.actor_id, is_initial_search).await?;
-    }
-    let viewer = me.map(|u| u.actor_id);
+    let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
+    crate::rate_limit::check_search_rate_limit(state, user.actor_id, is_initial_search).await?;
+    let viewer = Some(user.actor_id);
     let ids = crate::handlers::search::search_post_ids_by_cursor(
         state,
         q,
         page.limit as usize,
         page.until_id,
         page.since_id,
-        me.map(|u| (u.actor_id, u.username.as_str())),
+        (user.actor_id, user.username.as_str()),
     )
     .await;
     let mut rows = seiran_common::repository::find_visible_posts_by_ids(&state.db, &ids, viewer)

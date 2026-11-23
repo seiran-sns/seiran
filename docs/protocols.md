@@ -622,6 +622,8 @@ DID 解決は常に公開 AppView（`public.api.bsky.app` の `getProfile`/`reso
 
 ## 6.1 投稿検索とBluesky AppView
 
+投稿の検索はログイン必須（`GET /api/notes/search`・Misskey 互換 `POST /api/notes/search` は未ログインなら 401、Mastodon 互換 `/api/v2/search` は `statuses` だけを空にする）。全文検索はクエリによって重く、AppView の結果の保存も伴うので、回数制限（`check_search_rate_limit`、ユーザー単位）の掛からない未ログインには開かない。共通関数（`search_post_ids_by_cursor` 等）は閲覧者を必須の引数に取る。
+
 `GET /api/notes/search` は、初回検索でローカルDBと AppView の `app.bsky.feed.searchPosts` から `limit` 件ずつ取り、AppView の結果は author を `actors`、投稿を `posts` へ upsert してから、ローカル結果と ID 降順でマージ・重複排除して `limit` 件返す。AppView 障害時はローカル結果だけにする。
 
 Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by_cursor`（ブレンド・ブリッジポスト解決）と検索回数制限（`check_search_rate_limit`、初回のみ）を使い、`query`/`limit`/`sinceId`/`untilId` を受け付ける。`POST /api/notes/search-by-tag` は `tag`/`limit`/`sinceId`/`untilId` でハッシュタイムラインを返す（Aria 等）。

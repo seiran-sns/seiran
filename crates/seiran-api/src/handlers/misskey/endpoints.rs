@@ -532,8 +532,9 @@ pub async fn notes_search_by_tag(
 
 /// POST /api/notes/search（Misskey互換、Aria等）。検索対象の決定はカスタムAPI
 /// （`GET /api/notes/search`）と同じ`search_post_ids_by_cursor`・検索回数制限を使う。
+/// カスタムAPIと同じくログイン必須（`handlers::search`）。
 pub async fn notes_search(
-    MaybeAuthedUser(me): MaybeAuthedUser,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<NotesSearchBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
@@ -542,13 +543,10 @@ pub async fn notes_search(
         return Ok(Json(Vec::new()));
     }
     let page = body.cursor.page(30);
-    if let Some(user) = &me {
-        let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
-        crate::rate_limit::check_search_rate_limit(&state, user.actor_id, is_initial_search)
-            .await?;
-    }
-    let my_actor_id = me.as_ref().map(|u| u.actor_id);
-    let viewer = me.as_ref().map(|u| (u.actor_id, u.username.as_str()));
+    let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
+    crate::rate_limit::check_search_rate_limit(&state, user.actor_id, is_initial_search).await?;
+    let my_actor_id = Some(user.actor_id);
+    let viewer = (user.actor_id, user.username.as_str());
     let ids = crate::handlers::search::search_post_ids_by_cursor(
         &state,
         query,

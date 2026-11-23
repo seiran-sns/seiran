@@ -211,3 +211,18 @@ test("検索結果にもリアクションと引用元の埋め込みが付く",
     expect.arrayContaining([expect.objectContaining({ emoji: "👍", count: 1, reactedByMe: true })]),
   );
 });
+
+// 検索はログイン必須（crates/seiran-api/src/handlers/search.rs）。全文検索はクエリによって
+// 重く、AppView の結果の保存も伴うので、回数制限の掛からない未ログインには開かない。
+test("未ログインでは投稿を検索できない", async ({ request }) => {
+  const custom = await request.get("/api/notes/search?q=hello");
+  expect(custom.status()).toBe(401);
+
+  const misskey = await request.post("/api/notes/search", { data: { query: "hello" } });
+  expect(misskey.status()).toBe(401);
+
+  // Mastodon 互換はアカウント等の結果を返せるよう、投稿だけを空にする
+  const mastodon = await request.get("/api/v2/search?q=hello&type=statuses");
+  expect(mastodon.ok(), await mastodon.text()).toBeTruthy();
+  expect(((await mastodon.json()) as { statuses: unknown[] }).statuses).toEqual([]);
+});
