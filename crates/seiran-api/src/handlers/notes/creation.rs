@@ -1029,11 +1029,12 @@ async fn persist_regular_post(
 pub async fn create_note(
     user: AuthedUser,
     State(state): State<AppState>,
-    Json(req): Json<CreateNoteRequest>,
+    Json(mut req): Json<CreateNoteRequest>,
 ) -> impl IntoResponse {
     if let Err(e) = user.require_not_did_moved_out() {
         return e.into_response();
     }
+    req.normalize_misskey_quote();
     let now = chrono::Utc::now();
 
     match &req.renote_id {
