@@ -77,6 +77,7 @@ use seiran_common::repository::{Actor, FollowListRow, NotificationFilter, Page};
 
 use crate::error::ApiError;
 use crate::handlers::follows::FollowTargetRequest;
+use crate::handlers::notes::dto::CreateNoteRequest;
 use crate::handlers::notes::ReactRequest;
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
@@ -360,6 +361,50 @@ pub async fn notes_show(
         .map_err(internal)?
         .ok_or(ApiError::NotFound("NOTE_NOT_FOUND"))?;
     Ok(Json(build_note(&state, post, my_actor_id).await))
+}
+
+/// POST /api/notes/create — seiran UI と Misskey 互換クライアントが共有する投稿。
+/// 処理は `notes::create_note` そのもので、応答に Misskey の形 `createdNote` を足すだけ。
+/// Misskey クライアントは `createdNote` が無いと、投稿できていても失敗として扱う。seiran UI は
+/// 従来どおりトップレベルの `NoteResponse` を読み、足した項目は無視する（古い版の UI も同じ）。
+pub async fn notes_create(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<CreateNoteRequest>,
+) -> Response {
+    let actor_id = user.actor_id;
+    let resp = crate::handlers::notes::create_note(user, State(state.clone()), Json(req))
+        .await
+        .into_response();
+    if !resp.status().is_success() {
+        return resp;
+    }
+    let bytes = match axum::body::to_bytes(resp.into_body(), usize::MAX).await {
+        Ok(bytes) => bytes,
+        Err(e) => return internal(e).into_response(),
+    };
+    let mut body: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(e) => return internal(e).into_response(),
+    };
+    let created = match body["id"].as_str().and_then(|s| s.parse::<i64>().ok()) {
+        Some(id) => state
+            .posts
+            .find_by_id_for_viewer(id, Some(actor_id))
+            .await
+            .ok()
+            .flatten(),
+        None => None,
+    };
+    // 投稿自体はできているので、Misskey の形を組めなくても失敗にはしない
+    // （seiran UI はトップレベルだけを読む）。
+    if let Some(post) = created {
+        let note = build_note(&state, post, Some(actor_id)).await;
+        if let (Some(obj), Ok(note)) = (body.as_object_mut(), serde_json::to_value(note)) {
+            obj.insert("createdNote".to_owned(), note);
+        }
+    }
+    Json(body).into_response()
 }
 
 #[derive(Deserialize)]
