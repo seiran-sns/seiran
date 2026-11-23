@@ -5,6 +5,10 @@ export const admin = {
   listReports() {
     return request<AdminReport[]>("GET", "/admin/reports");
   },
+  /** 未処理の通報の件数（管理メニュー・通報タブのバッジ用）。 */
+  openReportCount() {
+    return request<{ count: number }>("GET", "/admin/reports/open-count");
+  },
   closeReport(id: string) {
     return request<void>(
       "POST",

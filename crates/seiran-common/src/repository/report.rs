@@ -72,6 +72,13 @@ pub async fn list(pool: &PgPool) -> Result<Vec<ReportRow>, sqlx::Error> {
     .await
 }
 
+/// 未処理（open）の件数（管理メニューのバッジ用）。`idx_reports_status_created` で数える。
+pub async fn count_open(pool: &PgPool) -> Result<i64, sqlx::Error> {
+    sqlx::query_scalar("SELECT COUNT(*) FROM reports WHERE status='open'")
+        .fetch_one(pool)
+        .await
+}
+
 /// クローズする。対象があれば真。
 pub async fn close(pool: &PgPool, id: i64) -> Result<bool, sqlx::Error> {
     let done = sqlx::query("UPDATE reports SET status='closed',closed_at=NOW() WHERE id=$1")

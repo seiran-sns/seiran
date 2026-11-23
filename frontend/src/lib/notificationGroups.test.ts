@@ -32,6 +32,17 @@ function follow(user: string): NotificationItem {
   return { id: `n${seq}-follow-${user}`, createdAt: "", type: "follow", user: { id: user, username: user, host: null } };
 }
 
+function n(type: string, user: string, relatedUser?: string): NotificationItem {
+  seq += 1;
+  return {
+    id: `n${seq}-${type}-${user}`,
+    createdAt: "",
+    type,
+    user: { id: user, username: user, host: null },
+    ...(relatedUser ? { relatedUser: { id: relatedUser, username: relatedUser, host: null } } : {}),
+  };
+}
+
 /** まとまりを「件数」の列で表す。 */
 function sizes(items: NotificationItem[], baseOldestId?: string): number[] {
   return groupNotifications(items, baseOldestId).map((g) => g.items.length);
@@ -45,9 +56,27 @@ describe("groupNotifications", () => {
     expect(sizes(items)).toEqual([2, 3]);
   });
 
-  it("リアクション以外の通知はまとめず、連続を切る", () => {
+  it("系統の違う通知とはまとめず、連続を切る", () => {
     const items = [r("a", "P1"), follow("x"), r("a", "P1")];
     expect(sizes(items)).toEqual([1, 1, 1]);
+    // 同じ人でも反応と関係はまとめない。
+    expect(sizes([follow("a"), r("a", "P1")])).toEqual([1, 1]);
+  });
+
+  it("フォロー・フォローリクエスト・フォロー承認・引っ越しは同じ人ならまとめる", () => {
+    const items = [n("followRequestAccepted", "a"), follow("a"), n("receiveFollowRequest", "a"), follow("b")];
+    expect(sizes(items)).toEqual([3, 1]);
+  });
+
+  it("引っ越し通知は引っ越し先の人でまとめる", () => {
+    // old から new へ引っ越した通知と、new からのフォロー。
+    expect(sizes([follow("new"), n("moveRefollowed", "old", "new")])).toEqual([2]);
+    expect(sizes([follow("old"), n("moveAlreadyFollowing", "old", "new")])).toEqual([1, 1]);
+  });
+
+  it("メンション・返信・引用はまとめない", () => {
+    expect(sizes([n("reply", "a"), n("reply", "a")])).toEqual([1, 1]);
+    expect(sizes([n("mention", "a"), n("quote", "a")])).toEqual([1, 1]);
   });
 
   it("リポスト通知もリポスト元のポストと人でリアクション通知とまとめる", () => {

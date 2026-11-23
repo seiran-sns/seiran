@@ -32,7 +32,11 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
-  const { dmUnreadCount, unread } = useStreamingContext();
+  const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
+  // ☰ のバッジはメニューの中の項目（通知・メッセージ・設定・管理）のバッジの合計。メニューを
+  // 開くまで気づけない件数を、閉じたままでも見えるようにする（通知は🔔にも出すが、メニューの
+  // 中の「通知」にもバッジがあるので合計に含める）。
+  const menuBadgeCount = unread + dmUnreadCount + followRequestCount + openReportCount;
   const [composeOpen, setComposeOpen] = useState(false);
   const [openTargetOpen, setOpenTargetOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -88,12 +92,12 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
           title={t("nav:leftNav.openMenu")}
         >
           <TwemojiEmoji emoji="☰" className={styles.floatingMenuIcon} />
-          {dmUnreadCount > 0 && (
+          {menuBadgeCount > 0 && (
             <span className={styles.floatingMenuBadge}>
-              {dmUnreadCount > 99 ? "99+" : dmUnreadCount}
+              {menuBadgeCount > 99 ? "99+" : menuBadgeCount}
             </span>
           )}
-          {dmUnreadCount === 0 && migrationImportActive && (
+          {menuBadgeCount === 0 && migrationImportActive && (
             <span className={styles.floatingMenuDot} aria-hidden="true" />
           )}
         </button>

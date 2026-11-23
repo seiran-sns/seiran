@@ -6,6 +6,7 @@ import {
   getErrorMessage,
   ReportComment,
 } from "../../api/client";
+import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
 import { findReportReasonLabel } from "../report/reportReasons";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -15,6 +16,7 @@ import styles from "../../pages/Admin.module.css";
 export default function ReportsPanel() {
   const { t } = useTranslation();
   const { showError } = useToast();
+  const { refreshOpenReportCount } = useStreamingContext();
   const [reports, setReports] = useState<AdminReport[]>([]);
   const [comments, setComments] = useState<Record<string, ReportComment[]>>({});
   const [drafts, setDrafts] = useState<Record<string, string>>({});
@@ -23,10 +25,12 @@ export default function ReportsPanel() {
   const reload = useCallback(async () => {
     try {
       setReports(await api.admin.listReports());
+      // 一覧を取り直すたびにバッジもそろえる（処理した直後・別の人が処理した分も反映する）。
+      refreshOpenReportCount();
     } catch (e) {
       showError(getErrorMessage(e));
     }
-  }, [showError]);
+  }, [showError, refreshOpenReportCount]);
   useEffect(() => {
     void reload();
   }, [reload]);

@@ -38,7 +38,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
-  const { dmUnreadCount, followRequestCount, unread } = useStreamingContext();
+  const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
   const location = useLocation();
   const [serverInfoOpen, setServerInfoOpen] = useState(false);
   // Bluesky からの転入の取り込みが裏で続いている間は、設定 > インポートへ誘う印を出す。
@@ -53,7 +53,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
     return item;
   });
   const navItems = canAccessAdminPage(user?.role)
-    ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin" }]
+    ? [...baseItems, { to: "/admin", icon: "🛡️", labelKey: "leftNav.admin", badge: openReportCount }]
     : baseItems;
 
   function handleLogout() {

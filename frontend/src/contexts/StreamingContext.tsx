@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { api, Note, ReactionSummary } from "../api/client";
 import { profileQuery } from "../lib/format";
+import { getAdminTopics } from "../lib/roles";
 import { setFollowStatus as setFollowStatusStore } from "../stores/followStatusStore";
 import { updatePollResults } from "../stores/pollVoteStore";
 import { useAuth } from "./AuthContext";
@@ -90,6 +91,10 @@ interface StreamingValue {
   followRequestCount: number;
   /** サーバーから承認待ち件数を再取得する（承認/拒否操作後・ページロード時に呼ぶ）。 */
   refreshFollowRequestCount: () => void;
+  /** 未処理の通報の件数（通報を扱えるロールだけ。管理メニュー・通報タブのバッジ用）。 */
+  openReportCount: number;
+  /** サーバーから未処理の通報の件数を再取得する（通報の処理後に呼ぶ）。 */
+  refreshOpenReportCount: () => void;
 }
 
 const StreamingContext = createContext<StreamingValue>({
@@ -105,7 +110,12 @@ const StreamingContext = createContext<StreamingValue>({
   refreshDmUnreadCount: () => {},
   followRequestCount: 0,
   refreshFollowRequestCount: () => {},
+  openReportCount: 0,
+  refreshOpenReportCount: () => {},
 });
+
+/** 未処理の通報の件数を取り直す間隔。新しい通報はストリーミングで届かないので定期的に確かめる。 */
+const OPEN_REPORT_POLL_MS = 60_000;
 
 const NOTIF_KINDS = new Set([
   "reaction",
@@ -125,6 +135,8 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const [followRequestCount, setFollowRequestCount] = useState(0);
+  const [openReportCount, setOpenReportCount] = useState(0);
+  const canHandleReports = getAdminTopics(user?.role).includes("reports");
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const linkResolvedListeners = useRef<Set<LinkResolvedListener>>(new Set());
@@ -163,6 +175,21 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     if (!user) return;
     api.followRequests.count().then((r) => setFollowRequestCount(r.count)).catch(() => {});
   }, [user]);
+
+  const refreshOpenReportCount = useCallback(() => {
+    if (!canHandleReports) return;
+    api.admin.openReportCount().then((r) => setOpenReportCount(r.count)).catch(() => {});
+  }, [canHandleReports]);
+
+  useEffect(() => {
+    if (!canHandleReports) {
+      setOpenReportCount(0);
+      return;
+    }
+    refreshOpenReportCount();
+    const timer = setInterval(refreshOpenReportCount, OPEN_REPORT_POLL_MS);
+    return () => clearInterval(timer);
+  }, [canHandleReports, refreshOpenReportCount, user?.id]);
 
   useEffect(() => {
     refreshDmUnreadCount();
@@ -324,6 +351,8 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         refreshDmUnreadCount,
         followRequestCount,
         refreshFollowRequestCount,
+        openReportCount,
+        refreshOpenReportCount,
       }}
     >
       {children}

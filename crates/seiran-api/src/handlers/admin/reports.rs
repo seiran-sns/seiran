@@ -79,6 +79,21 @@ pub async fn list_reports(
     Ok(Json(rows.into_iter().map(Into::into).collect()))
 }
 
+#[derive(Debug, Serialize)]
+pub struct OpenCountResponse {
+    pub count: i64,
+}
+
+/// 未処理の通報の件数（管理メニュー・通報タブのバッジ用）。
+pub async fn open_count(
+    State(state): State<AppState>,
+) -> Result<Json<OpenCountResponse>, ApiError> {
+    let count = report::count_open(&state.db)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(OpenCountResponse { count }))
+}
+
 pub async fn close_report(
     State(state): State<AppState>,
     Path(id): Path<i64>,
