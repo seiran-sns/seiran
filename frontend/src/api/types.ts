@@ -12,6 +12,9 @@ export interface User {
   language_preference?: string | null;
   /** 「今後は表示しない」にしたガイドのキー（設定画面「おせっかいなガイドの非表示」）。 */
   hidden_guides: string[];
+  /** 投稿のボタンバーの下にワンタッチリアクションバー（よく使う絵文字）を出すか（設定画面「表示」）。
+   * この項目を返さない版のサーバーでは `undefined` で、表示する扱いにする。 */
+  show_quick_reactions?: boolean;
   /** `GET /api/auth/me`のたびに再発行される新しいJWT（スライディング延命）。
    * 呼び出し側でlocalStorageへ保存し直すこと。 */
   token: string;

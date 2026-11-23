@@ -30,7 +30,9 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "언어 환경설정이 저장되었습니다."
+    "saved": "언어 환경설정이 저장되었습니다.",
+    "quickReactionsTitle": "원터치 리액션 바",
+    "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시"
   },
   "privacySettings": {
     "title": "개인정보 보호 설정",

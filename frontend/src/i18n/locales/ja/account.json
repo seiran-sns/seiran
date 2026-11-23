@@ -30,7 +30,9 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "言語設定を保存しました。"
+    "saved": "言語設定を保存しました。",
+    "quickReactionsTitle": "ワンタッチリアクションバー",
+    "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する"
   },
   "privacySettings": {
     "title": "プライバシー設定",

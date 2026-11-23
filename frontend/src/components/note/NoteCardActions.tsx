@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ReactionSummary, getErrorMessage } from "../../api/client";
 import { formatCount } from "../../lib/format";
 import { RedraftBlockReason } from "../../lib/redraft";
+import { useAuth } from "../../contexts/AuthContext";
 import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
 import { useFitCount } from "../../hooks/useFitCount";
@@ -125,7 +126,10 @@ export default function NoteCardActions({
   const reactionDisabled = locked || reactionPending;
   const totalReactionCount = reactions.reduce((sum, r) => sum + r.count, 0);
   const myReaction = reactions.find((r) => r.reactedByMe);
+  const { user } = useAuth();
   const quickReactions = useQuickReactions();
+  // 設定画面「表示」で消せる。この項目を返さない版のサーバーでは従来どおり出す。
+  const showQuickReactions = user?.show_quick_reactions ?? true;
   const actionsRef = useRef<HTMLDivElement>(null);
   // ❤️ボタンは幅が足りなければ隠し、ケバブメニューのボタンを行からはみ出させない
   // （メニューにしか無い操作があるため）。
@@ -312,13 +316,15 @@ export default function NoteCardActions({
             onOpen={redraft?.onMenuOpen}
           />
         </div>
-        <QuickReactionPopup
-          reactions={quickReactions}
-          anchorRef={actionsRef}
-          myReactionEmoji={myReaction?.emoji}
-          disabled={reactionDisabled}
-          onToggleReaction={onToggleReaction}
-        />
+        {showQuickReactions && (
+          <QuickReactionPopup
+            reactions={quickReactions}
+            anchorRef={actionsRef}
+            myReactionEmoji={myReaction?.emoji}
+            disabled={reactionDisabled}
+            onToggleReaction={onToggleReaction}
+          />
+        )}
       </div>
 
       <Modal

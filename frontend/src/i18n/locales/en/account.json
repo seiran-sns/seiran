@@ -30,7 +30,9 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "Language preference saved."
+    "saved": "Language preference saved.",
+    "quickReactionsTitle": "One-tap reaction bar",
+    "quickReactionsLabel": "Show the one-tap reaction bar with your frequently used emoji"
   },
   "privacySettings": {
     "title": "Privacy settings",

@@ -30,7 +30,9 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "Spracheinstellung gespeichert."
+    "saved": "Spracheinstellung gespeichert.",
+    "quickReactionsTitle": "Schnellreaktionsleiste",
+    "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen"
   },
   "privacySettings": {
     "title": "Datenschutzeinstellungen",

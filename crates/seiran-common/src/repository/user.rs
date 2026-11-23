@@ -177,6 +177,16 @@ pub trait UserRepository: Send + Sync {
         hidden: bool,
     ) -> Result<Vec<String>, sqlx::Error>;
 
+    /// 投稿のボタンバーの下にワンタッチリアクションバー（よく使う絵文字）を出すか。
+    async fn find_show_quick_reactions(&self, user_id: i64) -> Result<bool, sqlx::Error>;
+
+    /// ワンタッチリアクションバーの表示設定を更新する。
+    async fn update_show_quick_reactions(
+        &self,
+        user_id: i64,
+        show: bool,
+    ) -> Result<(), sqlx::Error>;
+
     /// 最終ログイン成功時刻を取得する（ブルートフォース判定ウィンドウの起点用、#223）。
     async fn find_last_login_success_at(
         &self,
@@ -452,6 +462,28 @@ impl UserRepository for PgUserRepository {
         .fetch_one(&self.pool)
         .await?;
         Ok(guides)
+    }
+
+    async fn find_show_quick_reactions(&self, user_id: i64) -> Result<bool, sqlx::Error> {
+        let row: Option<(bool,)> =
+            sqlx::query_as("SELECT show_quick_reactions FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(v,)| v).unwrap_or(true))
+    }
+
+    async fn update_show_quick_reactions(
+        &self,
+        user_id: i64,
+        show: bool,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET show_quick_reactions = $1, updated_at = NOW() WHERE id = $2")
+            .bind(show)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
     }
 
     async fn find_last_login_success_at(

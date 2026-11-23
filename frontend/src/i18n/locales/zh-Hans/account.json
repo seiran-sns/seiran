@@ -30,7 +30,9 @@
     "languageEs": "Español",
     "languageDe": "Deutsch",
     "languageFr": "Français",
-    "saved": "已保存语言首选项。"
+    "saved": "已保存语言首选项。",
+    "quickReactionsTitle": "一键回应栏",
+    "quickReactionsLabel": "显示常用表情符号的一键回应栏"
   },
   "privacySettings": {
     "title": "隐私设置",
