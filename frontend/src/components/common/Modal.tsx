@@ -29,7 +29,13 @@ export default function Modal({ open, onClose, title, children }: ModalProps) {
   // 隠れたり逆にヘッダー等の上に埋もれずかぶさったりするため、body 直下へポータルして描画する。
   return createPortal(
     <div className={styles.overlay} onClick={onClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+      <div
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-label={title}
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className={styles.header}>
           {title && <span className={styles.title}>{title}</span>}
           <button className={styles.close} onClick={onClose} aria-label={t("common:close")}>
