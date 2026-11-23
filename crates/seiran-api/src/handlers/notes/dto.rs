@@ -77,6 +77,31 @@ pub struct CreateNoteRequest {
     pub sensitive_attachment_ids: Option<Vec<String>>,
 }
 
+impl CreateNoteRequest {
+    /// Misskey 互換クライアントの引用を引用として扱う。Misskey は「リノート」と「引用」を
+    /// 別のパラメータにせず、`renoteId` に本文・添付・アンケート・CW のどれかが付いていれば
+    /// 引用とする。これをしないと、本文付きの `renoteId` が中身を捨てたリポストになる。
+    /// seiran の UI は引用を `quote_of_id` で送るので、`quote_of_id` があれば触らない。
+    pub fn normalize_misskey_quote(&mut self) {
+        if self.quote_of_id.is_some() || self.renote_id.is_none() || !self.has_own_content() {
+            return;
+        }
+        self.quote_of_id = self.renote_id.take();
+    }
+
+    /// リポストと違い、投稿自身の中身を持つか（Misskey の引用の判定と同じ）。
+    fn has_own_content(&self) -> bool {
+        let non_blank = |s: &Option<String>| s.as_deref().is_some_and(|t| !t.trim().is_empty());
+        non_blank(&self.text)
+            || non_blank(&self.content_warning)
+            || self
+                .attachment_ids
+                .as_ref()
+                .is_some_and(|ids| !ids.is_empty())
+            || self.poll.is_some()
+    }
+}
+
 /// [`CreateNoteRequest::poll`] の中身。
 #[derive(Deserialize, Debug, Clone)]
 pub struct PollCreateRequest {
@@ -722,6 +747,61 @@ pub struct RepostListResponse {
 #[derive(Deserialize)]
 pub struct ReactRequest {
     pub content: String,
+}
+
+#[cfg(test)]
+mod create_note_request_tests {
+    use super::CreateNoteRequest;
+
+    fn req(body: serde_json::Value) -> CreateNoteRequest {
+        let mut r: CreateNoteRequest = serde_json::from_value(body).unwrap();
+        r.normalize_misskey_quote();
+        r
+    }
+
+    #[test]
+    fn misskey_renote_with_text_becomes_quote() {
+        let r = req(serde_json::json!({ "renoteId": "42", "text": "hello" }));
+        assert_eq!(r.renote_id, None);
+        assert_eq!(r.quote_of_id.as_deref(), Some("42"));
+    }
+
+    #[test]
+    fn misskey_renote_with_files_cw_or_poll_becomes_quote() {
+        for extra in [
+            serde_json::json!({ "fileIds": ["1"] }),
+            serde_json::json!({ "cw": "spoiler" }),
+            serde_json::json!({ "poll": { "choices": ["a", "b"] } }),
+        ] {
+            let mut body = serde_json::json!({ "renoteId": "42" });
+            body.as_object_mut()
+                .unwrap()
+                .extend(extra.as_object().unwrap().clone());
+            let r = req(body);
+            assert_eq!(r.quote_of_id.as_deref(), Some("42"));
+            assert_eq!(r.renote_id, None);
+        }
+    }
+
+    #[test]
+    fn misskey_pure_renote_stays_renote() {
+        for body in [
+            serde_json::json!({ "renoteId": "42" }),
+            serde_json::json!({ "renoteId": "42", "text": null, "fileIds": [] }),
+            serde_json::json!({ "renoteId": "42", "text": "  " }),
+        ] {
+            let r = req(body);
+            assert_eq!(r.renote_id.as_deref(), Some("42"));
+            assert_eq!(r.quote_of_id, None);
+        }
+    }
+
+    #[test]
+    fn explicit_quote_of_id_is_left_alone() {
+        let r = req(serde_json::json!({ "quote_of_id": "7", "text": "hi" }));
+        assert_eq!(r.quote_of_id.as_deref(), Some("7"));
+        assert_eq!(r.renote_id, None);
+    }
 }
 
 #[cfg(test)]
