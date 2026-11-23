@@ -430,84 +430,27 @@ pub async fn resolve_bsky_embed(
 
 pub use seiran_common::ap::deliver::at_uri_to_bsky_app_url;
 
-/// ポストの出自（どのプロトコル上に実体を持つか）。配信先の制御に使う。
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PostOrigin {
-    /// ローカル投稿、または seiran リモート（AP/ATP 両方の実体を持つ）
-    LocalOrSeiran,
-    /// Fedi リモート（AP 実体のみ）
-    FediRemote,
-    /// Bsky リモート（ATP 実体のみ）
-    BskyRemote,
-}
+pub use seiran_common::ap::deliver::{classify_post, PostOrigin};
 
-/// 元ポストの種別を判定する。`is_local`は`actors.actor_type == "local"`（呼び出し元は
-/// `PostDeliveryMeta::actor_type`から渡す）。
-pub fn classify_post(
-    ap_object_id: Option<&str>,
-    at_uri: Option<&str>,
-    is_local: bool,
-) -> PostOrigin {
-    if is_local {
-        return PostOrigin::LocalOrSeiran;
-    }
-    match (ap_object_id.is_some(), at_uri.is_some()) {
-        // seiran リモート: ap_object_id あり AND at_uri あり（かつ domain != local）
-        (true, true) => PostOrigin::LocalOrSeiran,
-        // Fedi リモート: ap_object_id あり AND at_uri なし
-        (true, false) => PostOrigin::FediRemote,
-        // Bsky リモート: ap_object_id なし AND at_uri あり
-        (false, true) => PostOrigin::BskyRemote,
-        // 判定不能 → ローカル相当として扱う
-        (false, false) => PostOrigin::LocalOrSeiran,
-    }
-}
-
-/// brid.gyブリッジポスト対応（`seiran_common::bridge_post`・`docs/protocols.md`参照）:
-/// `id`が指すポストがブリッジポスト（`meta.bridge_of_post_id`が`Some`）の場合、元ポストの
-/// メタ情報を再取得して返す（内部的には常に元ポストへのリポスト/引用として扱うため、
-/// 呼び出し元は返り値の`i64`を`repost_of_post_id`/`quote_of_post_id`にそのまま使うこと）。
-/// 非ブリッジ、または元ポストの取得に失敗した場合は引数をそのまま返す。
+/// `seiran_common::ap::deliver::redirect_bridge_post_meta`（Note 組み立てと共有）を
+/// `AppState`から呼ぶ薄いラッパー。
 pub(crate) async fn redirect_bridge_post_meta(
     state: &AppState,
     id: i64,
     meta: PostDeliveryMeta,
 ) -> (i64, PostDeliveryMeta) {
-    match meta.bridge_of_post_id {
-        Some(original_id) => match state.posts.find_delivery_meta(original_id).await {
-            Ok(Some(original_meta)) => (original_id, original_meta),
-            _ => (id, meta),
-        },
-        None => (id, meta),
-    }
+    seiran_common::ap::deliver::redirect_bridge_post_meta(state.posts.as_ref(), id, meta).await
 }
 
-/// brid.gyブリッジポスト対応: `meta`（元ポスト、`redirect_bridge_post_meta`適用済みである
-/// こと）が対向プロトコル側に独立したブリッジポストを持つ場合、配送先識別子
-/// （ap_object_id/at_uri/at_cid）をそちらへ差し替える。`origin == LocalOrSeiran`
-/// （元ポストが両プロトコルにネイティブ実体を持つ、seiran自身の投稿）の場合は、わざわざ
-/// ブリッジポストへ送る必要が無いため差し替えない（ユーザー合意済み仕様）。
+/// `seiran_common::ap::deliver::with_bridge_delivery_targets`（Note 組み立てと共有）を
+/// `AppState`から呼ぶ薄いラッパー。
 pub(crate) async fn with_bridge_delivery_targets(
     state: &AppState,
     meta: PostDeliveryMeta,
     origin: PostOrigin,
 ) -> PostDeliveryMeta {
-    if origin == PostOrigin::LocalOrSeiran {
-        return meta;
-    }
-    let mut meta = meta;
-    if let Some(bridge_id) = meta.ap_bridge_post_id {
-        if let Ok(Some(bridge_meta)) = state.posts.find_delivery_meta(bridge_id).await {
-            meta.ap_object_id = bridge_meta.ap_object_id;
-        }
-    }
-    if let Some(bridge_id) = meta.atp_bridge_post_id {
-        if let Ok(Some(bridge_meta)) = state.posts.find_delivery_meta(bridge_id).await {
-            meta.at_uri = bridge_meta.at_uri;
-            meta.at_cid = bridge_meta.at_cid;
-        }
-    }
-    meta
+    seiran_common::ap::deliver::with_bridge_delivery_targets(state.posts.as_ref(), meta, origin)
+        .await
 }
 
 /// 新規投稿を著者本人 + accepted なローカルフォロワーへ、購読中のタイムラインチャンネル
@@ -610,23 +553,9 @@ pub async fn deliver_repost(
                 .await;
         } else if meta.at_uri.is_some() {
             // Bsky リモートポストのリポスト → Fedi フォールバック: URL テキスト投稿
-            let bsky_url = at_uri_to_bsky_app_url(meta.at_uri.as_deref().unwrap_or(""));
-            let author_name = meta
-                .display_name
-                .as_deref()
-                .unwrap_or(&meta.username)
-                .to_string();
-            let fallback_text = format!("🔁 {}: {}", author_name, bsky_url);
+            // （本文は配送時に`build_local_note`が`repost_fallback_text`で組み立てる）
             state
-                .enqueue_ap_delivery(
-                    actor_id,
-                    ApDeliveryKind::PostToFollowers {
-                        post_id,
-                        body: Some(fallback_text),
-                        quote_url: None,
-                        in_reply_to: None,
-                    },
-                )
+                .enqueue_ap_delivery(actor_id, ApDeliveryKind::PostToFollowers { post_id })
                 .await;
         }
     }
@@ -710,7 +639,6 @@ pub struct ReplyContext {
     pub deliver_fedi_allowed: bool,
     pub deliver_bsky_allowed: bool,
     pub bsky_reply: Option<BskyPostReply>,
-    pub ap_in_reply_to: Option<String>,
     /// 親ポストの可視性（非リプライの場合は `None`）。
     /// "public"/"unlisted"/"followers_only"/"direct" のいずれか。
     pub parent_visibility: Option<String>,
@@ -730,7 +658,6 @@ impl ReplyContext {
             deliver_fedi_allowed: true,
             deliver_bsky_allowed: true,
             bsky_reply: None,
-            ap_in_reply_to: None,
             parent_visibility: None,
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
@@ -872,7 +799,6 @@ pub async fn resolve_reply_context(
         deliver_fedi_allowed,
         deliver_bsky_allowed,
         bsky_reply,
-        ap_in_reply_to: meta.ap_object_id,
         parent_visibility: Some(meta.visibility.clone()),
         parent_thread_root_post_id: meta.thread_root_post_id,
         parent_local_actor_id,
@@ -880,79 +806,16 @@ pub async fn resolve_reply_context(
     })
 }
 
-/// Fedi 配送で使う引用表現。
-#[derive(Debug, PartialEq, Eq)]
-pub enum ApQuote {
-    /// AP 実体を持つ投稿は Misskey 互換の quoteUrl として配送する。
-    Misskey(String),
-    /// Bsky にしか実体がない投稿は、受信サーバーが AP オブジェクトとして解決できないため、
-    /// bsky.app URL を本文末尾へ追記する。
-    AppendUrl(String),
-}
-
-pub(crate) fn ap_delivery_quote_fields(
-    text: &str,
-    quote: Option<ApQuote>,
-) -> (Option<String>, Option<String>) {
-    match quote {
-        Some(ApQuote::Misskey(url)) => (None, Some(url)),
-        Some(ApQuote::AppendUrl(url)) => (Some(format!("{}\n\n{}", text, url)), None),
-        None => (None, None),
-    }
-}
-
-/// Bsky embed選択（#227）がURLで、かつ本文にそのURLが含まれない場合、ActivityPub配送用
-/// 本文への追記が必要かどうかを判定する。Fedi（AP）にはBskyのembed概念が無く、本文でしか
-/// URLを参照できないため、選択後に本文からそのURLを削除した「孤児」状態のままだとFedi側の
-/// 読者だけがそのURLを一切見られなくなってしまう。本文に既に含まれている
-/// 場合、および引用投稿（`quote_embed_present`、`bsky_embed_choice`自体が無視される）は
-/// 何もしない。
-fn fedi_url_append_needed(
-    text: &str,
-    quote_embed_present: bool,
-    choice: Option<&BskyEmbedChoice>,
-) -> Option<String> {
-    if quote_embed_present {
-        return None;
-    }
-    match choice {
-        Some(BskyEmbedChoice::Url { url }) if !text.contains(url.as_str()) => Some(url.clone()),
-        _ => None,
-    }
-}
-
-/// URLリンクカードのチェックボックス選択（`link_card_urls`）のうち、Fedi配送本文に
-/// まだ含まれていないものを出現順に返す（本文追記が必要なURL一覧）。`fedi_url_append_needed`
-/// と異なり、Bsky配送オフ・CW中でも常に判定する（このリストが使われる場面自体がその2ケース
-/// のため）。
-fn fedi_link_card_urls_append_needed(base_text: &str, link_card_urls: &[String]) -> Vec<String> {
-    link_card_urls
-        .iter()
-        .filter(|url| !base_text.contains(url.as_str()))
-        .cloned()
-        .collect()
-}
-
-pub(crate) fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
-    if meta.at_uri.is_some() && meta.ap_object_id.is_none() {
-        meta.at_uri
-            .as_deref()
-            .map(at_uri_to_bsky_app_url)
-            .map(ApQuote::AppendUrl)
-    } else {
-        meta.ap_object_id.clone().map(ApQuote::Misskey)
-    }
-}
-
-/// 引用元ポストの種別から Bsky embed（引用埋め込み）と AP 向け引用表現を組み立てる。
+/// 引用元ポストの種別から Bsky embed（引用埋め込み）を組み立てる。AP 向けの引用表現は
+/// 配送時に`seiran_common::ap::deliver::build_local_note`が DB から決める。
 pub async fn resolve_quote_embed(
     state: &AppState,
     actor_id: i64,
     quote_of_id: i64,
-) -> (Option<BskyEmbed>, Option<ApQuote>) {
+) -> Option<BskyEmbed> {
     let meta = match state.posts.find_delivery_meta(quote_of_id).await {
         Ok(Some(m)) => m,
-        _ => return (None, None),
+        _ => return None,
     };
     let (_, meta) = redirect_bridge_post_meta(state, quote_of_id, meta).await;
 
@@ -978,9 +841,7 @@ pub async fn resolve_quote_embed(
         build_external_post_embed(state, actor_id, &meta).await
     };
 
-    let ap_quote = ap_quote_from_meta(&meta);
-
-    (bsky_embed, ap_quote)
+    bsky_embed
 }
 
 /// 通常投稿 / リプライ / 引用投稿の配送指示。
@@ -996,8 +857,6 @@ pub struct RegularPostDelivery {
     pub visibility: String,
     pub bsky_reply: Option<BskyPostReply>,
     pub bsky_quote_embed: Option<BskyEmbed>,
-    pub ap_quote: Option<ApQuote>,
-    pub ap_in_reply_to: Option<String>,
     pub attachment_ids: Vec<i64>,
     /// Bsky embedの明示選択（#227、`resolve_bsky_embed`参照）。引用投稿（`bsky_quote_embed`が
     /// `Some`）の場合は無視される（動画/GIF/URL embed選択は引用と共存しない）。ただし静止画
@@ -1012,12 +871,6 @@ pub struct RegularPostDelivery {
     /// `build_cw_bsky_embed`のURLリンクカードのみを添付し、本文もこのガイド文に差し替える。
     /// AP配送では`summary`フィールドとして送る（本文・添付・アンケート・引用は通常通り）。
     pub content_warning: Option<String>,
-    /// URLリンクカードのチェックボックス選択（Bsky embed選択のラジオボタンリストを出せない
-    /// 場合の代替、Bsky配送オフ or CW中）で選ばれたURL一覧。`post_link_cards`への保存自体は
-    /// （このBsky/Fedi配送とは独立に）呼び出し元が`attach_link_cards_from_urls`で済ませて
-    /// いるが、Fedi配送本文への追記要否（本文に含まれないURLがあれば末尾に追記）の判定に
-    /// ここでも使う（`bsky_embed_choice`のURL選択と同じ「AP配送だけ上書き」の仕組み）。
-    pub link_card_urls: Vec<String>,
     /// ポストの言語（ISO 639-1）。Bsky配送の`app.bsky.feed.post`の`langs`にのみ反映する
     /// （AP配送では使わない）。`None`なら`langs`フィールド自体を省略する。
     pub language: Option<String>,
@@ -1054,24 +907,18 @@ pub async fn deliver_regular_post(state: &AppState, mut d: RegularPostDelivery) 
         );
     }
 
-    // Bsky embed選択がURL（#227）の場合、ActivityPub配信でも同じURLを参照できるようにする。
-    // 引用投稿（`bsky_quote_embed`がSome）は`bsky_embed_choice`自体が
-    // 無視されるため対象外。CW（#229）中も`bsky_embed_choice`自体を無視するため対象外。
-    let fedi_append_url: Option<String> = if bsky_target && d.content_warning.is_none() {
-        fedi_url_append_needed(
-            &d.text,
-            d.bsky_quote_embed.is_some(),
-            d.bsky_embed_choice.as_ref(),
-        )
-    } else {
-        None
-    };
-
     if bsky_target {
         commit_regular_post_to_bsky(state, &mut d).await;
     }
     if d.targets.fedi {
-        enqueue_regular_post_fedi_delivery(state, d, fedi_append_url).await;
+        // Note（本文・引用・返信先・リンクカードURLの追記）は配送時に DB から組み立てる。
+        // Bsky embed のURL選択はこの時点で`post_link_cards`へ保存済み（`resolve_url_embed`）。
+        state
+            .enqueue_ap_delivery(
+                d.actor_id,
+                ApDeliveryKind::PostToFollowers { post_id: d.post_id },
+            )
+            .await;
     }
 }
 
@@ -1183,54 +1030,13 @@ async fn commit_regular_post_to_bsky(state: &AppState, d: &mut RegularPostDelive
     }
 }
 
-/// Fedi フォロワーへの配送ジョブを積む。body は通常渡さず、`deliver_post_to_ap_followers` 側で
-/// DB の投稿本文を取得してメンション解決（tag[]・<a> アンカー付与）まで一貫して行う。
-/// 引用URLの追記、または本文に含まれないURLの末尾追記が必要な場合だけ上書き本文を渡す。
-async fn enqueue_regular_post_fedi_delivery(
-    state: &AppState,
-    d: RegularPostDelivery,
-    fedi_append_url: Option<String>,
-) {
-    let (quote_body, quote_url) = ap_delivery_quote_fields(&d.text, d.ap_quote);
-    // 本文に含まれないURLを末尾へ追記する対象を集める: (1) Bsky embed選択のURL
-    // （fedi_append_url、bsky配送あり && CW無しの場合のみ計算済み）、(2) URLリンクカード
-    // のチェックボックス選択（link_card_urls、Bsky配送オフ or CW中でも本文追記自体は
-    // 常に必要）。判定は最終的なFedi本文（引用ならquote_body、無ければd.text）に対して行う。
-    let base_text_for_append_check: &str = quote_body.as_deref().unwrap_or(&d.text);
-    let mut append_lines: Vec<String> = Vec::new();
-    append_lines.extend(fedi_append_url);
-    append_lines.extend(fedi_link_card_urls_append_needed(
-        base_text_for_append_check,
-        &d.link_card_urls,
-    ));
-    let append_block = (!append_lines.is_empty()).then(|| append_lines.join("\n"));
-    let body = match (quote_body, append_block) {
-        (Some(b), Some(block)) => Some(format!("{}\n\n{}", b, block)),
-        (Some(b), None) => Some(b),
-        (None, Some(block)) => Some(format!("{}\n\n{}", d.text, block)),
-        (None, None) => None,
-    };
-    state
-        .enqueue_ap_delivery(
-            d.actor_id,
-            ApDeliveryKind::PostToFollowers {
-                post_id: d.post_id,
-                body,
-                quote_url,
-                in_reply_to: d.ap_in_reply_to,
-            },
-        )
-        .await;
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        ap_delivery_quote_fields, ap_quote_from_meta, at_uri_to_bsky_app_url, build_cw_bsky_embed,
-        classify_post, fedi_link_card_urls_append_needed, fedi_url_append_needed,
-        resolve_poll_embed, ApQuote, BskyEmbed, BskyEmbedChoice, PostOrigin, ReplyContext,
+        at_uri_to_bsky_app_url, build_cw_bsky_embed, resolve_poll_embed, BskyEmbed, ReplyContext,
     };
     use crate::error::ApiError;
+    use seiran_common::ap::deliver::{ap_quote_from_meta, ApQuote};
     use seiran_common::repository::post::PostDeliveryMeta;
 
     fn ctx_with_parent_visibility(parent_visibility: Option<&str>) -> ReplyContext {
@@ -1238,7 +1044,6 @@ mod tests {
             deliver_fedi_allowed: true,
             deliver_bsky_allowed: true,
             bsky_reply: None,
-            ap_in_reply_to: None,
             parent_visibility: parent_visibility.map(str::to_owned),
             parent_thread_root_post_id: None,
             parent_local_actor_id: None,
@@ -1418,95 +1223,6 @@ mod tests {
     }
 
     #[test]
-    fn ap_quote_uses_misskey_fields_for_ap_object() {
-        assert_eq!(
-            ap_delivery_quote_fields(
-                "comment",
-                Some(ApQuote::Misskey("https://fedi.example/notes/1".to_owned()))
-            ),
-            (None, Some("https://fedi.example/notes/1".to_owned()))
-        );
-    }
-
-    #[test]
-    fn ap_quote_appends_bsky_url_to_body() {
-        assert_eq!(
-            ap_delivery_quote_fields(
-                "comment",
-                Some(ApQuote::AppendUrl(
-                    "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
-                ))
-            ),
-            (
-                Some("comment\n\nhttps://bsky.app/profile/did:plc:test/post/abc".to_owned()),
-                None
-            )
-        );
-    }
-
-    #[test]
-    fn fedi_url_append_needed_appends_when_url_missing_from_text() {
-        let choice = BskyEmbedChoice::Url {
-            url: "https://example.com/article".to_owned(),
-        };
-        assert_eq!(
-            fedi_url_append_needed("本文からURLを消した後", false, Some(&choice)),
-            Some("https://example.com/article".to_owned())
-        );
-    }
-
-    #[test]
-    fn fedi_url_append_needed_no_op_when_url_already_in_text() {
-        let choice = BskyEmbedChoice::Url {
-            url: "https://example.com/article".to_owned(),
-        };
-        assert_eq!(
-            fedi_url_append_needed("見て https://example.com/article", false, Some(&choice)),
-            None
-        );
-    }
-
-    #[test]
-    fn fedi_url_append_needed_no_op_for_non_url_choice() {
-        let choice = BskyEmbedChoice::Images;
-        assert_eq!(fedi_url_append_needed("本文", false, Some(&choice)), None);
-        assert_eq!(fedi_url_append_needed("本文", false, None), None);
-    }
-
-    #[test]
-    fn fedi_url_append_needed_no_op_when_quote_embed_present() {
-        let choice = BskyEmbedChoice::Url {
-            url: "https://example.com/article".to_owned(),
-        };
-        assert_eq!(fedi_url_append_needed("本文", true, Some(&choice)), None);
-    }
-
-    #[test]
-    fn fedi_link_card_urls_append_needed_returns_only_missing_urls_in_order() {
-        let urls = vec![
-            "https://example.com/a".to_owned(),
-            "https://example.com/b".to_owned(),
-            "https://example.com/c".to_owned(),
-        ];
-        assert_eq!(
-            fedi_link_card_urls_append_needed("本文中に https://example.com/b があります", &urls,),
-            vec![
-                "https://example.com/a".to_owned(),
-                "https://example.com/c".to_owned(),
-            ]
-        );
-    }
-
-    #[test]
-    fn fedi_link_card_urls_append_needed_empty_when_all_present() {
-        let urls = vec!["https://example.com/a".to_owned()];
-        assert_eq!(
-            fedi_link_card_urls_append_needed("見て https://example.com/a", &urls),
-            Vec::<String>::new()
-        );
-    }
-
-    #[test]
     fn build_cw_bsky_embed_uses_open_cw_hash_and_open_title() {
         let embed = build_cw_bsky_embed("seiran.example", 42);
         match embed {
@@ -1574,41 +1290,6 @@ mod tests {
                 "https://bsky.app/profile/did:plc:test/post/abc".to_owned()
             ))
         );
-    }
-
-    #[test]
-    fn classify_post_local_domain_match() {
-        // is_local=true の場合は ap_object_id / at_uri の値によらずローカル扱い
-        assert_eq!(classify_post(None, None, true), PostOrigin::LocalOrSeiran);
-    }
-
-    #[test]
-    fn classify_post_seiran_remote_has_both_ids() {
-        assert_eq!(
-            classify_post(Some("https://a/notes/1"), Some("at://did/x/y"), false),
-            PostOrigin::LocalOrSeiran
-        );
-    }
-
-    #[test]
-    fn classify_post_fedi_remote_ap_only() {
-        assert_eq!(
-            classify_post(Some("https://mastodon.example/notes/1"), None, false),
-            PostOrigin::FediRemote
-        );
-    }
-
-    #[test]
-    fn classify_post_bsky_remote_at_uri_only() {
-        assert_eq!(
-            classify_post(None, Some("at://did/x/y"), false),
-            PostOrigin::BskyRemote
-        );
-    }
-
-    #[test]
-    fn classify_post_unknown_defaults_to_local() {
-        assert_eq!(classify_post(None, None, false), PostOrigin::LocalOrSeiran);
     }
 
     // ─── reply_delivery_allowed ────────────────────────────────────────────

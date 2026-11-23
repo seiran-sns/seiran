@@ -787,9 +787,9 @@ async fn persist_regular_post(
         resolve_local_emoji_map(state, &with_poll_option_names(&text, poll_json.as_ref())).await;
 
     // 引用元情報の取得（Bsky embed / AP quoteUrl を決定する）
-    let (bsky_quote_embed, ap_quote) = match quote_of_id_i64 {
+    let bsky_quote_embed = match quote_of_id_i64 {
         Some(quote_id) => resolve_quote_embed(state, actor_id, quote_id).await,
-        None => (None, None),
+        None => None,
     };
 
     // DMのスレッド起点ID。親（reply_to）がdirectならその値をそのまま伝播コピーし、
@@ -918,13 +918,10 @@ async fn persist_regular_post(
             visibility: visibility.to_string(),
             bsky_reply: reply_ctx.bsky_reply,
             bsky_quote_embed,
-            ap_quote,
-            ap_in_reply_to: reply_ctx.ap_in_reply_to,
             attachment_ids: attachment_ids_i64.clone(),
             bsky_embed_choice: req.bsky_embed_choice.clone(),
             poll: poll_json.clone(),
             content_warning: content_warning.clone(),
-            link_card_urls: req.link_card_urls.clone(),
             language: req.language.clone(),
         },
     )

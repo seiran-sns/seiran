@@ -89,14 +89,11 @@ pub trait SessionStore: Send + Sync {
 /// ジョブハンドラ側（`jobs::ap_delivery` → `ap::deliver`）が行う。
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum ApDeliveryKind {
-    /// Create(Note) をフォロワーへ配送する。
-    /// `body` はメンション変換済み等の上書き本文（`None` なら DB の posts.body を使用）。
-    PostToFollowers {
-        post_id: i64,
-        body: Option<String>,
-        quote_url: Option<String>,
-        in_reply_to: Option<String>,
-    },
+    /// Create(Note) をフォロワーへ配送する。Note は配送時に DB から組み立てる
+    /// （`ap::deliver::build_local_note`。本文・引用・返信先をジョブに持たせると
+    /// `GET /notes/:id` とずれるため持たせない）。以前の版が積んだ `body`/`quote_url`/
+    /// `in_reply_to` 付きのジョブも、未知フィールドとして読み飛ばされる。
+    PostToFollowers { post_id: i64 },
     /// DM（`visibility='direct'`）投稿を、宛先（`post_recipients`）の中のFediアクターへ
     /// のみ配送する（フォロワーコレクションではなく宛先個人のinboxのみ）。
     DirectMessage { post_id: i64 },
@@ -518,12 +515,7 @@ mod tests {
             },
             Job::ApDelivery {
                 actor_id: 1,
-                kind: ApDeliveryKind::PostToFollowers {
-                    post_id: 2,
-                    body: Some("hello".into()),
-                    quote_url: None,
-                    in_reply_to: Some("https://b.example/notes/3".into()),
-                },
+                kind: ApDeliveryKind::PostToFollowers { post_id: 2 },
             },
             Job::ApDelivery {
                 actor_id: 1,
@@ -585,5 +577,42 @@ mod tests {
             // Job は PartialEq 未実装のため、再シリアライズ結果の一致で確認する
             assert_eq!(json, serde_json::to_string(&back).unwrap());
         }
+    }
+
+    /// 以前の版が積んだ`PostToFollowers`（本文・引用・返信先付き）がキューに残っていても、
+    /// 未知フィールドとして読み飛ばして配送できる。
+    #[test]
+    fn legacy_post_to_followers_job_still_deserializes() {
+        let job = Job::ApDelivery {
+            actor_id: 1,
+            kind: ApDeliveryKind::PostToFollowers { post_id: 2 },
+        };
+        let mut value = serde_json::to_value(&job).unwrap();
+        fn add_legacy_fields(v: &mut serde_json::Value) -> bool {
+            match v {
+                serde_json::Value::Object(map) => {
+                    if let Some(serde_json::Value::Object(inner)) = map.get_mut("PostToFollowers") {
+                        inner.insert("body".into(), serde_json::json!("hello"));
+                        inner.insert("quote_url".into(), serde_json::Value::Null);
+                        inner.insert(
+                            "in_reply_to".into(),
+                            serde_json::json!("https://b.example/notes/3"),
+                        );
+                        return true;
+                    }
+                    map.values_mut().any(add_legacy_fields)
+                }
+                _ => false,
+            }
+        }
+        assert!(add_legacy_fields(&mut value), "{}", value);
+        let back: Job = serde_json::from_value(value).expect("deserialize legacy job");
+        assert!(matches!(
+            back,
+            Job::ApDelivery {
+                kind: ApDeliveryKind::PostToFollowers { post_id: 2 },
+                ..
+            }
+        ));
     }
 }

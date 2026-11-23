@@ -72,7 +72,7 @@ use seiran_common::streaming::{
     broadcast_dm_reaction_update, broadcast_poll_update, broadcast_reaction_update,
 };
 use seiran_common::{
-    ap::{fetch_ap_history, plain_to_html_with_mentions},
+    ap::fetch_ap_history,
     generate_snowflake_id,
     mention::{convert_mentions_for_bsky, extract_local_mention_actor_ids},
     ApDeliveryKind, PrevApReaction,

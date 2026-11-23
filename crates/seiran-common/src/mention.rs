@@ -883,8 +883,8 @@ pub async fn convert_mentions_for_ap(
 }
 
 /// `ApInlineMention` 群から AP `tag[]` 配列を組み立てる（`Mention`/`Hashtag` のみ、
-/// `Link` は含めない）。push配送（`crate::ap::deliver`）と pull取得
-/// （`seiran-api::handlers::notes::get_note_ap`）の両方で同じ組み立てロジックを共有する
+/// `Link` は含めない）。push配送と pull取得（`GET /notes/:id`）の両方が通る
+/// `crate::ap::deliver::build_local_note` から使う
 /// （`docs/protocols.md` 6節）。
 pub fn ap_inline_mentions_to_tag_json(mentions: &[ApInlineMention]) -> Vec<serde_json::Value> {
     mentions

@@ -7,6 +7,8 @@
 //! - `infra`: inbox 解決・並列 fan-out（配送の共通機構、how）
 //! - `activity`: アクティビティ JSON の組み立て（DB・ネットワーク非依存の純関数、what）
 //! - `note` / `announce` / `actor` / `reaction`: 種別ごとの配送オーケストレーション（how）
+//! - `note_object`: ローカル投稿の Note オブジェクトを DB から組み立てる唯一の場所
+//!   （Create/Update/DM 配送と `GET /notes/:id` で共有）
 //! - `text`: 本文の HTML 変換（プレーンテキスト/メンション → HTML）
 
 mod activity;
@@ -14,19 +16,23 @@ mod actor;
 mod announce;
 mod infra;
 mod note;
+mod note_object;
 mod reaction;
 mod text;
 
 pub use activity::{
-    append_emoji_tags, apply_note_sensitive, apply_poll_to_note_object,
-    build_seiran_post_for_basis, fetch_post_activity_basis, local_attachment_document,
-    PostActivityBasis,
+    append_emoji_tags, build_seiran_post_for_basis, fetch_post_activity_basis, PostActivityBasis,
 };
 pub use actor::{deliver_delete_actor, deliver_update_actor};
 pub use announce::{deliver_ap_announce, deliver_undo_announce};
 pub use note::{
     deliver_delete_note, deliver_direct_message_to_ap, deliver_post_to_ap_followers,
     deliver_seiranpost_update,
+};
+pub use note_object::{
+    ap_quote_from_meta, build_local_note, classify_post, find_delivery_meta_with_bridge,
+    local_note_create_activity, redirect_bridge_post_meta, with_bridge_delivery_targets, ApQuote,
+    LocalNote, PostOrigin,
 };
 pub use reaction::{deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction};
 pub use text::{at_uri_to_bsky_app_url, plain_to_html, plain_to_html_with_mentions};
