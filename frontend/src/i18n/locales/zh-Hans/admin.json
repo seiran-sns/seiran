@@ -102,7 +102,7 @@
     "siteDescriptionLabel": "站点说明文字",
     "siteDescriptionHint": "显示在登录界面上。可以使用HTML标签，换行会原样保留。由于这是仅限管理员的输入项，不会进行任何净化处理。",
     "termsOfServiceLabel": "服务条款文字",
-    "termsOfServiceHint": "会以同意复选框的形式显示在新注册画面（包含从Bluesky转入）。可使用HTML标签，换行会原样保留（white-space: pre-wrap）。留空则完全不显示复选框。此为管理员专用输入，不会进行消毒处理。",
+    "termsOfServiceHint": "会以同意复选框的形式显示在新注册画面（包含从Bluesky转入），并显示在“关于本站”（/about）。可使用HTML标签，换行会原样保留（white-space: pre-wrap）。留空则完全不显示复选框。此为管理员专用输入，不会进行消毒处理。",
     "loginBackgroundLabel": "登录界面背景",
     "loginBackgroundHint": "可以上传图片或视频。视频会在登录界面自动循环播放（静音）。未设置时，背景将根据站点颜色生成。",
     "selectBackgroundButton": "选择背景",
@@ -175,7 +175,11 @@
     "oembedSectionTitle": "URL卡片嵌入播放器",
     "oembedAllowedDomainsLabel": "允许的域名（每行一个）",
     "oembedAllowedDomainsHint": "指定任何人都可以托管内容的域名（例如 github.io、amazonaws.com）可能会导致恶意脚本被嵌入到您的网站上。",
-    "oembedEndpointHint": "如果某网站支持oEmbed但未在HTML中提供发现标签，可以用「域名,oEmbed端点URL」的格式（例如 vimeo.com,https://vimeo.com/api/oembed.json）直接指定该端点。"
+    "oembedEndpointHint": "如果某网站支持oEmbed但未在HTML中提供发现标签，可以用「域名,oEmbed端点URL」的格式（例如 vimeo.com,https://vimeo.com/api/oembed.json）直接指定该端点。",
+    "operatorNameLabel": "运营者名称",
+    "operatorUrlLabel": "运营者网址",
+    "contactEmailLabel": "联系邮箱地址",
+    "aboutFieldsHint": "均为选填。只有已设置的项目会显示在“关于本站”（/about）。运营者名称和邮箱地址也会作为 Misskey／Mastodon 兼容 API 的运营者信息。运营者网址必须以 http:// 或 https:// 开头。"
   },
   "storageProvidersPanel": {
     "title": "对象存储",

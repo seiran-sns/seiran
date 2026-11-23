@@ -164,9 +164,14 @@ export default function AuthCarouselPage() {
             <MigratePanel state={migrateState} onChange={patchMigrate} />
           </PanelSection>
 
-          <button type="button" className={styles.poweredBy} onClick={() => setServerInfoOpen(true)}>
-            {t("nav:leftNav.poweredBy")}
-          </button>
+          <div className={styles.siteLinks}>
+            <Link to="/about" className={styles.siteLink}>
+              {t("nav:leftNav.about")}
+            </Link>
+            <button type="button" className={styles.siteLink} onClick={() => setServerInfoOpen(true)}>
+              {t("nav:leftNav.poweredBy")}
+            </button>
+          </div>
         </div>
       </div>
 

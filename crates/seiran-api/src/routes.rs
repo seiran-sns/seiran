@@ -699,6 +699,8 @@ fn misskey_routes() -> Router<AppState> {
         // ストリーミング（本家と同じく `/api` の外。トークンはクエリ `i`）
         .route("/streaming", get(handlers::misskey::streaming::streaming))
         .route("/api/meta", post(handlers::meta::api_meta))
+        // 「このサイトについて」の運営者・管理者一覧・問い合わせ先（認証不要）
+        .route("/api/about", get(handlers::about::about))
         .route("/api/ap/show", post(handlers::misskey::endpoints::ap_show))
         .route(
             "/api/endpoints",

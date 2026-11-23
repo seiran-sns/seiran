@@ -102,7 +102,7 @@
     "siteDescriptionLabel": "Site-Beschreibungstext",
     "siteDescriptionHint": "Wird auf dem Login-Bildschirm angezeigt. HTML-Tags sind erlaubt, Zeilenumbrüche bleiben erhalten. Da dies eine Eingabe nur für Administratoren ist, wird sie nicht bereinigt.",
     "termsOfServiceLabel": "Nutzungsbedingungen-Text",
-    "termsOfServiceHint": "Wird als Zustimmungs-Checkbox auf den Anmeldebildschirmen angezeigt (auch beim Umzug von Bluesky). HTML-Tags sind erlaubt, Zeilenumbrüche bleiben erhalten (white-space: pre-wrap). Leer lassen, um die Checkbox vollständig auszublenden. Dies ist eine reine Admin-Eingabe und wird daher nicht bereinigt.",
+    "termsOfServiceHint": "Wird als Zustimmungs-Checkbox auf den Anmeldebildschirmen (auch beim Umzug von Bluesky) und auf „Über diese Website“ (/about) angezeigt. HTML-Tags sind erlaubt, Zeilenumbrüche bleiben erhalten (white-space: pre-wrap). Leer lassen, um die Checkbox vollständig auszublenden. Dies ist eine reine Admin-Eingabe und wird daher nicht bereinigt.",
     "loginBackgroundLabel": "Hintergrund des Login-Bildschirms",
     "loginBackgroundHint": "Sie können ein Bild oder ein Video hochladen. Videos werden auf dem Login-Bildschirm automatisch abgespielt und wiederholt (stumm). Ohne Einstellung wird der Hintergrund aus der Site-Farbe abgeleitet.",
     "selectBackgroundButton": "Hintergrund auswählen",
@@ -175,7 +175,11 @@
     "oembedSectionTitle": "URL-Karten-Einbettungsplayer",
     "oembedAllowedDomainsLabel": "Erlaubte Domains (eine pro Zeile)",
     "oembedAllowedDomainsHint": "Die Angabe einer Domain, auf der beliebige Personen Inhalte hosten können (z. B. github.io, amazonaws.com), birgt das Risiko, dass bösartige Skripte auf Ihrer Website eingebettet werden.",
-    "oembedEndpointHint": "Wenn eine Seite oEmbed unterstützt, dies aber nicht über ein HTML-Discovery-Tag bekannt gibt, können Sie den Endpunkt direkt im Format \"domain,oembed-endpunkt-url\" angeben (z. B. vimeo.com,https://vimeo.com/api/oembed.json)."
+    "oembedEndpointHint": "Wenn eine Seite oEmbed unterstützt, dies aber nicht über ein HTML-Discovery-Tag bekannt gibt, können Sie den Endpunkt direkt im Format \"domain,oembed-endpunkt-url\" angeben (z. B. vimeo.com,https://vimeo.com/api/oembed.json).",
+    "operatorNameLabel": "Name des Betreibers",
+    "operatorUrlLabel": "URL des Betreibers",
+    "contactEmailLabel": "Kontakt-E-Mail-Adresse",
+    "aboutFieldsHint": "Alle Angaben sind optional. Auf „Über diese Website“ (/about) erscheint nur, was gesetzt ist. Name und E-Mail-Adresse werden außerdem als Betreiberangaben in den Misskey- und Mastodon-kompatiblen APIs ausgegeben. Die URL muss mit http:// oder https:// beginnen."
   },
   "storageProvidersPanel": {
     "title": "Objektspeicher",

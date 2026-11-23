@@ -51,5 +51,12 @@
   },
   "filterField": {
     "clear": "모두 지우기"
+  },
+  "aboutPage": {
+    "title": "이 사이트에 대해",
+    "operator": "운영자",
+    "admins": "관리자",
+    "contact": "문의처",
+    "termsOfService": "이용약관"
   }
 }

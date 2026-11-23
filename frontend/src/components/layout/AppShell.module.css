@@ -233,20 +233,40 @@
   color: var(--text);
 }
 
-.poweredBy {
+/* 左メニュー最下部の「このサイトについて」「Powered by Seiran」。flex-wrap で、幅が足りない
+   言語・フォントでは項目単位で次の行へ折り返す（1項目が幅を超えるときはその中で折り返す）。 */
+.siteLinks {
   margin-top: 6px;
+  display: flex;
+  flex-wrap: wrap;
+  column-gap: 4px;
+}
+
+.siteLink {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  max-width: 100%;
   background: none;
   border: none;
   color: var(--text-dim);
   font-size: 0.75rem;
+  line-height: 1.4;
   text-align: left;
+  text-decoration: none;
+  overflow-wrap: anywhere;
   cursor: pointer;
   padding: 4px 8px;
 }
 
-.poweredBy:hover {
+.siteLink:hover {
   color: var(--text);
   text-decoration: underline;
+}
+
+/* アイコンのみに畳まれた幅でだけ出す（下のメディアクエリ）。 */
+.aboutIcon {
+  display: none;
 }
 
 /* ── 中央ペイン（幅固定：中 / 600px）─────────────────────────── */
@@ -412,9 +432,17 @@
     justify-content: center;
     padding: 8px 0 16px;
   }
-  /* アイコンのみに畳まれた幅（72px）ではテキストリンクが収まらないため隠す。 */
-  .poweredBy {
+  /* アイコンのみに畳まれた幅（72px）ではテキストリンクが収まらない。「Powered by」は隠し、
+     「このサイトについて」はアイコンだけにする。 */
+  .poweredBy,
+  .siteLinkLabel {
     display: none;
+  }
+  .siteLinks {
+    justify-content: center;
+  }
+  .aboutIcon {
+    display: block;
   }
   .loginIcon {
     display: block;

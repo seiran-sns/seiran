@@ -52,6 +52,7 @@ struct SiteInfo {
     title: String,
     description: String,
     thumbnail: Option<String>,
+    contact_email: String,
 }
 
 async fn site_info(state: &AppState) -> Result<SiteInfo, ApiError> {
@@ -70,6 +71,7 @@ async fn site_info(state: &AppState) -> Result<SiteInfo, ApiError> {
         },
         description: strip_html_tags(&get("site_description")),
         thumbnail: Some(get("site_icon_url")).filter(|s| !s.is_empty()),
+        contact_email: get("contact_email").trim().to_owned(),
     })
 }
 
@@ -172,7 +174,7 @@ pub async fn instance_v2(State(state): State<AppState>) -> Result<Json<Value>, A
         },
         "registrations": { "enabled": registrations_open, "approval_required": false, "message": null },
         "api_versions": { "mastodon": MASTODON_API_VERSION },
-        "contact": { "email": "", "account": null },
+        "contact": { "email": site.contact_email, "account": null },
         "rules": [],
         "fedibird_capabilities": FEDIBIRD_CAPABILITIES,
     })))

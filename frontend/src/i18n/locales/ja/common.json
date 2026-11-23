@@ -51,5 +51,12 @@
   },
   "filterField": {
     "clear": "すべてクリア"
+  },
+  "aboutPage": {
+    "title": "このサイトについて",
+    "operator": "運営者",
+    "admins": "管理者",
+    "contact": "問い合わせ先",
+    "termsOfService": "利用規約"
   }
 }

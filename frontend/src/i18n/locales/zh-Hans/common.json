@@ -51,5 +51,12 @@
   },
   "filterField": {
     "clear": "全部清除"
+  },
+  "aboutPage": {
+    "title": "关于本站",
+    "operator": "运营者",
+    "admins": "管理员",
+    "contact": "联系方式",
+    "termsOfService": "使用条款"
   }
 }

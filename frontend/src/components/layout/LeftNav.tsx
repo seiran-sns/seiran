@@ -162,13 +162,26 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
         )}
       </div>
 
-      <button
-        type="button"
-        className={styles.poweredBy}
-        onClick={() => setServerInfoOpen(true)}
-      >
-        {t("nav:leftNav.poweredBy")}
-      </button>
+      {/* 常用はしないが大事な入口なので、Web サイトのフッターと同じ位置に置く。幅が足りなければ
+          項目単位で2段に折り返す（`.siteLinks`）。 */}
+      <div className={styles.siteLinks}>
+        <Link
+          to="/about"
+          className={styles.siteLink}
+          onClick={() => onItemClick?.()}
+          title={t("nav:leftNav.about")}
+        >
+          <TwemojiEmoji emoji="ℹ️" className={styles.aboutIcon} />
+          <span className={styles.siteLinkLabel}>{t("nav:leftNav.about")}</span>
+        </Link>
+        <button
+          type="button"
+          className={`${styles.siteLink} ${styles.poweredBy}`}
+          onClick={() => setServerInfoOpen(true)}
+        >
+          {t("nav:leftNav.poweredBy")}
+        </button>
+      </div>
       <ServerInfoDialog open={serverInfoOpen} onClose={() => setServerInfoOpen(false)} />
     </nav>
   );

@@ -83,6 +83,9 @@ pub async fn api_meta(State(state): State<AppState>) -> impl IntoResponse {
         // 利用規約。空文字列なら登録画面は同意チェックボックス自体を表示しない。
         // site_description等と同じくHTML可・サニタイズしない管理者専用入力。
         "termsOfServiceHtml": get("terms_of_service_text"),
+        // Misskey 互換の運営者情報（「このサイトについて」の運営者名・問い合わせ先と同じ値）。
+        "maintainerName": Some(get("operator_name")).filter(|v| !v.trim().is_empty()),
+        "maintainerEmail": Some(get("contact_email")).filter(|v| !v.trim().is_empty()),
         "loginBackgroundUrl": get("login_bg_url"),
         "loginBackgroundType": get("login_bg_type"),
         "internalMediaOrigins": internal_media_origins,

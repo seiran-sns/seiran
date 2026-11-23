@@ -13,6 +13,7 @@ import ReloadRequiredDialog from "./components/common/ReloadRequiredDialog";
 import ServerUnavailableDialog from "./components/common/ServerUnavailableDialog";
 import HomePage from "./pages/HomePage";
 
+const AboutPage = lazy(() => import("./pages/AboutPage"));
 const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const FollowImportSettingsPage = lazy(() => import("./pages/FollowImportSettingsPage"));
@@ -136,6 +137,8 @@ function AppRoutes() {
         />
         {/* ポスト詳細はログイン不要で閲覧できる（未ログイン時のアクション操作はAPI側の401で弾かれる）。 */}
         <Route path="/notes/:id" element={<NoteDetailPage />} />
+        {/* 「このサイトについて」もログイン不要（ログイン画面からも開く）。 */}
+        <Route path="/about" element={<AboutPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route
           path="/admin/:slug?"

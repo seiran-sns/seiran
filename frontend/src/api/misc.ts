@@ -1,5 +1,5 @@
 import { request, uploadFormData } from "./core";
-import type { AppTokenRow, CreateAppTokenResponse, DriveFile, MetaResponse, PublicEmoji } from "./types";
+import type { AboutResponse, AppTokenRow, CreateAppTokenResponse, DriveFile, MetaResponse, PublicEmoji } from "./types";
 
 export function openTarget(target: string) {
   return request<{ path: string; kind: "actor" | "post" }>("POST", "/open", {
@@ -21,6 +21,11 @@ export const reports = {
 
 export function meta(signal?: AbortSignal) {
   return request<MetaResponse>("POST", "/meta", undefined, signal);
+}
+
+/** 「このサイトについて」（`/about`）の運営者・管理者一覧・問い合わせ先。 */
+export function about(signal?: AbortSignal) {
+  return request<AboutResponse>("GET", "/about", undefined, signal);
 }
 
 export const appTokens = {
