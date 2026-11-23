@@ -63,9 +63,9 @@ describe("groupNotifications", () => {
     expect(sizes([follow("a"), r("a", "P1")])).toEqual([1, 1]);
   });
 
-  it("フォロー・フォロー承認・引っ越しは同じ人ならまとめる", () => {
-    const items = [n("followRequestAccepted", "a"), follow("a"), follow("b"), follow("c")];
-    expect(sizes(items)).toEqual([2, 1, 1]);
+  it("フォロー・フォローリクエスト・フォロー承認・引っ越しは同じ人ならまとめる", () => {
+    const items = [n("followRequestAccepted", "a"), follow("a"), n("receiveFollowRequest", "a"), follow("b")];
+    expect(sizes(items)).toEqual([3, 1]);
   });
 
   it("引っ越し通知は引っ越し先の人でまとめる", () => {
@@ -74,10 +74,9 @@ describe("groupNotifications", () => {
     expect(sizes([follow("old"), n("moveAlreadyFollowing", "old", "new")])).toEqual([1, 1]);
   });
 
-  it("メンション・返信・引用・フォローリクエストはまとめない", () => {
+  it("メンション・返信・引用はまとめない", () => {
     expect(sizes([n("reply", "a"), n("reply", "a")])).toEqual([1, 1]);
     expect(sizes([n("mention", "a"), n("quote", "a")])).toEqual([1, 1]);
-    expect(sizes([n("receiveFollowRequest", "a"), follow("a")])).toEqual([1, 1]);
   });
 
   it("リポスト通知もリポスト元のポストと人でリアクション通知とまとめる", () => {

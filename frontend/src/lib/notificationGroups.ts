@@ -6,8 +6,8 @@ import type { NotificationItem } from "../api/client";
  * まとめる通知は2つの系統に分かれ、系統をまたいではまとめない:
  * - 反応（リアクション・リポスト）: 「同じポストへの連続」か「同じ人からの連続」のどちらかを
  *   満たす区間を1つのまとまりにする（種別が混ざってもよい）。
- * - 関係（フォロー・フォロー承認・引っ越し）: 「同じ人からの連続」を1つのまとまりにする（種別が
- *   混ざってもよい）。引っ越し通知の「人」は引っ越し先のアカウント（同じ人が引っ越してきた後に
+ * - 関係（フォロー・フォローリクエスト・フォロー承認・引っ越し）: 「同じ人からの連続」を1つの
+ *   まとまりにする（種別が混ざってもよい）。引っ越し通知の「人」は引っ越し先のアカウント（同じ人が引っ越してきた後に
  *   フォローし直した等の続きの出来事を1つに見せるため）。
  * それ以外の通知は1件で1つ。
  */
@@ -16,7 +16,13 @@ export interface NotificationGroup {
 }
 
 const REACTION_TYPES = new Set(["reaction", "renote"]);
-const RELATION_TYPES = new Set(["follow", "followRequestAccepted", "moveRefollowed", "moveAlreadyFollowing"]);
+const RELATION_TYPES = new Set([
+  "follow",
+  "receiveFollowRequest",
+  "followRequestAccepted",
+  "moveRefollowed",
+  "moveAlreadyFollowing",
+]);
 const MOVE_TYPES = new Set(["moveRefollowed", "moveAlreadyFollowing"]);
 
 /** 反応された自分のポスト。リポスト通知の `note` はリポストラッパーなので、リポスト元を見る。 */
