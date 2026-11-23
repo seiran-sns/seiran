@@ -324,6 +324,16 @@ pub enum Job {
         url: String,
     },
 
+    /// Bsky投稿の返信許可（threadgate）・引用可否（postgate）を取得して保存する。検索結果の
+    /// 取り込み（`atp::upsert_bsky_post_deferring_gates`）は1件ごとに2回の`getRecord`を待つと
+    /// 応答が数秒遅れるので、保存だけ先に済ませてこのジョブに回す。取得できるまでは
+    /// 「制限なし」のまま（取得失敗時の既定と同じ）。
+    BskyGatesFetch {
+        post_id: i64,
+        author_did: String,
+        at_uri: String,
+    },
+
     /// リモートインスタンス（Fedi、`actors.domain`単位）のnodeinfoを取得し
     /// `remote_instance_meta` へキャッシュする（#NoteCardリモートサーバー表示）。
     /// notes API / Misskey互換API がキャッシュ未登録のドメインを見つけた際に積む。
@@ -554,6 +564,11 @@ mod tests {
                 post_id: 2,
                 position: 0,
                 url: "https://youtube.com/watch?v=x".into(),
+            },
+            Job::BskyGatesFetch {
+                post_id: 2,
+                author_did: "did:plc:test".into(),
+                at_uri: "at://did:plc:test/app.bsky.feed.post/abc".into(),
             },
             Job::FollowImportProcess { request_id: 1 },
             Job::EmojiImportProcess { request_id: 1 },

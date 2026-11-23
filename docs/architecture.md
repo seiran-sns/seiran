@@ -200,6 +200,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 | `AlsoKnownAsVerify` / `RemoteAlsoKnownAsSync` | 「別のアカウント」の相互検証・同期（表示時再検証） | 低 |
 | `BridgeUserLinkResolve{actor_id}` | ブリッジユーザーの実ユーザーへのリンク解決（解決済みなら何もしない） | 低 |
 | `BskyListMembershipResolve{list_uri}` | リモート Bsky リストのメンバーを24時間キャッシュ（threadgate `#listRule`） | 低 |
+| `BskyGatesFetch{post_id, author_did, at_uri}` | 検索結果として取り込んだ Bsky 投稿の threadgate・postgate を後から取得（`docs/protocols.md`「返信許可・引用可否」） | 中 |
 | `FetchBridgeOriginal{bridge_post_id, target_uri, protocol}` | ブリッジポストの元ポストを取りに行く | 中 |
 | `FollowImportProcess{request_id}` | フォローインポート（自己再 enqueue 型） | 低 |
 | `EmojiImportProcess{request_id}` | 絵文字インポート（Misskey 形式 ZIP、自己再 enqueue 型。7節） | 低 |

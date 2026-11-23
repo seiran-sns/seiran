@@ -316,7 +316,7 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 ### 返信許可（threadgate）・引用可否（postgate）
 リモート Bsky 投稿について、閲覧者が返信・引用できるかを評価し、NoteCard のボタンをグレーアウトする。
 
-- **取得**: `upsert_bsky_post` が新規保存直後に `fetch_bsky_gates` で同じ rkey の threadgate/postgate を取得し、`posts.bsky_reply_allow`（threadgate の `allow` 配列。不在なら NULL = 制限なし）と `posts.bsky_quote_disabled`（postgate に `#disableRule` があるか。postgate は全員可/全員不可の二値）に保存する。
+- **取得**: `upsert_bsky_post` が新規保存直後に `fetch_bsky_gates` で同じ rkey の threadgate/postgate を取得し、`posts.bsky_reply_allow`（threadgate の `allow` 配列。不在なら NULL = 制限なし）と `posts.bsky_quote_disabled`（postgate に `#disableRule` があるか。postgate は全員可/全員不可の二値）に保存する。 検索結果の取り込み（`upsert_bsky_post_deferring_gates`）だけは、投稿1件ごとに `getRecord` を2回待つと検索の応答が数秒遅れるので、取得を `Job::BskyGatesFetch` に回す。PostView に `threadgate` が付いていればその `allow` はその場で保存し、引用可否はジョブが取るまで「制限なし」のまま（取得失敗時と同じ扱い）。取り込んだ投稿にすぐ返信・引用しうる経路（「開く」等）は同期で取る。
 - **評価**（`queries::attach_reply_quote_gates`）: `NoteResponse` 組み立て後に一括評価し `replyBlocked`/`quoteBlocked` に反映する（未ログイン時はしない）。ルールは OR、投稿者自身は常に許可。
   - `#mentionRule` — `mention_facets` に閲覧者の DID があるか。
   - `#followingRule` — `follows` に author → viewer の行があるか（firehose で取り込み済み）。
