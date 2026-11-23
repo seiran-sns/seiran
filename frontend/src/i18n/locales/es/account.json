@@ -32,8 +32,7 @@
     "languageFr": "Français",
     "saved": "Preferencia de idioma guardada.",
     "quickReactionsTitle": "Barra de reacciones rápidas",
-    "quickReactionsLabel": "Mostrar la barra de reacciones rápidas con tus emojis más usados",
-    "quickReactionsDescription": "Muestra una fila con tus emojis más usados debajo de los botones de cada publicación. Pulsa uno para reaccionar con él. Con ratón aparece al pasar el cursor sobre la publicación; en pantallas táctiles, solo en la publicación más alta de la pantalla. Este ajuste se guarda en tu cuenta y se aplica en todos tus dispositivos."
+    "quickReactionsLabel": "Mostrar la barra de reacciones rápidas con tus emojis más usados"
   },
   "privacySettings": {
     "title": "Configuración de privacidad",

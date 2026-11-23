@@ -162,9 +162,6 @@ export default function AppearanceSettingsPage() {
           />
           {t("account:appearanceSettings.quickReactionsLabel")}
         </label>
-        <p className={styles.description}>
-          {t("account:appearanceSettings.quickReactionsDescription")}
-        </p>
       </div>
     </>
   );

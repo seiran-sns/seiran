@@ -86,10 +86,3 @@
   color: var(--text);
   cursor: pointer;
 }
-
-.description {
-  color: var(--text-dim);
-  font-size: 0.8rem;
-  margin: 8px 0 0;
-  line-height: 1.5;
-}

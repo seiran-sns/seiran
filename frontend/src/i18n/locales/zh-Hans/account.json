@@ -32,8 +32,7 @@
     "languageFr": "Français",
     "saved": "已保存语言首选项。",
     "quickReactionsTitle": "一键回应栏",
-    "quickReactionsLabel": "显示常用表情符号的一键回应栏",
-    "quickReactionsDescription": "在帖子按钮下方显示一行常用的表情符号，点一下即可用该表情符号回应。使用鼠标时，光标停在帖子上时显示；触控操作时，只在屏幕最上方的一条帖子显示。此设置保存在账号中，所有设备都相同。"
+    "quickReactionsLabel": "显示常用表情符号的一键回应栏"
   },
   "privacySettings": {
     "title": "隐私设置",
