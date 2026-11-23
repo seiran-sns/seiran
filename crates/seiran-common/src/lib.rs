@@ -68,6 +68,11 @@ pub use username::{
 /// プロフィールのキーバリュー項目（#62）の最大件数。Mastodon 等のデフォルト（4件）に合わせる。
 pub const MAX_PROFILE_FIELDS: usize = 4;
 
+/// サイトカラー（`site_settings.site_color`）が未設定のときの色。画面の既定のアクセント色
+/// （`frontend/src/index.css` の `--accent`）と同じで、管理画面のサイト設定も「空欄で既定色」と
+/// 案内している。nodeinfo の `themeColor` など、外へ色を伝えるときに未設定の代わりに使う。
+pub const DEFAULT_SITE_COLOR: &str = "#2563eb";
+
 /// プロフィールの「別のアカウント」（alsoKnownAs、AP Moveの語彙をプロフィール表示・
 /// 相互検証用途に転用したseiran独自拡張）の最大登録件数。
 pub const MAX_ALSO_KNOWN_AS: usize = 10;

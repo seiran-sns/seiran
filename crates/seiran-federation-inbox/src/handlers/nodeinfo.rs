@@ -89,7 +89,16 @@ async fn nodeinfo_response(state: Arc<AppState>, version: &'static str) -> impl 
         };
         strip_html_tags(&n)
     };
-    let site_color = get("site_color");
+    // 未設定でも既定色を載せる（他サーバーがサイトの色として表示に使うため。省くと各実装の
+    // 汎用の色で表示されてしまう）。
+    let site_color = {
+        let c = get("site_color");
+        if c.is_empty() {
+            seiran_common::DEFAULT_SITE_COLOR.to_string()
+        } else {
+            c
+        }
+    };
     let site_icon_url = get("site_icon_url");
     // site_description もHTML可（#243、ログイン画面用）。nodeDescription はHTML想定でないため
     // タグを除去したプレーンテキストを使う。
@@ -97,9 +106,7 @@ async fn nodeinfo_response(state: Arc<AppState>, version: &'static str) -> impl 
 
     let mut metadata = serde_json::Map::new();
     metadata.insert("nodeName".into(), serde_json::json!(site_name));
-    if !site_color.is_empty() {
-        metadata.insert("themeColor".into(), serde_json::json!(site_color));
-    }
+    metadata.insert("themeColor".into(), serde_json::json!(site_color));
     if !site_icon_url.is_empty() {
         metadata.insert("iconUrl".into(), serde_json::json!(site_icon_url));
     }
