@@ -7,6 +7,7 @@ import FitText from "./FitText";
 import LoginPanel from "./LoginPanel";
 import RegisterPanel, { REGISTER_PANEL_INITIAL_STATE, RegisterPanelState } from "./RegisterPanel";
 import MigratePanel, { MIGRATE_PANEL_INITIAL_STATE, MigratePanelState } from "./MigratePanel";
+import { trimBlockBoundaryNewlines } from "../../utils/adminHtml";
 import styles from "./AuthCarousel.module.css";
 
 type PanelKey = "login" | "register" | "migrate";
@@ -149,7 +150,11 @@ export default function AuthCarouselPage() {
             <FitText html={titleHtml} maxPx={isWide ? 144 : 72} className={styles.siteTitle} />
           </div>
           <div className={styles.descHalf}>
-            <div className={styles.siteDescription} dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
+            {/* pre-wrap で出すので、ブロック要素の境目の改行を1個取り除く（利用規約と同じ）。 */}
+            <div
+              className={styles.siteDescription}
+              dangerouslySetInnerHTML={{ __html: trimBlockBoundaryNewlines(descriptionHtml) }}
+            />
           </div>
         </div>
 

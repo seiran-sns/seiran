@@ -445,7 +445,7 @@ seiran では Bsky ポストを Fedi 方面へリポストすると、Fedi 側�
 ### サイトタイトル・説明文
 - サイトタイトルは「サイト名」（`site_name`）を HTML のまま描く（管理者専用の入力なのでサニタイズしない）。nodeinfo の `nodeName`・PWA のマニフェスト名・OGP の `og:site_name`・`<title>` には HTML タグを除いたプレーンテキスト版を使う（`notes/validation.rs::strip_html_tags`、`seiran-federation-inbox` の nodeinfo は同等の軽量実装を持つ）。`POST /api/meta` は `name`（タグ除去済み）と `siteTitleHtml`（生の HTML）の両方を返す。
 - タイトルの文字サイズは `hooks/useFitTextSize.ts`（ResizeObserver ＋二分探索）で、改行せず幅に収まる最大値を都度計算する（上限は横並び144px、縦積み72px）。
-- 説明文は「サイト説明テキスト」（`site_description`）を HTML のまま右寄せで出す（`white-space: pre-wrap` でプレーンテキストの改行も効く）。
+- 説明文は「サイト説明テキスト」（`site_description`）を HTML のまま右寄せで出す（`white-space: pre-wrap` でプレーンテキストの改行も効く。ブロック要素・`<br>` の境目の改行は利用規約と同じく1個取り除く。「利用規約同意」）。
 
 ### フォームエリア（縦カルーセル）
 ログイン・サインアップ・Bluesky から転入の3パネルを縦に並べる。非アクティブなパネルは見出しボタン（クリックで対応するルートへ）だけの高さに縮み、アクティブなパネルはフォーム全体を展開する（`max-height` のアコーディオン）。3パネルは常にマウントしたまま CSS で開閉するので、メール確認送信済みや2FA入力中といった途中状態はパネルを切り替えても残る。共通のフッターに「powered by Seiran」ボタンを1つ置く。
