@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import Modal from "../common/Modal";
 import { ActionsMenuPopoverList } from "../common/ActionsMenu";
 import ReportModal from "../report/ReportModal";
+import ModerationDialogs from "./ModerationDialogs";
 import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useUserContextMenuPopover } from "../../hooks/useUserContextMenuPopover";
 import styles from "./UserContextMenu.module.css";
@@ -49,6 +50,7 @@ export default function UserRelationshipPopovers({ target, state }: UserRelation
           subjectLabel={target.reportLabel}
         />
       )}
+      <ModerationDialogs menu={menu} subjectLabel={target.reportLabel} />
       <Modal
         open={menu.blockConfirmOpen}
         onClose={menu.closeBlockConfirm}

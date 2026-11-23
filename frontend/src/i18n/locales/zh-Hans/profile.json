@@ -109,5 +109,19 @@
       "video": "视频",
       "audio": "音频"
     }
+  },
+  "moderation": {
+    "suspendItem": "冻结",
+    "unsuspendItem": "解除冻结",
+    "changeRoleItem": "更改角色（当前：{{role}}）",
+    "suspendTitle": "冻结用户",
+    "suspendBody": "要冻结 {{subject}} 吗？冻结期间无法登录或使用 API，其帖子也会被隐藏。",
+    "suspendConfirm": "冻结",
+    "unsuspendTitle": "解除冻结",
+    "unsuspendBody": "要解除 {{subject}} 的冻结吗？",
+    "unsuspendConfirm": "解除冻结",
+    "changeRoleTitle": "更改角色",
+    "changeRoleBody": "更改 {{subject}} 的角色（当前：{{role}}）。",
+    "changeRoleConfirm": "更改"
   }
 }

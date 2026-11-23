@@ -311,7 +311,11 @@
       "reasonRuleBanEvasion": "規避停權",
       "reasonRuleOther": "其他違規行為",
       "reasonOther": "其他"
-    }
+    },
+    "deletePostConfirm": "要刪除 {{subject}} 被檢舉的貼文嗎？此操作無法復原。",
+    "suspendUserConfirm": "要凍結 {{subject}} 嗎？凍結期間無法登入或使用 API，其貼文也會被隱藏。",
+    "silenceUserConfirm": "要限制 {{subject}} 嗎？將無法公開發文。",
+    "quarantineUserConfirm": "要隔離 {{subject}} 嗎？將無法公開發文，也無法對追蹤者以外的人回覆、提及或回應。"
   },
   "suspendedActors": {
     "title": "已凍結使用者",
@@ -333,7 +337,11 @@
     "totpDisabled": "TOTP：已停用",
     "passkeyCount": "金鑰：{{count}}",
     "disableTotpButton": "強制停用 TOTP",
-    "disableTotpConfirm": "要強制停用 {{username}} 的 TOTP 嗎？"
+    "disableTotpConfirm": "要強制停用 {{username}} 的 TOTP 嗎？",
+    "changeRoleTitle": "變更角色",
+    "changeRoleConfirm": "要將 {{user}} 的角色從 {{from}} 變更為 {{to}} 嗎？",
+    "suspendConfirm": "要凍結 {{user}} 嗎？凍結期間無法登入或使用 API，其貼文也會被隱藏。",
+    "unsuspendConfirm": "要解除 {{user}} 的凍結嗎？"
   },
   "serverBlocksPanel": {
     "deniedTitle": "拒絕的伺服器",

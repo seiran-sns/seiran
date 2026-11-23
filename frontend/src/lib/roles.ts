@@ -55,3 +55,11 @@ export function canAccessAdminPage(role: string | undefined): boolean {
 export function canPostPublic(role: string | undefined): boolean {
   return role !== "silence" && role !== "quarantine";
 }
+
+/**
+ * 調停者のロール（admin・moderator）か。調停者は凍結・制限・隔離できない（調停者が調停者を
+ * 止められないように。サーバーも `SUBJECT_IS_PRIVILEGED` で拒否する）。
+ */
+export function isPrivilegedRole(role: string | null | undefined): boolean {
+  return role === "admin" || role === "moderator";
+}

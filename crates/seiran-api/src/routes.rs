@@ -231,6 +231,14 @@ fn admin_routes(state: &AppState) -> Router<AppState> {
             "/api/admin/actors/:id/unsuspend",
             post(handlers::admin::actors::unsuspend_actor),
         )
+        .route(
+            "/api/admin/actors/:id/moderation",
+            get(handlers::admin::actors::moderation_state),
+        )
+        .route(
+            "/api/admin/actors/:id/role",
+            post(handlers::admin::actors::change_actor_role),
+        )
         .route_layer(axum::middleware::from_fn_with_state(
             state.clone(),
             middleware::report_moderator_only,

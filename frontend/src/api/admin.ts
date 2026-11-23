@@ -102,6 +102,16 @@ export const admin = {
   suspendActor(id: string) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/suspend`);
   },
+  /** ユーザー操作メニュー用の、アクターの凍結状態・ロール・操作者が付けられるロール。 */
+  actorModeration(id: string) {
+    return request<{ suspended: boolean; role: string | null; assignable_roles: string[] }>(
+      "GET",
+      `/admin/actors/${encodeURIComponent(id)}/moderation`,
+    );
+  },
+  changeActorRole(id: string, role: string) {
+    return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/role`, { role });
+  },
   unsuspendActor(id: string) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/unsuspend`);
   },

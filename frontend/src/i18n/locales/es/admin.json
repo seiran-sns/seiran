@@ -311,7 +311,11 @@
       "reasonRuleBanEvasion": "Prohibir la evasión",
       "reasonRuleOther": "Otra violación de las reglas",
       "reasonOther": "Otro"
-    }
+    },
+    "deletePostConfirm": "¿Eliminar la publicación denunciada de {{subject}}? No se puede deshacer.",
+    "suspendUserConfirm": "¿Suspender a {{subject}}? Mientras esté suspendido no podrá iniciar sesión ni usar la API, y sus publicaciones se ocultarán.",
+    "silenceUserConfirm": "¿Restringir a {{subject}}? Ya no podrá publicar de forma pública.",
+    "quarantineUserConfirm": "¿Aislar a {{subject}}? No podrá publicar de forma pública ni responder, mencionar o reaccionar a quien no le siga."
   },
   "suspendedActors": {
     "title": "Usuarios suspendidos",
@@ -333,7 +337,11 @@
     "totpDisabled": "TOTP: deshabilitado",
     "passkeyCount": "Claves de acceso: {{count}}",
     "disableTotpButton": "Forzar la desactivación del TOTP",
-    "disableTotpConfirm": "¿Forzar la desactivación del TOTP para {{username}}?"
+    "disableTotpConfirm": "¿Forzar la desactivación del TOTP para {{username}}?",
+    "changeRoleTitle": "Cambiar rol",
+    "changeRoleConfirm": "¿Cambiar el rol de {{user}} de {{from}} a {{to}}?",
+    "suspendConfirm": "¿Suspender a {{user}}? Mientras esté suspendido no podrá iniciar sesión ni usar la API, y sus publicaciones se ocultarán.",
+    "unsuspendConfirm": "¿Quitar la suspensión de {{user}}?"
   },
   "serverBlocksPanel": {
     "deniedTitle": "Servidores denegados",

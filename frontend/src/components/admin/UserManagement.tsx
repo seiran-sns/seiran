@@ -6,6 +6,8 @@ import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel
 import EmojiText from "../note/EmojiText";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
+import { isPrivilegedRole } from "../../lib/roles";
+import ConfirmModal from "../common/ConfirmModal";
 
 const ROLES = ["quarantine", "silence", "user", "emoji-editor", "moderator", "admin"];
 const PAGE_SIZE = 30;
@@ -64,6 +66,18 @@ export default function UserManagement() {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query]);
+
+  // 凍結・凍結解除・ロール変更は確認してから行う。
+  const [pending, setPending] = useState<
+    { kind: "suspend"; user: AdminUser } | { kind: "role"; user: AdminUser; role: string } | null
+  >(null);
+  const userLabel = (u: AdminUser) => (u.username ? `@${u.username}` : u.email);
+  async function runPending() {
+    if (!pending) return;
+    if (pending.kind === "suspend") await toggleSuspend(pending.user);
+    else await changeRole(pending.user, pending.role);
+    setPending(null);
+  }
 
   async function toggleSuspend(u: AdminUser) {
     setBusyId(u.id);
@@ -165,7 +179,9 @@ export default function UserManagement() {
                 className={styles.select}
                 value={u.role}
                 disabled={busyId === u.id}
-                onChange={(e) => changeRole(u, e.target.value)}
+                onChange={(e) => {
+                  if (e.target.value !== u.role) setPending({ kind: "role", user: u, role: e.target.value });
+                }}
               >
                 {ROLES.map((r) => (
                   <option key={r} value={r}>
@@ -173,13 +189,16 @@ export default function UserManagement() {
                   </option>
                 ))}
               </select>
-              <button
-                className={u.suspended_at ? styles.btnGhost : styles.btnDanger}
-                disabled={busyId === u.id}
-                onClick={() => toggleSuspend(u)}
-              >
-                {u.suspended_at ? t("admin:userManagement.unsuspendButton") : t("admin:userManagement.suspendButton")}
-              </button>
+              {/* admin・moderator は凍結できない（凍結済みなら解除だけはできる）。 */}
+              {(u.suspended_at || !isPrivilegedRole(u.role)) && (
+                <button
+                  className={u.suspended_at ? styles.btnGhost : styles.btnDanger}
+                  disabled={busyId === u.id}
+                  onClick={() => setPending({ kind: "suspend", user: u })}
+                >
+                  {u.suspended_at ? t("admin:userManagement.unsuspendButton") : t("admin:userManagement.suspendButton")}
+                </button>
+              )}
               {u.totp_enabled && (
                 <button
                   className={styles.btnDanger}
@@ -197,6 +216,43 @@ export default function UserManagement() {
         <div ref={sentinelRef} className={styles.sentinel}>
           {loadingMore ? t("common:loading") : ""}
         </div>
+      )}
+      {pending && (
+        <ConfirmModal
+          open
+          onClose={() => setPending(null)}
+          title={
+            pending.kind === "role"
+              ? t("admin:userManagement.changeRoleTitle")
+              : pending.user.suspended_at
+                ? t("admin:userManagement.unsuspendButton")
+                : t("admin:userManagement.suspendButton")
+          }
+          confirmLabel={
+            pending.kind === "role"
+              ? t("admin:userManagement.changeRoleTitle")
+              : pending.user.suspended_at
+                ? t("admin:userManagement.unsuspendButton")
+                : t("admin:userManagement.suspendButton")
+          }
+          onConfirm={() => void runPending()}
+          busy={busyId === pending.user.id}
+        >
+          <p>
+            {pending.kind === "role"
+              ? t("admin:userManagement.changeRoleConfirm", {
+                  user: userLabel(pending.user),
+                  from: pending.user.role,
+                  to: pending.role,
+                })
+              : t(
+                  pending.user.suspended_at
+                    ? "admin:userManagement.unsuspendConfirm"
+                    : "admin:userManagement.suspendConfirm",
+                  { user: userLabel(pending.user) },
+                )}
+          </p>
+        </ConfirmModal>
       )}
     </div>
   );

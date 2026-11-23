@@ -2,8 +2,10 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ListMembership } from "../api/client";
 import { followTargetOf } from "../api/follows";
+import { useAuth } from "../contexts/AuthContext";
 import { useToast } from "../contexts/ToastContext";
 import { profileQuery } from "../lib/format";
+import { getAdminTopics, isPrivilegedRole } from "../lib/roles";
 import { ActionsMenuItem } from "../components/common/ActionsMenu";
 import {
   FollowStatus,
@@ -63,6 +65,12 @@ export function useUserRelationshipMenu(
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
   const [listMemberships, setListMemberships] = useState<ListMembership[] | null>(null);
+  // 調停者（admin・moderator）向けの凍結・ロール変更。メニューを開いたときに対象の状態を取る。
+  const { user: currentUser } = useAuth();
+  const canModerate = getAdminTopics(currentUser?.role).includes("reports");
+  const [moderation, setModeration] = useState<ModerationState | null>(null);
+  const [moderationDialog, setModerationDialog] = useState<ModerationDialog | null>(null);
+  const [moderationBusy, setModerationBusy] = useState(false);
   const [listActionPendingId, setListActionPendingId] = useState<string | null>(null);
 
   function patch(p: Partial<RelationshipSnapshot>) {
@@ -187,6 +195,44 @@ export function useUserRelationshipMenu(
     }
   }
 
+  async function loadModeration() {
+    if (!canModerate || !target.actorId) return;
+    try {
+      const res = await api.admin.actorModeration(target.actorId);
+      setModeration({ suspended: res.suspended, role: res.role, assignableRoles: res.assignable_roles });
+    } catch {
+      // 失敗しても他の項目は出す（凍結・ロール変更の項目だけ出さない）。
+    }
+  }
+
+  /** メニューを開いたときに、開いてから決まる項目（リスト・調停）の材料を取る。 */
+  function loadMenuData() {
+    void loadListMemberships();
+    void loadModeration();
+  }
+
+  async function confirmModeration() {
+    if (!moderationDialog || !target.actorId || !moderation) return;
+    setModerationBusy(true);
+    try {
+      if (moderationDialog.kind === "suspend") {
+        await api.admin.suspendActor(target.actorId);
+        setModeration({ ...moderation, suspended: true });
+      } else if (moderationDialog.kind === "unsuspend") {
+        await api.admin.unsuspendActor(target.actorId);
+        setModeration({ ...moderation, suspended: false });
+      } else {
+        await api.admin.changeActorRole(target.actorId, moderationDialog.role);
+        setModeration({ ...moderation, role: moderationDialog.role });
+      }
+      setModerationDialog(null);
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setModerationBusy(false);
+    }
+  }
+
   async function toggleListMembership(list: ListMembership) {
     if (!target.actorId || listActionPendingId) return;
     setListActionPendingId(list.id);
@@ -290,6 +336,33 @@ export function useUserRelationshipMenu(
         },
   );
 
+  if (moderation) {
+    if (moderation.suspended) {
+      items.push({
+        key: "unsuspend",
+        label: `🛡️ ${t("profile:moderation.unsuspendItem")}`,
+        onClick: () => setModerationDialog({ kind: "unsuspend" }),
+        danger: true,
+      });
+    } else if (!isPrivilegedRole(moderation.role)) {
+      items.push({
+        key: "suspend",
+        label: `🛡️ ${t("profile:moderation.suspendItem")}`,
+        onClick: () => setModerationDialog({ kind: "suspend" }),
+        danger: true,
+      });
+    }
+    if (moderation.role && moderation.assignableRoles.length > 0) {
+      const current = moderation.role;
+      items.push({
+        key: "change-role",
+        label: `🛡️ ${t("profile:moderation.changeRoleItem", { role: current })}`,
+        onClick: () => setModerationDialog({ kind: "role", role: current }),
+        danger: true,
+      });
+    }
+  }
+
   items.push({
     key: "report",
     label: `⚠️ ${t("home:noteCard.reportButton")}`,
@@ -312,6 +385,27 @@ export function useUserRelationshipMenu(
     reportModalOpen,
     closeReportModal: () => setReportModalOpen(false),
 
-    loadListMemberships,
+    loadMenuData,
+
+    moderation,
+    moderationDialog,
+    /** ロール変更ダイアログで選んだロールを反映する。 */
+    selectModerationRole: (role: string) =>
+      setModerationDialog((d) => (d?.kind === "role" ? { kind: "role", role } : d)),
+    closeModerationDialog: () => setModerationDialog(null),
+    confirmModeration,
+    moderationBusy,
   };
 }
+
+/** 調停者向け項目の材料（`GET /api/admin/actors/:id/moderation`）。 */
+export interface ModerationState {
+  suspended: boolean;
+  /** ローカルユーザーならロール（リモートは null）。 */
+  role: string | null;
+  /** 操作者が付けられるロール。空ならロール変更の項目を出さない。 */
+  assignableRoles: string[];
+}
+
+/** 開いている確認ダイアログ。`role` は選んでいる変更後のロール。 */
+export type ModerationDialog = { kind: "suspend" } | { kind: "unsuspend" } | { kind: "role"; role: string };

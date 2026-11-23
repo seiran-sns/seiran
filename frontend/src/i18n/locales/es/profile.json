@@ -109,5 +109,19 @@
       "video": "Vídeo",
       "audio": "Audio"
     }
+  },
+  "moderation": {
+    "suspendItem": "Suspender",
+    "unsuspendItem": "Quitar suspensión",
+    "changeRoleItem": "Cambiar rol (actual: {{role}})",
+    "suspendTitle": "Suspender usuario",
+    "suspendBody": "¿Suspender a {{subject}}? Mientras esté suspendido no podrá iniciar sesión ni usar la API, y sus publicaciones se ocultarán.",
+    "suspendConfirm": "Suspender",
+    "unsuspendTitle": "Quitar suspensión",
+    "unsuspendBody": "¿Quitar la suspensión de {{subject}}?",
+    "unsuspendConfirm": "Quitar suspensión",
+    "changeRoleTitle": "Cambiar rol",
+    "changeRoleBody": "Cambiar el rol de {{subject}} (actual: {{role}}).",
+    "changeRoleConfirm": "Cambiar"
   }
 }

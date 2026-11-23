@@ -109,5 +109,19 @@
       "video": "Vidéo",
       "audio": "Audio"
     }
+  },
+  "moderation": {
+    "suspendItem": "Suspendre",
+    "unsuspendItem": "Lever la suspension",
+    "changeRoleItem": "Changer le rôle (actuel : {{role}})",
+    "suspendTitle": "Suspendre l'utilisateur",
+    "suspendBody": "Suspendre {{subject}} ? Pendant la suspension, il ne peut ni se connecter ni utiliser l'API, et ses publications sont masquées.",
+    "suspendConfirm": "Suspendre",
+    "unsuspendTitle": "Lever la suspension",
+    "unsuspendBody": "Lever la suspension de {{subject}} ?",
+    "unsuspendConfirm": "Lever la suspension",
+    "changeRoleTitle": "Changer le rôle",
+    "changeRoleBody": "Changer le rôle de {{subject}} (actuel : {{role}}).",
+    "changeRoleConfirm": "Changer"
   }
 }

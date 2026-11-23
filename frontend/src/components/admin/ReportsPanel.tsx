@@ -8,13 +8,13 @@ import {
 } from "../../api/client";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
+import { isPrivilegedRole } from "../../lib/roles";
 import { findReportReasonLabel } from "../report/reportReasons";
+import ConfirmModal from "../common/ConfirmModal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import TwemojiText from "../common/TwemojiText";
 import styles from "../../pages/Admin.module.css";
 
-/** 通報の処理で下げられるロール（admin・moderator はユーザー管理で変える）。 */
-const LOWERABLE_ROLES = new Set(["user", "emoji-editor", "silence", "quarantine"]);
 /** 制限（silence）以下のロール。 */
 const SILENCED_ROLES = new Set(["silence", "quarantine"]);
 
@@ -64,6 +64,24 @@ export default function ReportsPanel() {
       showError(getErrorMessage(e));
     }
   }
+  // 対象への処分（凍結・制限・隔離・投稿削除）は確認してから行う。
+  const [pending, setPending] = useState<{
+    label: string;
+    body: string;
+    action: () => Promise<void>;
+  } | null>(null);
+  const [pendingBusy, setPendingBusy] = useState(false);
+  function confirmAct(r: AdminReport, labelKey: string, bodyKey: string, action: () => Promise<void>) {
+    setPending({ label: t(labelKey), body: t(bodyKey, { subject: r.subject }), action });
+  }
+  async function runPending() {
+    if (!pending) return;
+    setPendingBusy(true);
+    await act(pending.action);
+    setPendingBusy(false);
+    setPending(null);
+  }
+
   async function act(action: () => Promise<void>) {
     try {
       await action();
@@ -162,12 +180,16 @@ export default function ReportsPanel() {
             {r.subject_post_id && (
               <button
                 className={styles.btnDanger}
-                onClick={() => act(() => api.admin.deleteReportedPost(r.id))}
+                onClick={() =>
+                  confirmAct(r, "admin:reports.deletePostButton", "admin:reports.deletePostConfirm", () =>
+                    api.admin.deleteReportedPost(r.id),
+                  )
+                }
               >
                 {t("admin:reports.deletePostButton")}
               </button>
             )}
-            {r.subject_role && LOWERABLE_ROLES.has(r.subject_role) && (
+            {r.subject_role && !isPrivilegedRole(r.subject_role) && (
               <>
                 {SILENCED_ROLES.has(r.subject_role) ? (
                   <span className={`${styles.badge} ${styles.badgeSuspended}`}>
@@ -177,7 +199,9 @@ export default function ReportsPanel() {
                   <button
                     className={styles.btnDanger}
                     onClick={() =>
-                      act(() => api.admin.restrictReportedUser(r.id, "silence"))
+                      confirmAct(r, "admin:reports.silenceUserButton", "admin:reports.silenceUserConfirm", () =>
+                        api.admin.restrictReportedUser(r.id, "silence"),
+                      )
                     }
                   >
                     {t("admin:reports.silenceUserButton")}
@@ -191,7 +215,7 @@ export default function ReportsPanel() {
                   <button
                     className={styles.btnDanger}
                     onClick={() =>
-                      act(() =>
+                      confirmAct(r, "admin:reports.quarantineUserButton", "admin:reports.quarantineUserConfirm", () =>
                         api.admin.restrictReportedUser(r.id, "quarantine"),
                       )
                     }
@@ -205,10 +229,14 @@ export default function ReportsPanel() {
               <span className={`${styles.badge} ${styles.badgeSuspended}`}>
                 {t("admin:reports.suspendedBadge")}
               </span>
-            ) : (
+            ) : isPrivilegedRole(r.subject_role) ? null : (
               <button
                 className={styles.btnDanger}
-                onClick={() => act(() => api.admin.suspendReportedUser(r.id))}
+                onClick={() =>
+                  confirmAct(r, "admin:reports.suspendUserButton", "admin:reports.suspendUserConfirm", () =>
+                    api.admin.suspendReportedUser(r.id),
+                  )
+                }
               >
                 {t("admin:reports.suspendUserButton")}
               </button>
@@ -242,6 +270,16 @@ export default function ReportsPanel() {
           )}
         </section>
       ))}
+      <ConfirmModal
+        open={pending !== null}
+        onClose={() => setPending(null)}
+        title={pending?.label ?? ""}
+        confirmLabel={pending?.label ?? ""}
+        onConfirm={() => void runPending()}
+        busy={pendingBusy}
+      >
+        <p>{pending?.body}</p>
+      </ConfirmModal>
     </div>
   );
 }

@@ -178,12 +178,10 @@ pub async fn suspend_subject(
         .await
         .map_err(|e| ApiError::Internal(e.to_string()))?;
     let subject_actor_id = subject_actor_id.ok_or(ApiError::NotFound("REPORT_NOT_FOUND"))?;
-    state
-        .actors
-        .set_suspended(subject_actor_id, true)
-        .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
-    Ok(StatusCode::NO_CONTENT)
+    super::actors::suspend_response(
+        state.actors.set_suspended(subject_actor_id, true).await,
+        "REPORT_NOT_FOUND",
+    )
 }
 
 #[derive(Debug, Deserialize)]

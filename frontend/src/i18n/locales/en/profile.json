@@ -109,5 +109,19 @@
       "video": "Video",
       "audio": "Audio"
     }
+  },
+  "moderation": {
+    "suspendItem": "Suspend",
+    "unsuspendItem": "Unsuspend",
+    "changeRoleItem": "Change role (current: {{role}})",
+    "suspendTitle": "Suspend user",
+    "suspendBody": "Suspend {{subject}}? While suspended, they cannot log in or use the API, and their posts are hidden.",
+    "suspendConfirm": "Suspend",
+    "unsuspendTitle": "Unsuspend user",
+    "unsuspendBody": "Lift the suspension of {{subject}}?",
+    "unsuspendConfirm": "Unsuspend",
+    "changeRoleTitle": "Change role",
+    "changeRoleBody": "Change the role of {{subject}} (current: {{role}}).",
+    "changeRoleConfirm": "Change"
   }
 }

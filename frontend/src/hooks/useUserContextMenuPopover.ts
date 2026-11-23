@@ -39,7 +39,7 @@ export function useUserContextMenuPopover(target: UserRelationshipTarget) {
     e.preventDefault();
     e.stopPropagation();
     setMenuPos({ x: e.clientX, y: e.clientY });
-    menu.loadListMemberships();
+    menu.loadMenuData();
   }
 
   function closeMenu() {

@@ -328,7 +328,11 @@
       "reasonRuleBanEvasion": "凍結逃れ（再登録）",
       "reasonRuleOther": "その他のルール違反",
       "reasonOther": "その他"
-    }
+    },
+    "deletePostConfirm": "{{subject}} の通報された投稿を削除します。元に戻せません。よろしいですか？",
+    "suspendUserConfirm": "{{subject}} を凍結します。凍結中はログインもAPIの利用もできず、投稿も表示されなくなります。よろしいですか？",
+    "silenceUserConfirm": "{{subject}} を制限（silence）にします。パブリック投稿ができなくなります。よろしいですか？",
+    "quarantineUserConfirm": "{{subject}} を隔離（quarantine）にします。パブリック投稿ができず、フォロワー以外への返信・メンション・リアクション等もできなくなります。よろしいですか？"
   },
   "suspendedActors": {
     "title": "凍結済みユーザー",
@@ -350,7 +354,11 @@
     "totpDisabled": "TOTP: 無効",
     "passkeyCount": "パスキー: {{count}}件",
     "disableTotpButton": "TOTP強制解除",
-    "disableTotpConfirm": "{{username}} のTOTPを強制解除しますか？"
+    "disableTotpConfirm": "{{username}} のTOTPを強制解除しますか？",
+    "changeRoleTitle": "ロールを変更",
+    "changeRoleConfirm": "{{user}} のロールを {{from}} から {{to}} に変更します。よろしいですか？",
+    "suspendConfirm": "{{user}} を凍結します。凍結中はログインもAPIの利用もできず、投稿も表示されなくなります。よろしいですか？",
+    "unsuspendConfirm": "{{user}} の凍結を解除します。よろしいですか？"
   },
   "roleRateLimitPanel": {
     "title": "ロール別レート制限",

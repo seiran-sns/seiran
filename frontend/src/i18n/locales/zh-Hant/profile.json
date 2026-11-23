@@ -109,5 +109,19 @@
       "video": "影片",
       "audio": "音訊"
     }
+  },
+  "moderation": {
+    "suspendItem": "凍結",
+    "unsuspendItem": "解除凍結",
+    "changeRoleItem": "變更角色（目前：{{role}}）",
+    "suspendTitle": "凍結使用者",
+    "suspendBody": "要凍結 {{subject}} 嗎？凍結期間無法登入或使用 API，其貼文也會被隱藏。",
+    "suspendConfirm": "凍結",
+    "unsuspendTitle": "解除凍結",
+    "unsuspendBody": "要解除 {{subject}} 的凍結嗎？",
+    "unsuspendConfirm": "解除凍結",
+    "changeRoleTitle": "變更角色",
+    "changeRoleBody": "變更 {{subject}} 的角色（目前：{{role}}）。",
+    "changeRoleConfirm": "變更"
   }
 }

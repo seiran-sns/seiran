@@ -109,5 +109,19 @@
       "video": "Video",
       "audio": "Audio"
     }
+  },
+  "moderation": {
+    "suspendItem": "Sperren",
+    "unsuspendItem": "Sperre aufheben",
+    "changeRoleItem": "Rolle ändern (aktuell: {{role}})",
+    "suspendTitle": "Benutzer sperren",
+    "suspendBody": "{{subject}} sperren? Gesperrte Benutzer können sich nicht anmelden und die API nicht nutzen; ihre Beiträge werden ausgeblendet.",
+    "suspendConfirm": "Sperren",
+    "unsuspendTitle": "Sperre aufheben",
+    "unsuspendBody": "Die Sperre von {{subject}} aufheben?",
+    "unsuspendConfirm": "Sperre aufheben",
+    "changeRoleTitle": "Rolle ändern",
+    "changeRoleBody": "Die Rolle von {{subject}} ändern (aktuell: {{role}}).",
+    "changeRoleConfirm": "Ändern"
   }
 }
