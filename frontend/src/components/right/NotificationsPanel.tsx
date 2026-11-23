@@ -40,11 +40,13 @@ const PAGE_SIZE = 20;
 /** 未読だった通知を目立たせておく時間（10秒＋元の背景へ戻る1.5秒。CSS の notifFresh と揃える）。 */
 const FRESH_HIGHLIGHT_MS = 11_500;
 
-/** 2行で出す通知種別。2行目に対象ポストを出し、どのポストへの反応かを一目でわかるようにする。 */
-const TWO_LINE_TYPES = new Set(["reaction", "renote"]);
+/** 2行で出す通知種別。2行目に対象ポストを出し、どのポストへの反応か・何と書かれたかを一目で
+ * わかるようにする（返信・引用・メンションでは相手のポスト自体）。 */
+const TWO_LINE_TYPES = new Set(["reaction", "renote", "reply", "quote", "mention"]);
 
 /** 2行目に出す対象ポスト。リポスト通知の `note` は本文の無いラッパーなので、リポスト元を出す
- * （取り消し済みでラッパーが残っていなければ `note` がリポスト元そのもの）。 */
+ * （取り消し済みでラッパーが残っていなければ `note` がリポスト元そのもの）。返信・引用・
+ * メンション通知の `note` は相手のポスト（返信・引用したポスト自体）。 */
 function targetNote(n: NotificationItem) {
   return n.type === "renote" ? (n.note?.renote ?? n.note) : n.note;
 }
