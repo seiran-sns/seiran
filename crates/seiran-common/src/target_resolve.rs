@@ -10,13 +10,15 @@ use crate::ap::ApClient;
 use crate::atp::fetch_bsky_profile;
 use crate::follow_target::{classify_follow_target, FollowTargetKind};
 use crate::repository::{Actor, ActorRepository};
-use crate::{generate_snowflake_id, ApError};
+use crate::ApError;
 
 /// `resolve_and_upsert_target`が必要とする依存の束。`seiran-api`の`AppState`・
 /// `seiran-common`のジョブ（`JobContext`/`InboxContext`）のどちらからも組み立てられるよう、
 /// 具象の`AppState`型には依存しない最小限のフィールドだけを持つ。
 pub struct TargetResolveContext<'a> {
     pub actors: &'a dyn ActorRepository,
+    pub db_pool: &'a sqlx::PgPool,
+    pub job_queue: &'a dyn crate::traits::JobQueue,
     pub ap_client: &'a ApClient,
     pub local_domain: &'a str,
     /// 署名付きGETに使う鍵（`(key_id, private_key_pem)`）。未設定なら未署名GETにフォールバック。
@@ -60,23 +62,16 @@ async fn resolve_bsky(
         }
     }
 
-    let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
-    let actor_id = ctx
-        .actors
-        .upsert_remote_bsky(
-            new_actor_id,
-            &crate::repository::BskyActorProfile {
-                at_did: &did,
-                handle: &bsky_resp.handle,
-                display_name: bsky_resp.display_name.as_deref(),
-                avatar_url: bsky_resp.avatar.as_deref(),
-                banner_url: bsky_resp.banner.as_deref(),
-            },
-            now,
-        )
-        .await
-        .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?;
+    let actor_id = crate::seiran_actor_merge::discover_bsky_profile(
+        ctx.db_pool,
+        ctx.job_queue,
+        &(&bsky_resp).into(),
+        crate::seiran_actor_merge::DeclarationLookup::Always,
+        true,
+    )
+    .await
+    .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?
+    .actor_id;
 
     ctx.actors
         .find_by_id(actor_id)
@@ -129,12 +124,15 @@ async fn resolve_fedi(ctx: &TargetResolveContext<'_>, target: &str) -> Result<Ac
         .await?;
     let profile = crate::repository::FediActorProfile::from_ap_actor(&remote_ap, &target_uri, None)
         .map_err(|e| ApError::Other(e.to_string()))?;
-    let now = chrono::Utc::now();
-    let remote_actor_id = ctx
-        .actors
-        .upsert_remote_fedi(generate_snowflake_id(now), &profile, now)
-        .await
-        .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?;
+    let remote_actor_id = crate::seiran_actor_merge::discover_fedi_profile(
+        ctx.db_pool,
+        ctx.job_queue,
+        &profile,
+        true,
+    )
+    .await
+    .map_err(|e| ApError::Other(format!("DBエラー: {}", e)))?
+    .actor_id;
 
     ctx.actors
         .find_by_id(remote_actor_id)

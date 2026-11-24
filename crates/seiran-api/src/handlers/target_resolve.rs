@@ -38,6 +38,8 @@ pub async fn check_not_blocked(
 pub async fn resolve_and_upsert_target(state: &AppState, target: &str) -> Result<Actor, ApError> {
     let ctx = TargetResolveContext {
         actors: state.actors.as_ref(),
+        db_pool: &state.db,
+        job_queue: state.job_queue.as_ref(),
         ap_client: &state.ap_client,
         local_domain: state.local_domain.as_str(),
         system_signing_key: state.system_signing_key(),

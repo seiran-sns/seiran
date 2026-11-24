@@ -88,13 +88,24 @@ pub async fn run(
         )
     };
     let follower_poll = {
-        let (pool, http, hub) = (pool.clone(), Arc::clone(&http), Arc::clone(&stream_hub));
+        let (pool, http, hub, queue) = (
+            pool.clone(),
+            Arc::clone(&http),
+            Arc::clone(&stream_hub),
+            Arc::clone(&job_queue),
+        );
         run_as_leader(
             pool.clone(),
             LeaderTask::BskyFollowerPoll,
             shutdown.clone(),
             move |stop| {
-                bsky_follower_poll::run(pool.clone(), Arc::clone(&http), Arc::clone(&hub), stop)
+                bsky_follower_poll::run(
+                    pool.clone(),
+                    Arc::clone(&queue),
+                    Arc::clone(&http),
+                    Arc::clone(&hub),
+                    stop,
+                )
             },
         )
     };

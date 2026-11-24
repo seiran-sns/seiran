@@ -511,21 +511,25 @@ async fn fetch_bsky_profile_from_appview(
         if db_actor.actor_type == "local" {
             return build_profile_response(db_actor, my_user_id, state).await;
         }
-        let now = chrono::Utc::now();
-        let _ = state
-            .actors
-            .upsert_remote_bsky(
-                db_actor.id,
-                &seiran_common::repository::BskyActorProfile {
-                    at_did: &bsky.did,
-                    handle: &bsky.handle,
-                    display_name: bsky.display_name.as_deref(),
-                    avatar_url: bsky.avatar.as_deref(),
-                    banner_url: bsky.banner.as_deref(),
-                },
-                now,
-            )
-            .await;
+        let outcome = seiran_common::seiran_actor_merge::discover_bsky_profile(
+            &state.db,
+            state.job_queue.as_ref(),
+            &(&bsky).into(),
+            seiran_common::seiran_actor_merge::DeclarationLookup::Always,
+            true,
+        )
+        .await;
+        // Fedi 側の行と統合された場合、この行は消えて統合先の行が残る
+        let db_actor = match outcome {
+            Ok(o) if o.actor_id != db_actor.id => state
+                .actors
+                .find_by_id(o.actor_id)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(db_actor),
+            _ => db_actor,
+        };
         // バックグラウンドで過去ポストを取り込む（Worker の ActorHistorySync ジョブ）
         state
             .enqueue_actor_history_sync(None, Some(bsky.did.clone()))
@@ -1391,13 +1395,14 @@ async fn fetch_remote_profile(
             return ApiError::NotFound("USER_NOT_FOUND").into_response();
         }
     };
-    let now = chrono::Utc::now();
-    let new_actor_id = seiran_common::generate_snowflake_id(now);
-
-    match state
-        .actors
-        .upsert_remote_fedi(new_actor_id, &profile, now)
-        .await
+    match seiran_common::seiran_actor_merge::discover_fedi_profile(
+        &state.db,
+        state.job_queue.as_ref(),
+        &profile,
+        true,
+    )
+    .await
+    .map(|o| o.actor_id)
     {
         Ok(actor_id) => match state.actors.find_by_id(actor_id).await {
             Ok(Some(actor)) => {

@@ -61,20 +61,18 @@ async fn fetch_atp_original(
     let actors = PgActorRepository::new(pool.clone());
     let actor_id = match actors.find_by_did(&post.author_did).await {
         Ok(Some(actor)) => actor.id,
-        Ok(None) => actors
-            .upsert_remote_bsky(
-                crate::generate_snowflake_id(chrono::Utc::now()),
-                &crate::repository::BskyActorProfile {
-                    at_did: &post.author_did,
-                    handle: &post.author_handle,
-                    display_name: post.author_display_name.as_deref(),
-                    avatar_url: post.author_avatar.as_deref(),
-                    banner_url: None,
-                },
-                chrono::Utc::now(),
+        Ok(None) => {
+            crate::seiran_actor_merge::discover_bsky_profile(
+                pool,
+                ctx.queue.as_ref(),
+                &(&post).into(),
+                crate::seiran_actor_merge::DeclarationLookup::WhenNew,
+                true,
             )
             .await
-            .map_err(|e| format!("元投稿アクターupsert失敗: {}", e))?,
+            .map_err(|e| format!("元投稿アクターupsert失敗: {}", e))?
+            .actor_id
+        }
         Err(e) => return Err(format!("元投稿アクター検索失敗: {}", e)),
     };
 

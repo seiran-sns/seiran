@@ -237,21 +237,14 @@ async fn upsert_remote_fedi_actor(
         .map_err(|e| format!("{} ({})", e, actor_uri))?;
     record_remote_emojis(inbox, &profile.domain, &remote_ap.tag).await;
 
-    let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
-    // リモートseiranアクターの相互申告マージ（#236）。`seiranAtDid`拡張フィールドの
-    // 有無に関わらず同じ経路を通す（無ければ`claimed_at_did=None`で単純upsertと同義）。
-    let outcome =
-        crate::seiran_actor_merge::discover_fedi_actor(&inbox.db_pool, new_actor_id, &profile, now)
-            .await
-            .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
-    crate::seiran_actor_merge::promote_after_discovery(
+    let outcome = crate::seiran_actor_merge::discover_fedi_profile(
         &inbox.db_pool,
         inbox.queue.as_ref(),
-        &outcome,
-        profile.claimed_at_did.as_deref(),
+        &profile,
+        true,
     )
-    .await;
+    .await
+    .map_err(|e| format!("リモートアクター upsert エラー: {}", e))?;
 
     Ok(RemoteActorInfo {
         actor_id: outcome.actor_id,

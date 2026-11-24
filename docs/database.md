@@ -100,8 +100,8 @@ ID の採番は2系統:
 - `is_locked`: フォロー承認制。投稿の公開範囲には影響しない（`docs/protocols.md` 2節）。
 - `at_rotation_key_pem`: アカウント単位の PLC ローテーションキー（`docs/account_migration.md` 6節）。NULL は、この列より前に作られた/転入したアカウントの取り残しだけ。
 - `did_moved_out_at`: DID 転出済みの時刻（`submitPlcOperation` 成功か `deactivateAccount` で設定）。読み取りは通常どおりで、書き込みだけ拒否する。
-- `claimed_ap_uri`/`claimed_at_did`: 相互申告マージ（#236）用の、まだ確認できていない自己申告（`bsky` 行が申告する AP Actor URI、`fedi` 行が申告する DID）。相互一致で結婚したら `remote_seiran` に昇格して NULL に戻す。相互に申告し合う2行の共存は複合 UNIQUE `actors_mutual_claim_key` で禁止する（`docs/protocols.md` 11節、`seiran_actor_merge`・`unique_retry`）。
-- `at_handle`: ATP ハンドル。`remote_seiran` の `username` は Fedi 側のまま固定されるので、Bsky ID の表示にはこれを使う。発見・再訪問のたびに最新にする（`upsert_remote_bsky`・`discover_bsky_actor`）。
+- `claimed_ap_uri`/`claimed_at_did`: 相互申告マージ（#236）用の、まだ確認できていない自己申告（`bsky` 行が申告する AP Actor URI、`fedi` 行が申告する DID）。相互一致で結婚したら `remote_seiran` に昇格して NULL に戻す。相互に申告し合う2行の共存は複合 UNIQUE `actors_mutual_claim_key` で禁止し、既存行へ申告を書き足して相互に申告し合う形になるときは2行を統合する（`docs/protocols.md` 11節、`seiran_actor_merge`・`repository::actor_merge`・`unique_retry`）。
+- `at_handle`: ATP ハンドル。`remote_seiran` の `username` は Fedi 側のまま固定されるので、Bsky ID の表示にはこれを使う。発見・再訪問のたびに最新にする（`discover_bsky_actor`）。
 - `bridge_real_actor_id`: ブリッジユーザーから実ユーザーへのリンク。
 - `seiran_pair_actor_id`: 使っていない（常に NULL）。削除を検討中。
 

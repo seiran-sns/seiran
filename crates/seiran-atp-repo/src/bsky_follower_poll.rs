@@ -23,6 +23,7 @@ use seiran_common::repository::{
     PgFollowRepository, PgNotificationRepository,
 };
 use seiran_common::streaming::StreamHub;
+use seiran_common::traits::JobQueue;
 use seiran_common::{CancellationToken, generate_snowflake_id};
 use sqlx::PgPool;
 
@@ -44,17 +45,23 @@ fn poll_interval() -> Duration {
 /// フォロワー検知ポーリングを常駐実行する。
 pub async fn run(
     pool: PgPool,
+    queue: Arc<dyn JobQueue>,
     http: Arc<reqwest::Client>,
     stream_hub: Arc<StreamHub>,
     stop: CancellationToken,
 ) {
     seiran_common::leader::every(poll_interval(), stop, || {
-        poll_once(&pool, &http, &stream_hub)
+        poll_once(&pool, queue.as_ref(), &http, &stream_hub)
     })
     .await;
 }
 
-async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub) {
+async fn poll_once(
+    pool: &PgPool,
+    queue: &dyn JobQueue,
+    http: &reqwest::Client,
+    stream_hub: &StreamHub,
+) {
     let users = match seiran_common::repository::actor::bsky_follower_poll_targets(pool).await {
         Ok(rows) => rows,
         Err(e) => {
@@ -64,7 +71,7 @@ async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub
     };
 
     for (actor_id, did) in users {
-        if let Err(e) = poll_user(pool, http, stream_hub, actor_id, &did).await {
+        if let Err(e) = poll_user(pool, queue, http, stream_hub, actor_id, &did).await {
             tracing::warn!(
                 "[BskyFollowerPoll] actor_id={} のポーリング失敗: {}",
                 actor_id,
@@ -76,6 +83,7 @@ async fn poll_once(pool: &PgPool, http: &reqwest::Client, stream_hub: &StreamHub
 
 async fn poll_user(
     pool: &PgPool,
+    queue: &dyn JobQueue,
     http: &reqwest::Client,
     stream_hub: &StreamHub,
     local_actor_id: i64,
@@ -115,21 +123,22 @@ async fn poll_user(
             let follower_actor_id = match actor_repo.find_by_did(&f.did).await {
                 Ok(Some(existing)) => existing.id,
                 Ok(None) => {
-                    let new_id = generate_snowflake_id(Utc::now());
-                    actor_repo
-                        .upsert_remote_bsky(
-                            new_id,
-                            &seiran_common::repository::BskyActorProfile {
-                                at_did: &f.did,
-                                handle: &f.handle,
-                                display_name: f.display_name.as_deref(),
-                                avatar_url: f.avatar.as_deref(),
-                                banner_url: None,
-                            },
-                            Utc::now(),
-                        )
-                        .await
-                        .map_err(|e| format!("upsert_remote_bsky 失敗 did={}: {}", f.did, e))?
+                    seiran_common::seiran_actor_merge::discover_bsky_profile(
+                        pool,
+                        queue,
+                        &seiran_common::repository::BskyActorProfile {
+                            at_did: &f.did,
+                            handle: &f.handle,
+                            display_name: f.display_name.as_deref(),
+                            avatar_url: f.avatar.as_deref(),
+                            banner_url: None,
+                        },
+                        seiran_common::seiran_actor_merge::DeclarationLookup::WhenNew,
+                        true,
+                    )
+                    .await
+                    .map_err(|e| format!("discover_bsky_profile 失敗 did={}: {}", f.did, e))?
+                    .actor_id
                 }
                 Err(e) => {
                     tracing::warn!("[BskyFollowerPoll] find_by_did 失敗 did={}: {}", f.did, e);

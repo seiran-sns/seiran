@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::generate_snowflake_id;
 use crate::queue::worker::{priority, JobContext};
 use crate::repository::{
     ActorRepository, AlsoKnownAsRepository, PgActorRepository, PgAlsoKnownAsRepository,
@@ -124,23 +123,16 @@ async fn resolve_also_known_as_uri(
         let profile = crate::atp::fetch_bsky_profile(&ctx.ap_client.http, did)
             .await
             .map_err(|e| format!("Bskyプロフィール取得失敗: {}", e))?;
-        let now = chrono::Utc::now();
-        let new_id = generate_snowflake_id(now);
-        let id = actors
-            .upsert_remote_bsky(
-                new_id,
-                &crate::repository::BskyActorProfile {
-                    at_did: &profile.did,
-                    handle: &profile.handle,
-                    display_name: profile.display_name.as_deref(),
-                    avatar_url: profile.avatar.as_deref(),
-                    banner_url: profile.banner.as_deref(),
-                },
-                now,
-            )
-            .await
-            .map_err(|e| format!("upsert失敗: {}", e))?;
-        return Ok(Some(id));
+        let outcome = crate::seiran_actor_merge::discover_bsky_profile(
+            ctx.db_pool.as_ref().ok_or("DB pool 未設定")?,
+            ctx.queue.as_ref(),
+            &(&profile).into(),
+            crate::seiran_actor_merge::DeclarationLookup::Always,
+            true,
+        )
+        .await
+        .map_err(|e| format!("upsert失敗: {}", e))?;
+        return Ok(Some(outcome.actor_id));
     }
 
     if uri.starts_with("https://") || uri.starts_with("http://") {
@@ -173,15 +165,15 @@ async fn resolve_also_known_as_uri(
                 Err(crate::ap::client::FediProfileError::MissingInbox) => return Ok(None),
                 Err(e) => return Err(e.to_string()),
             };
-        let id = actors
-            .upsert_remote_fedi(
-                generate_snowflake_id(chrono::Utc::now()),
-                &profile,
-                chrono::Utc::now(),
-            )
-            .await
-            .map_err(|e| format!("upsert失敗: {}", e))?;
-        return Ok(Some(id));
+        let outcome = crate::seiran_actor_merge::discover_fedi_profile(
+            ctx.db_pool.as_ref().ok_or("DB pool 未設定")?,
+            ctx.queue.as_ref(),
+            &profile,
+            true,
+        )
+        .await
+        .map_err(|e| format!("upsert失敗: {}", e))?;
+        return Ok(Some(outcome.actor_id));
     }
 
     Ok(None)

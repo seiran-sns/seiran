@@ -10,7 +10,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::generate_snowflake_id;
 use crate::queue::worker::JobContext;
 use crate::repository::{ActorRepository, PgActorRepository};
 
@@ -126,14 +125,11 @@ pub(crate) async fn resolve_and_upsert(uri: &str, ctx: &JobContext) -> Result<Op
     };
     let username = profile.username.clone();
 
-    let actor_id = actor_repo
-        .upsert_remote_fedi(
-            generate_snowflake_id(chrono::Utc::now()),
-            &profile,
-            chrono::Utc::now(),
-        )
-        .await
-        .map_err(|e| format!("upsert_remote_fedi 失敗: {}", e))?;
+    let actor_id =
+        crate::seiran_actor_merge::discover_fedi_profile(pool, ctx.queue.as_ref(), &profile, true)
+            .await
+            .map_err(|e| format!("discover_fedi_profile 失敗: {}", e))?
+            .actor_id;
 
     tracing::info!(
         "[RemoteActorResolve] 未知アクター解決完了: uri={} handle={}",

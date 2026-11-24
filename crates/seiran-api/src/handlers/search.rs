@@ -253,23 +253,16 @@ pub(crate) async fn persist_appview_posts(
         let actor_id = match state.actors.find_by_did(&post.author_did).await {
             Ok(Some(actor)) if actor.actor_type == "local" => actor.id,
             Ok(_) => {
-                let now = chrono::Utc::now();
-                match state
-                    .actors
-                    .upsert_remote_bsky(
-                        seiran_common::generate_snowflake_id(now),
-                        &seiran_common::repository::BskyActorProfile {
-                            at_did: &post.author_did,
-                            handle: &post.author_handle,
-                            display_name: post.author_display_name.as_deref(),
-                            avatar_url: post.author_avatar.as_deref(),
-                            banner_url: None,
-                        },
-                        now,
-                    )
-                    .await
+                match seiran_common::seiran_actor_merge::discover_bsky_profile(
+                    &state.db,
+                    state.job_queue.as_ref(),
+                    &(&post).into(),
+                    seiran_common::seiran_actor_merge::DeclarationLookup::WhenNew,
+                    true,
+                )
+                .await
                 {
-                    Ok(id) => id,
+                    Ok(outcome) => outcome.actor_id,
                     Err(error) => {
                         tracing::warn!(
                             "[search] AppView actor保存失敗 did={}: {}",

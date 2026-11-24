@@ -390,7 +390,7 @@ Jetstream の `wantedDids` は発行者 DID の絞り込みなので、新たに
 
 - **baseline**: 既存フォロワー全員が初回に「新規」として通知されないよう、`actors.bsky_followers_baseline_done_at` が NULL のユーザーは全ページを辿って無通知で `follows` に入れ、完了後にマーカーを立てる。
 - **ページング**: 新しい順の前提で、baseline 済みなら既知フォロワーに達したら打ち切る（上限 `STEADY_STATE_MAX_PAGES=20`）。未 baseline は `HARD_MAX_PAGES=1000` まで。
-- 未知の DID は `getFollowers` の応答（handle/displayName/avatar）で `upsert_remote_bsky` する。通知の `source_uri` は `bsky-follow:{follower_actor_id}:{local_actor_id}` で、複数インスタンスの同時ポーリングによる重複を部分ユニークインデックスで防ぐ。
+- 未知の DID は `getFollowers` の応答（handle/displayName/avatar）で `discover_bsky_profile` する（宣言レコードは新しい行のときだけ取る、11節）。通知の `source_uri` は `bsky-follow:{follower_actor_id}:{local_actor_id}` で、複数インスタンスの同時ポーリングによる重複を部分ユニークインデックスで防ぐ。
 - Bsky 側のアンフォロー検出は未実装。
 
 ### 生年月日（`actors.birth_date`/`birth_date_public`）
@@ -481,7 +481,7 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 
 **Actor 解決の自ドメインガード**: `upsert_remote_fedi_actor`/`resolve_fedi` は、URI が自ドメインの `https://{local_domain}/users/{username}` なら `extract_local_username` で判定してローカル行を返す（`fedi` 行を作らない）。ローカル行は同じ `ap_uri` を持つので、ガードを通らなくても `ON CONFLICT (ap_uri)` で重複は防がれる。
 
-**Bsky 側 Actor 解決の自 DID ガード**: `follow_bsky`/`resolve_bsky`/`fetch_bsky_profile_from_appview`/`persist_appview_posts` 等は、得た DID が `find_by_did` でローカル行に当たればそれを返し、`upsert_remote_bsky` を呼ばない。ローカルユーザーの Bsky ハンドル表記（`{username}.{local_domain}`）は他の ATP ハンドルと区別できずこの経路に入りうるが、`upsert_remote_bsky` の `ON CONFLICT (at_did) DO UPDATE` がローカル行の `username` をドット付きのハンドルで上書きしてしまうため。
+**Bsky 側 Actor 解決の自 DID ガード**: ローカルユーザーの Bsky ハンドル表記（`{username}.{local_domain}`）は他の ATP ハンドルと区別できず、リモートアクターの解決経路に入りうる。`follow_bsky`/`resolve_bsky`/`fetch_bsky_profile_from_appview`/`persist_appview_posts` 等は、得た DID が `find_by_did` でローカル行に当たればそれを返す。保存の入口（`discover_bsky_profile`、11節）もローカル行に当たったら何も変えずに返す。ローカル行の `username` をドット付きのハンドルで上書きしないため。
 
 ### `seiranPost`拡張オブジェクト（#237）
 
@@ -547,7 +547,7 @@ Bridgy Fed はアクターも投影する。ブリッジユーザーから実ユ
 - AP 側（`bsky.brid.gy`、Bluesky ユーザーの投影）: `ap_uri` が `https://bsky.brid.gy/ap/{did}` なので DID を取得無しで取り出せる。
 - ATP 側（`*.ap.brid.gy`、Fedi ユーザーの投影）: ハンドル `{username}.{domain}.ap.brid.gy` から username/domain を復元し、`ApClient::resolve_webfinger` で actor URI を得る。プロフィールの `bridgyOriginalUrl` は表示用URLで actor URI と一致するとは限らない（Misskey 等）ため使わない。
 
-**解決**: 実ユーザーがDBにあればすぐリンクし、無ければ取得して upsert する（AP 側は `fetch_bsky_profile` → `upsert_remote_bsky`、ATP 側は `RemoteActorResolve` のパイプライン）。
+**解決**: 実ユーザーがDBにあればすぐリンクし、無ければ取得して upsert する（AP 側は `fetch_bsky_profile` → `discover_bsky_profile`、ATP 側は `RemoteActorResolve` のパイプライン）。
 
 **トリガー**: プロフィール表示のたびに、未解決のブリッジユーザーへ `Job::BridgeUserLinkResolve` を積む（表示時再検証）。ブリッジ関係は変わらないので、解決済みならジョブは即終了する。過剰な WebFinger を避けるため `RemoteActorResolve` と同じ1時間のクールダウンを設ける。
 
@@ -907,9 +907,17 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 
 - **自己申告**: AP は Actor 文書の拡張フィールド `seiranAtDid` で自分の DID を、ATP は独自コレクション `org.seiran.actor.declaration`（rkey `self`）の `apActorUri` で自分の Actor URI を申告する。`app.bsky.actor.profile` に載せないのは、他クライアントがプロフィールを丸ごと上書きすると独自フィールドが消えるため。取得は公開 AppView が独自 NSID を中継しないので、DID を `atproto_pds` に解決してその PDS に直接 `getRecord` する（`atp::client::fetch_seiran_actor_declaration`）。
 - **発見時はすぐ INSERT、検証は後**: AP で u（ATP 相手 v を申告）を見つけたら `fedi` 型で `ap_uri=u`・`claimed_at_did=v` として INSERT し、v を取りに行く `Job::ActorMetadataResolve` を積む（結婚を早めるための先行取得で、成立の必須条件ではない）。ATP 側も対称に `bsky` 型で `at_did=v`・`claimed_ap_uri=u`。このジョブ（`jobs::actor_metadata_resolve`）は必ず相手側の申告（DID 側は `fetch_seiran_actor_declaration`、AP 側は取得した Actor 文書の `seiranAtDid`）を使う。呼び出し元が持つ値を渡すと下の相互一致が自己参照になり、一方的な申告だけで結婚が成立してしまう。
-- **発見後の共通処理**: 結婚成立時の Jetstream `wantedDids` 再構築と、未成立かつ申告ありのときの `ActorMetadataResolve` 投入は `seiran_actor_merge::promote_after_discovery` に集約し、`follow_exec`・`inbound_activity_process`・`firehose::resolve_or_upsert_bsky_actor`・`actor_metadata_resolve`（`claimed` に None を渡して無限投入を防ぐ）から呼ぶ。`find_by_did` が既存行を返す経路はこの発見処理を通らない（両側の行が既に別々にある場合の対処はスコープ外）。
+- **保存の入口は1つ**: リモートアクターの行を作る・更新する経路は、すべて `seiran_actor_merge::discover_fedi_profile`（AP）か `discover_bsky_profile`（ATP）を通す（フォロー・受信 Activity・firehose・フォロワーのポーリング・検索・プロフィール表示・ターゲット解決・各種ジョブ）。申告を取らずに行を作る経路があると、その行は申告を持たないまま残り、相手と結婚できなくなる。
+  - AP の申告は Actor 文書に含まれるので、取得した文書から常に入る。ATP の申告は別に宣言レコードを取る必要があり、`DeclarationLookup` で取る時機を選ぶ。1人のプロフィールを取り直す経路（フォロー・プロフィール表示・ターゲット解決・相手の解決ジョブ等）は常に取り（`Always`）、多数を一度に目にする経路（検索結果・フォロワー一覧・ブリッジ）は行がまだ無いときだけ取る（`WhenNew`）。新しく作る行には必ず申告が付く。
+  - 入口は、結婚成立時の Jetstream `wantedDids` 再構築と、未成立かつ申告ありのときの `ActorMetadataResolve` 投入（`promote_after_discovery`）まで行う。相手の解決ジョブ自身から呼ぶときは投入を抑止する（`reenqueue_counterpart`、無限投入を防ぐ）。
+  - ローカルアクターの行に当たったら何も変えずに返す（ローカルユーザーの ATP ハンドル表記で `username` を上書きしない）。
 - **相互一致で結婚**: 相手の実体（真正な `ap_uri`、または DID 解決・署名済みコミットで裏付けられた `at_did`）がDBにあり、かつその既存行の申告が今回見つけた実体を指し返している場合だけ結婚させる。成立したら `remote_seiran` に昇格し `claimed_*` をクリアする。不一致・申告なしなら単独の `fedi`/`bsky` 行のまま残す。一方的な申告を受け入れると、他人の実在 URI を騙って結び付ける偽装ができてしまう。
-- **結婚済みの行の保護**: 結婚済みの行を再訪問したとき（`existing_id` 分岐）は、`claimed_*` を復活させず `username` も上書きしない。結婚ロジックを通らない `ActorRepository::upsert_remote_bsky`（フォロワーポーリング・検索・ターゲット解決等）も、結婚済みの行の `username` を ATP ハンドル形式で上書きしない。`at_handle`（プロフィールの Bsky ID 表示用）は対象外で常に最新にする。
+- **既存の2行の統合**: 両側の行が既に別々にあることがある。Bluesky から seiran へ転入した人は、転入前の Bluesky 側の行が申告なしで残っており、転入後に Fedi 側の行が申告付きでできる（相手に申告が無いので、その時点では結婚しない）。既存行へ申告を書き足すとき、書き足すと相互に申告し合う相手の行があれば、2行を統合して結婚させる（`marry_existing_rows`）。
+  - Fedi 側の行を残し（結婚後の正式な `username` は Fedi 側由来）、Bluesky 側の行を参照ごと吸収して削除してから、残した行に `at_did`・`at_handle` を移す。
+  - 吸収は `repository::actor_merge::absorb_actor` が行う。`actors` を参照する全列（`ACTOR_REFERENCES`）を付け替え、付け替えると UNIQUE 制約で重複する行（両方の行をフォローしていた等）と、自分自身を指すことになる関係（両方の行の間のフォロー等）は消す。投稿数（`notes_count`）は数え直す。
+  - `actors` を参照する外部キーを足したら `ACTOR_REFERENCES` にも足す。足し忘れると、その行は統合で吸収される側と一緒に CASCADE で消える。DB の外部キーと UNIQUE 制約が一覧と一致することを `crates/seiran-api/tests/actor_merge_integration.rs` が検査する。
+  - 転入の例では、Fedi 側の行の発見が `ActorMetadataResolve` を積み、そのジョブが Bluesky 側の宣言レコードを取り直す（`Always`）ところで統合が起きる。
+- **結婚済みの行の保護**: 結婚済みの行を再訪問したとき（既存行の分岐）は、`claimed_*` を復活させず `username` も上書きしない。`at_handle`（プロフィールの Bsky ID 表示用）は対象外で常に最新にする。
 - **チャレンジ検証が不要な理由**: AP の Actor 文書はドメインの TLS で、ATP の宣言レコードは DID の署名済みコミットで、それぞれ発行者の真正性が担保されている。相互申告の一致を確認すれば、攻撃者は相手の鍵やドメインを持たない限り「相手に自分を名指しさせる」ことができない。
 - **レース対策**: `actors` の複合 UNIQUE `actors_mutual_claim_key`（`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`、`actor_type IN ('fedi','bsky','remote_seiran')` の部分インデックス）で、相互に申告し合う2行の共存を禁じる。申告の無い行は NULL の非等価性で抵触しない。違反したら `unique_retry::retry_on_unique_violation` がトランザクションを最大5回やり直す（`discover_fedi_actor`/`discover_bsky_actor`）。advisory lock ではなく制約にしているのは、ロックキーの選び方次第で直列化が効かなくなる余地を無くすため。
 - **Fedi 系アクターの判定**: AP の inbox を持つのは `fedi` と `remote_seiran` の両方なので、AP 配送・DM・メンション等の宛先判定は `actor_type IN ('fedi', 'remote_seiran')` にする。`lists.rs` のプロキシフォロー関連だけは `fedi` 固定が正しい（`remote_seiran` は `wantedDids` 経由で ATP から投稿を受け取れるので、AP のプロキシフォローが要らない）。

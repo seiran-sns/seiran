@@ -246,3 +246,53 @@ fn detects_raw_sql_usage() {
         "use sqlx::PgPool;\nfn f(pool: &sqlx::PgPool) {}"
     ));
 }
+
+/// リモートアクター（`fedi`・`bsky`）の行を作ってよいファイル。保存の入口
+/// （`discover_fedi_profile`・`discover_bsky_profile`）が自己申告を取って相互申告マージを
+/// 通す。別の場所で行を作ると申告の無い行ができ、相手と結婚できなくなる
+/// （`docs/protocols.md` 11節）。
+const REMOTE_ACTOR_INSERT_FILE: &str = "crates/seiran-common/src/seiran_actor_merge.rs";
+
+/// `INSERT INTO actors` の直後（列の並びと VALUES）に `'fedi'`・`'bsky'` が現れるか。
+fn inserts_remote_actor(code: &str) -> bool {
+    code.match_indices("INSERT INTO ACTORS").any(|(i, _)| {
+        let tail: String = code[i..].chars().take(400).collect();
+        tail.contains("'FEDI'") || tail.contains("'BSKY'")
+    })
+}
+
+#[test]
+fn remote_actor_rows_are_inserted_only_by_discovery() {
+    let root = workspace_root();
+    let mut files = Vec::new();
+    collect_files(&root.join("crates"), &["rs"], &mut files);
+    let violations: Vec<_> = files
+        .into_iter()
+        .filter(|p| !p.components().any(|c| c.as_os_str() == "tests"))
+        .filter(|p| !p.ends_with(REMOTE_ACTOR_INSERT_FILE))
+        .filter(|p| {
+            let content = std::fs::read_to_string(p).unwrap();
+            inserts_remote_actor(&normalized_code(&content, "//"))
+        })
+        .collect();
+    assert!(
+        violations.is_empty(),
+        "リモートアクターの行は seiran_actor_merge の discover_fedi_profile / discover_bsky_profile \
+         を通して作ってください:\n{}",
+        violations
+            .iter()
+            .map(|p| format!("  {}", p.display()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    );
+}
+
+#[test]
+fn detects_remote_actor_insert() {
+    assert!(inserts_remote_actor(
+        "INSERT INTO ACTORS (ID, ACTOR_TYPE, AT_DID) VALUES ($1, 'BSKY', $2)"
+    ));
+    assert!(!inserts_remote_actor(
+        "INSERT INTO ACTORS (ID, USER_ID, ACTOR_TYPE) VALUES ($1, $2, 'LOCAL')"
+    ));
+}
