@@ -1,0 +1,27 @@
+name: Set up Trivy
+description: >-
+  公開イメージの OS パッケージの脆弱性検査に使う Trivy を入れ、脆弱性データベースを
+  Actions のキャッシュから戻す（.github/scripts/image-vulns.sh が使う）。
+
+# Trivy のインストーラ（setup-trivy）はタグでなくコミットで固定する。タグは付け替えられる
+# ので、インストーラが差し替えられると CI の中で任意のコードが動いてしまう。インストーラは
+# リリースのチェックサムを確かめてからバイナリを置く。版を上げるときは、setup-trivy の差分を
+# 読んでからコミットを更新する。
+runs:
+  using: composite
+  steps:
+    - uses: aquasecurity/setup-trivy@81e514348e19b6112ce2a7e3ecbafe19c1e1f567 # v0.3.1
+      with:
+        version: v0.76.2
+        cache: true
+    # データベースは数時間ごとに更新される。日付ごとのキャッシュを戻しておき、古ければ Trivy が
+    # 差分ではなく丸ごと取り直す。毎回の取得を減らし、配布元の流量制限に当たりにくくするため。
+    - name: Date for the database cache
+      id: date
+      shell: bash
+      run: echo "date=$(date -u +%Y%m%d)" >> "$GITHUB_OUTPUT"
+    - uses: actions/cache@v6
+      with:
+        path: ~/.cache/trivy/db
+        key: trivy-db-${{ runner.os }}-${{ steps.date.outputs.date }}
+        restore-keys: trivy-db-${{ runner.os }}-

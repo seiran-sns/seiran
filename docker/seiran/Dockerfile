@@ -43,7 +43,11 @@ COPY frontend ./
 RUN npm run build
 
 # ─── 実行環境 ─────────────────────────────────────────────────────────────────
-FROM debian:bookworm-slim
+# ステージ名 runtime は CI が使う。OS パッケージに修正版のある脆弱性が見つかったとき、この段だけ
+# キャッシュを使わずに作り直す（no-cache-filters: runtime。.github/workflows/ci.yml・
+# image-rescan.yml）。apt の層はベースイメージが変わらない限りキャッシュから再利用され、その間に
+# 出た Debian のセキュリティ更新を取り込まないため。
+FROM debian:bookworm-slim AS runtime
 # curl は compose のヘルスチェック用。gosu は root で設定ボリュームの所有権を揃えてから
 # seiran ユーザーへ降格するため、tini は PID 1 としてシグナルを伝え、ffmpeg 等の子プロセスを
 # 刈り取るため。

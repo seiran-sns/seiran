@@ -5,14 +5,18 @@
 #
 # 前提: push 済みのコミットにいて、作業ツリーに未コミットの変更が無いこと。
 #       docker login docker.io（seiranorg）と docker login ghcr.io（write:packages 権限の
-#       トークン）を済ませていること。
+#       トークン）を済ませていること。linux/amd64 と linux/arm64 をまとめてビルドするので、
+#       buildx の builder が両方を扱えること（Docker Desktop はそのまま。Linux では
+#       docker-container ドライバの builder と、開発機と違うアーキテクチャ用の QEMU
+#       （binfmt）が要る。エミュレーションする側の Rust のビルドは何倍も遅い）。
+#       CI（.github/workflows/ci.yml）はアーキテクチャごとのランナーでネイティブにビルドする。
 #
 # Usage: scripts/release.sh
 set -euo pipefail
 cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 images=(docker.io/seiranorg/seiran ghcr.io/seiran-sns/seiran)
-platform=linux/amd64
+platform=linux/amd64,linux/arm64
 
 log() { echo "[release] $*"; }
 die() { log "$*"; exit 1; }

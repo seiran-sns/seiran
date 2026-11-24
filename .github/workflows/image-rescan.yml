@@ -1,0 +1,217 @@
+name: Image rescan
+
+# 公開中の最新イメージ（latest）の OS パッケージを毎日 Trivy で検査する。Debian のセキュリティ
+# 更新はイメージを出した後にも出るので、出した時点で問題が無くても古くなっていく。
+#
+#   1. latest を検査し、修正版のある脆弱性（HIGH 以上）が無ければ終わる
+#   2. あれば、latest と同じコミットからイメージを作り直して（実行環境の段だけキャッシュを
+#      使わない）検査し直す
+#   3. 作り直すと消える脆弱性があれば、リビジョン桁を上げて main へ push する。その push の
+#      CI（ci.yml）が新しい版のイメージを出す（.github/scripts/image-rescan-bump.sh）
+#
+# 作り直しても消えないもの（Debian 側の修正待ち）では版を上げない。新しい版を出しても中身は
+# 変わらないため。作り直したイメージそのものは出さない。版 <版> のタグは不変で、同じ版を
+# 別の中身で上書きしないため。
+#
+# 深刻度を HIGH 以上に絞るのは、Debian の小さな修正のたびにリリースと告知が出るのを避けるため。
+# ci.yml の image-build は深刻度を問わずに作り直すので、版を上げるリリースには
+# その時点の修正がすべて入る。
+#
+# 版上げの push は GitHub App のトークンで行う（security-release.yml と同じ。GITHUB_TOKEN の
+# push では main の CI が起動しない）。
+on:
+  schedule:
+    - cron: "41 19 * * *" # 毎日 JST 4:41
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: image-rescan
+  cancel-in-progress: false
+
+env:
+  IMAGE: ghcr.io/seiran-sns/seiran
+  SEVERITY: HIGH,CRITICAL
+
+jobs:
+  # latest が指すイメージを digest で固定し、その版・コミット・アーキテクチャを調べる。
+  # 以降のジョブは同じ digest を見る（途中で latest が動いても混ざらない）。
+  resolve:
+    name: Resolve latest
+    runs-on: ubuntu-latest
+    outputs:
+      digest: ${{ steps.resolve.outputs.digest }}
+      version: ${{ steps.resolve.outputs.version }}
+      revision: ${{ steps.resolve.outputs.revision }}
+      matrix: ${{ steps.resolve.outputs.matrix }}
+    steps:
+      - name: Resolve
+        id: resolve
+        run: |
+          manifest="$RUNNER_TEMP/manifest.json"
+          skopeo inspect --raw "docker://$IMAGE:latest" > "$manifest"
+          digest="sha256:$(sha256sum "$manifest" | cut -d' ' -f1)"
+          if jq -e '.manifests' "$manifest" > /dev/null; then
+              # 来歴の添付（unknown/unknown）を除く
+              arches="$(jq -r '[.manifests[].platform | select(.os == "linux") | .architecture] | unique | .[]' "$manifest")"
+          else
+              arches=amd64
+          fi
+          labels="$(skopeo inspect --override-os linux --override-arch "$(head -n1 <<< "$arches")" \
+              "docker://$IMAGE@$digest" | jq '.Labels')"
+          version="$(jq -r '."org.opencontainers.image.version" // empty' <<< "$labels")"
+          revision="$(jq -r '."org.opencontainers.image.revision" // empty' <<< "$labels")"
+          if [ -z "$version" ] || [ -z "$revision" ]; then
+              echo "::error::$IMAGE@$digest に版かコミットのラベルがありません"
+              exit 1
+          fi
+          matrix="$(for arch in $arches; do
+              case "$arch" in
+                  amd64) echo '{"arch":"amd64","runner":"ubuntu-latest"}' ;;
+                  arm64) echo '{"arch":"arm64","runner":"ubuntu-24.04-arm"}' ;;
+              esac
+          done | jq -sc '{include: .}')"
+          {
+              echo "digest=$digest"
+              echo "version=$version"
+              echo "revision=$revision"
+              echo "matrix=$matrix"
+          } >> "$GITHUB_OUTPUT"
+          echo "latest: $IMAGE@$digest（版 $version、$revision、$(tr '\n' ' ' <<< "$arches")）" >> "$GITHUB_STEP_SUMMARY"
+
+  scan:
+    name: Scan (${{ matrix.arch }})
+    needs: resolve
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.resolve.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      DIGEST: ${{ needs.resolve.outputs.digest }}
+    steps:
+      # 検査の道具（スクリプト・Trivy の設定）は main のものを使い、イメージは公開イメージと
+      # 同じコミットから作る（古いコミットにはこの道具が無いことがある）
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ needs.resolve.outputs.revision }}
+          path: build-src
+      - uses: ./.github/actions/setup-trivy
+      - name: Scan the published image
+        id: published
+        run: |
+          docker pull -q --platform "linux/${{ matrix.arch }}" "$IMAGE@$DIGEST"
+          docker tag "$IMAGE@$DIGEST" "seiran-published:${{ matrix.arch }}"
+          .github/scripts/image-vulns.sh "seiran-published:${{ matrix.arch }}" \
+              "$RUNNER_TEMP/published.tsv" "$SEVERITY"
+      # 実行環境の段に名前（runtime）の無い古い Dockerfile では、その段だけを指定できないので
+      # 全体をキャッシュなしで作る
+      - name: Choose what to rebuild
+        id: rebuild
+        if: steps.published.outputs.found == 'true'
+        run: |
+          if grep -Eq '^FROM .* AS runtime$' build-src/docker/seiran/Dockerfile; then
+              echo "no_cache=false" >> "$GITHUB_OUTPUT"
+          else
+              echo "no_cache=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/setup-buildx-action@v4
+        if: steps.published.outputs.found == 'true'
+      # キャッシュは読むだけにする（古いコミットの層で main のキャッシュを上書きしない）
+      - name: Rebuild from the same commit
+        if: steps.published.outputs.found == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: build-src
+          file: build-src/docker/seiran/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: seiran-rebuilt:${{ matrix.arch }}
+          pull: true
+          no-cache: ${{ steps.rebuild.outputs.no_cache == 'true' }}
+          no-cache-filters: ${{ steps.rebuild.outputs.no_cache != 'true' && 'runtime' || '' }}
+          cache-from: type=gha,scope=release-image-${{ matrix.arch }}
+      - name: Scan the rebuilt image
+        if: steps.published.outputs.found == 'true'
+        run: |
+          .github/scripts/image-vulns.sh "seiran-rebuilt:${{ matrix.arch }}" \
+              "$RUNNER_TEMP/rebuilt.tsv" "$SEVERITY"
+      # 作り直すと消えるもの（脆弱性 ID とパッケージの組で比べる）を残す
+      - name: List what a rebuild fixes
+        run: |
+          out="$RUNNER_TEMP/rescan/fixed-${{ matrix.arch }}.tsv"
+          mkdir -p "$(dirname "$out")"
+          : > "$out"
+          if [ -s "$RUNNER_TEMP/published.tsv" ]; then
+              key() { cut -f1,2 "$1" | sort -u; }
+              comm -23 <(key "$RUNNER_TEMP/published.tsv") <(key "$RUNNER_TEMP/rebuilt.tsv") \
+                  | sed 's/^/${{ matrix.arch }}\t/' > "$out"
+          fi
+          {
+              echo "### 作り直すと消える脆弱性（${{ matrix.arch }}）: $(wc -l < "$out") 件"
+              if [ -s "$out" ]; then echo; echo '```'; cat "$out"; echo '```'; fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: rescan-${{ matrix.arch }}
+          path: ${{ runner.temp }}/rescan/fixed-${{ matrix.arch }}.tsv
+          retention-days: 7
+          overwrite: true
+
+  bump:
+    name: Bump revision
+    needs: [resolve, scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: rescan-*
+          path: ${{ runner.temp }}/rescan
+          merge-multiple: true
+      - name: Collect
+        id: collect
+        run: |
+          fixed="$RUNNER_TEMP/fixed.tsv"
+          cat "$RUNNER_TEMP"/rescan/*.tsv > "$fixed"
+          if [ -s "$fixed" ]; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+              echo "found=false" >> "$GITHUB_OUTPUT"
+              echo "作り直して消える脆弱性は無いので、版を上げません" >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - uses: actions/create-github-app-token@v3
+        id: app
+        if: steps.collect.outputs.found == 'true'
+        with:
+          client-id: ${{ secrets.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+      - uses: actions/checkout@v7
+        if: steps.collect.outputs.found == 'true'
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ steps.app.outputs.token }}
+      - uses: actions/setup-node@v7
+        if: steps.collect.outputs.found == 'true'
+        with:
+          node-version: 26
+      - name: Configure git author
+        if: steps.collect.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          APP_SLUG: ${{ steps.app.outputs.app-slug }}
+        run: |
+          user_id="$(gh api "/users/${APP_SLUG}[bot]" --jq .id)"
+          git config user.name "${APP_SLUG}[bot]"
+          git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
+      - name: Bump and push
+        if: steps.collect.outputs.found == 'true'
+        env:
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: .github/scripts/image-rescan-bump.sh "$VERSION" "$RUNNER_TEMP/fixed.tsv"
