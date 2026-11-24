@@ -16,7 +16,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use crate::generate_snowflake_id;
 use crate::queue::worker::JobContext;
 use crate::repository::{Actor, ActorRepository, PgActorRepository};
 
@@ -87,7 +86,7 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
 }
 
 /// AP側ブリッジユーザー（`bsky.brid.gy`）: `ap_uri`から実ユーザーのDIDを直接取り出す。
-/// 既知ならそのまま返し、未知ならAppViewからプロフィールを取得して`upsert_remote_bsky`する。
+/// 既知ならそのまま返し、未知ならAppViewからプロフィールを取得して`discover_bsky_profile`で保存する。
 async fn resolve_ap_side_bridge(
     actor_repo: &PgActorRepository,
     ctx: &Arc<JobContext>,
@@ -121,21 +120,16 @@ async fn resolve_ap_side_bridge(
             return Ok(None);
         }
     };
-    let new_id = generate_snowflake_id(chrono::Utc::now());
-    let real_id = actor_repo
-        .upsert_remote_bsky(
-            new_id,
-            &crate::repository::BskyActorProfile {
-                at_did: did,
-                handle: &profile.handle,
-                display_name: profile.display_name.as_deref(),
-                avatar_url: profile.avatar.as_deref(),
-                banner_url: profile.banner.as_deref(),
-            },
-            chrono::Utc::now(),
-        )
-        .await
-        .map_err(|e| format!("upsert_remote_bsky 失敗: {}", e))?;
+    let real_id = crate::seiran_actor_merge::discover_bsky_profile(
+        ctx.db_pool.as_ref().ok_or("DB pool 未設定")?,
+        ctx.queue.as_ref(),
+        &(&profile).into(),
+        crate::seiran_actor_merge::DeclarationLookup::WhenNew,
+        true,
+    )
+    .await
+    .map_err(|e| format!("discover_bsky_profile 失敗: {}", e))?
+    .actor_id;
     Ok(Some(real_id))
 }
 

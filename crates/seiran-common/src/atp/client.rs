@@ -1099,3 +1099,28 @@ pub async fn create_atp_post(
 
     Ok((result.uri, result.cid))
 }
+
+impl<'a> From<&'a BskyProfile> for crate::repository::BskyActorProfile<'a> {
+    fn from(p: &'a BskyProfile) -> Self {
+        Self {
+            at_did: &p.did,
+            handle: &p.handle,
+            display_name: p.display_name.as_deref(),
+            avatar_url: p.avatar.as_deref(),
+            banner_url: p.banner.as_deref(),
+        }
+    }
+}
+
+/// 投稿の作者としてのアクター（投稿一覧の `author` はバナーを含まない）。
+impl<'a> From<&'a BskyPost> for crate::repository::BskyActorProfile<'a> {
+    fn from(p: &'a BskyPost) -> Self {
+        Self {
+            at_did: &p.author_did,
+            handle: &p.author_handle,
+            display_name: p.author_display_name.as_deref(),
+            avatar_url: p.author_avatar.as_deref(),
+            banner_url: None,
+        }
+    }
+}

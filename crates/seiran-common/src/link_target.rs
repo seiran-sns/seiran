@@ -157,6 +157,8 @@ impl ResolveContext<'_> {
     fn target_resolve_ctx(&self) -> TargetResolveContext<'_> {
         TargetResolveContext {
             actors: self.actors,
+            db_pool: self.db_pool,
+            job_queue: self.job_queue.as_ref(),
             ap_client: self.ap_client,
             local_domain: self.local_domain,
             system_signing_key: self.system_signing_key.clone(),

@@ -14,6 +14,7 @@ pub struct Page {
 
 pub mod account_claims;
 pub mod actor;
+pub mod actor_merge;
 pub mod actor_search;
 pub mod also_known_as;
 pub mod ap_public;

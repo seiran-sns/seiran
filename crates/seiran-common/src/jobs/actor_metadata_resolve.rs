@@ -9,7 +9,6 @@
 
 use std::sync::Arc;
 
-use crate::generate_snowflake_id;
 use crate::queue::worker::JobContext;
 use crate::repository::{Actor, ActorRepository, PgActorRepository};
 
@@ -51,9 +50,15 @@ async fn resolve_counterpart_via_atp(
         .await
         .map_err(|e| format!("Bskyプロフィール取得失敗: {}", e))?;
     // 相手側解決ジョブ自身からの呼び出しのため、再投入は抑止する（無限ジョブ再投入対策）。
-    crate::seiran_actor_merge::discover_bsky_profile(pool, ctx.queue.as_ref(), &profile, false)
-        .await
-        .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
+    crate::seiran_actor_merge::discover_bsky_profile(
+        pool,
+        ctx.queue.as_ref(),
+        &(&profile).into(),
+        crate::seiran_actor_merge::DeclarationLookup::Always,
+        false,
+    )
+    .await
+    .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
     Ok(())
 }
 
@@ -86,14 +91,9 @@ async fn resolve_counterpart_via_ap(
         Err(crate::ap::client::FediProfileError::MissingInbox) => return Ok(()),
         Err(e) => return Err(format!("{} ({})", e, ap_uri)),
     };
-    let new_id = generate_snowflake_id(chrono::Utc::now());
-    let outcome =
-        crate::seiran_actor_merge::discover_fedi_actor(pool, new_id, &profile, chrono::Utc::now())
-            .await
-            .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
-    // `claimed`にNoneを渡し、再enqueueは抑止する（`resolve_counterpart_via_atp`と同じ
-    // 無限ジョブ再投入対策）。
-    crate::seiran_actor_merge::promote_after_discovery(pool, ctx.queue.as_ref(), &outcome, None)
-        .await;
+    // 再enqueueは抑止する（`resolve_counterpart_via_atp`と同じ無限ジョブ再投入対策）。
+    crate::seiran_actor_merge::discover_fedi_profile(pool, ctx.queue.as_ref(), &profile, false)
+        .await
+        .map_err(|e| format!("discover_fedi_actor 失敗: {}", e))?;
     Ok(())
 }

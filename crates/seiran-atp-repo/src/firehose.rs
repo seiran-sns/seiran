@@ -1684,12 +1684,11 @@ pub(crate) async fn resolve_or_upsert_bsky_actor(
     }
 
     let profile = fetch_bsky_profile(http, did).await?;
-    // リモートseiranアクターの相互申告マージ（#236）。`org.seiran.actor.declaration`が
-    // 無いDID（大多数のBskyユーザー）は通常のupsertと同義になる。
     let outcome = seiran_common::seiran_actor_merge::discover_bsky_profile(
         pool,
         job_queue.as_ref(),
-        &profile,
+        &(&profile).into(),
+        seiran_common::seiran_actor_merge::DeclarationLookup::Always,
         true,
     )
     .await

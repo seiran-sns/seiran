@@ -23,7 +23,7 @@ pub(crate) async fn insert_local_actor_row(
     a: &NewLocalActor<'_>,
 ) -> Result<(), sqlx::Error> {
     // ap_uri を格納しておくことで、万一リモートActor解決処理が自ドメインURIを
-    // 誤って渡してきても find_by_ap_uri / upsert_remote_fedi の ON CONFLICT (ap_uri)
+    // 誤って渡してきても find_by_ap_uri / `ap_uri` の UNIQUE
     // による自然な重複排除が効く（#110 の防御的二重チェック）。
     let ap_uri = format!("https://{}/users/{}", a.domain, a.username);
     sqlx::query(
@@ -46,7 +46,7 @@ pub(crate) async fn insert_local_actor_row(
 
 /// リモートFediアクターのプロフィール（AP Actor 文書から
 /// `FediActorProfile::from_ap_actor`（`crate::ap::client`）で組み立てる）。
-/// `upsert_remote_fedi`・`seiran_actor_merge::discover_fedi_actor`の入力。
+/// `seiran_actor_merge::discover_fedi_profile`の入力。
 #[derive(Debug, Clone)]
 pub struct FediActorProfile {
     pub ap_uri: String,
@@ -68,7 +68,7 @@ pub struct FediActorProfile {
 }
 
 /// リモートBskyアクターのプロフィール（AppView `getProfile` 等の取得結果）。
-/// `upsert_remote_bsky`の入力。
+/// `seiran_actor_merge::discover_bsky_profile`の入力。
 #[derive(Debug, Clone, Copy)]
 pub struct BskyActorProfile<'a> {
     pub at_did: &'a str,
@@ -232,25 +232,6 @@ pub trait ActorRepository: Send + Sync {
         username: &str,
         domain: &str,
     ) -> Result<Option<String>, sqlx::Error>;
-
-    /// リモート（Bsky）アクターを upsert し、その actor_id を返す。
-    /// `at_did` の一意制約で衝突した場合は handle と display_name を更新する。
-    async fn upsert_remote_bsky(
-        &self,
-        id: i64,
-        profile: &BskyActorProfile<'_>,
-        now: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error>;
-
-    /// リモート（Fediverse）アクターを upsert し、その actor_id を返す。
-    /// `bio`・`avatar_url`・`banner_url` が `None` の場合は既存値を保持する（COALESCE）。
-    /// `profile.claimed_at_did` は使わない（相互申告マージは`discover_fedi_actor`の責務）。
-    async fn upsert_remote_fedi(
-        &self,
-        id: i64,
-        profile: &FediActorProfile,
-        now: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error>;
 
     /// DID を持つ全ローカルアクターの (username, did) を取得する（起動時 TXT 再登録用）。
     async fn list_local_dids(&self) -> Result<Vec<(String, String)>, sqlx::Error>;
@@ -478,82 +459,6 @@ impl ActorRepository for PgActorRepository {
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.map(|r| r.0))
-    }
-
-    async fn upsert_remote_bsky(
-        &self,
-        id: i64,
-        profile: &BskyActorProfile<'_>,
-        now: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error> {
-        // 既に`remote_seiran`へ昇格済み（結婚成立済み、#236）の行に対しては`username`を
-        // ATPハンドル形式（`user.pds-domain`）で上書きしない。結婚後の正式なusernameは
-        // Fedi側由来のまま保つ（`seiran_actor_merge::discover_bsky_actor`の対称ロジック）。
-        // このガードが無いと、フォロワーポーリング等マージロジックを経由しない呼び出し元
-        // （`bsky_follower_poll`・`search`等）が定期的に上書きしてしまう（例:
-        // `@yubao@beta.seiran.org`のusernameが`yubao.beta.seiran.org`に化ける）。
-        // 一方`at_handle`はプロフィール画面のBsky ID表示専用の別列のため、`username`とは
-        // 独立に`remote_seiran`でも常に最新値へ更新する。
-        let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, at_did, username, domain, display_name, avatar_url, banner_url, at_handle, created_at, updated_at)
-             VALUES ($1, 'bsky', $2, $3, '', $4, $5, $6, $3, $7, $7)
-             ON CONFLICT (at_did) DO UPDATE
-               SET username     = CASE WHEN actors.actor_type = 'remote_seiran' THEN actors.username
-                                        ELSE EXCLUDED.username END,
-                   display_name = COALESCE(EXCLUDED.display_name, actors.display_name),
-                   avatar_url   = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
-                   banner_url   = COALESCE(EXCLUDED.banner_url, actors.banner_url),
-                   at_handle    = EXCLUDED.at_handle,
-                   updated_at   = EXCLUDED.updated_at
-             RETURNING id",
-        )
-        .bind(id)
-        .bind(profile.at_did)
-        .bind(profile.handle)
-        .bind(profile.display_name)
-        .bind(profile.avatar_url)
-        .bind(profile.banner_url)
-        .bind(now)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
-    }
-
-    async fn upsert_remote_fedi(
-        &self,
-        id: i64,
-        profile: &FediActorProfile,
-        now: DateTime<Utc>,
-    ) -> Result<i64, sqlx::Error> {
-        let row: (i64,) = sqlx::query_as(
-            "INSERT INTO actors (id, actor_type, ap_uri, ap_inbox_url, username, domain, display_name, avatar_url, banner_url, bio, created_at, updated_at, emoji_map, profile_fields)
-             VALUES ($1, 'fedi', $2, $3, $4, $5, $6, $7, $8, $9, $10, $10, $11, $12)
-             ON CONFLICT (ap_uri) DO UPDATE
-               SET ap_inbox_url   = EXCLUDED.ap_inbox_url,
-                   display_name   = EXCLUDED.display_name,
-                   avatar_url     = COALESCE(EXCLUDED.avatar_url, actors.avatar_url),
-                   banner_url     = COALESCE(EXCLUDED.banner_url, actors.banner_url),
-                   bio            = COALESCE(EXCLUDED.bio, actors.bio),
-                   emoji_map      = EXCLUDED.emoji_map,
-                   profile_fields = EXCLUDED.profile_fields,
-                   updated_at     = EXCLUDED.updated_at
-             RETURNING id",
-        )
-        .bind(id)
-        .bind(&profile.ap_uri)
-        .bind(&profile.ap_inbox_url)
-        .bind(&profile.username)
-        .bind(&profile.domain)
-        .bind(&profile.display_name)
-        .bind(&profile.avatar_url)
-        .bind(&profile.banner_url)
-        .bind(&profile.bio)
-        .bind(now)
-        .bind(&profile.emoji_map)
-        .bind(&profile.profile_fields)
-        .fetch_one(&self.pool)
-        .await?;
-        Ok(row.0)
     }
 
     async fn list_local_dids(&self) -> Result<Vec<(String, String)>, sqlx::Error> {

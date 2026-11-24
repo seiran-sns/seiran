@@ -343,15 +343,18 @@ async fn resolve_bsky_target_actor(
     let remote_actor_id = match config.actors.find_by_did(&did).await {
         Ok(Some(existing)) if existing.actor_type == "local" => existing.id,
         _ => {
-            // リモートseiranアクターの相互申告マージ（#236）。`follow_fedi`と同じ扱いに揃える
-            // （旧`upsert_remote_bsky`直呼びのままだと、claimed_ap_uriを取りこぼして恒久的に
-            // 結婚不成立となる実装漏れがあった）。
-            crate::seiran_actor_merge::discover_bsky_profile(pool, queue.as_ref(), &bsky_resp, true)
-                .await
-                .map_err(|e| {
-                    FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
-                })?
-                .actor_id
+            crate::seiran_actor_merge::discover_bsky_profile(
+                pool,
+                queue.as_ref(),
+                &(&bsky_resp).into(),
+                crate::seiran_actor_merge::DeclarationLookup::Always,
+                true,
+            )
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/bsky] アクター upsert 失敗: {}", e))
+            })?
+            .actor_id
         }
     };
 
@@ -466,7 +469,7 @@ async fn follow_fedi(
         FollowError::Internal(format!("ターゲット解決失敗: {}", e))
     })?;
 
-    // target_uri が自ドメインを指す場合、fetch_actor/upsert_remote_fedi へ進まず拒否する
+    // target_uri が自ドメインを指す場合、fetch_actor/discover_fedi_profile へ進まず拒否する
     // （ローカルユーザーを fedi フォロー経路で解決させると影の重複 fedi 行が生成される、#110）。
     if crate::ap::extract_local_username(&target_uri, &config.local_domain).is_some() {
         return Err(FollowError::LocalViaFediGuard);
@@ -484,22 +487,12 @@ async fn follow_fedi(
     let remote_inbox = profile.ap_inbox_url.clone();
 
     let now = chrono::Utc::now();
-    let new_actor_id = generate_snowflake_id(now);
-    // リモートseiranアクターの相互申告マージ（#236）。能動的フォロー実行時（この経路）も
-    // インバウンド発見時（`inbound_activity_process`）と同じ`discover_fedi_actor`を通す
-    // ことで、`seiranAtDid`拡張フィールドを取りこぼさず結婚成立に反映する。
-    let outcome = crate::seiran_actor_merge::discover_fedi_actor(pool, new_actor_id, &profile, now)
-        .await
-        .map_err(|e| {
-            FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
-        })?;
-    crate::seiran_actor_merge::promote_after_discovery(
-        pool,
-        queue.as_ref(),
-        &outcome,
-        profile.claimed_at_did.as_deref(),
-    )
-    .await;
+    let outcome =
+        crate::seiran_actor_merge::discover_fedi_profile(pool, queue.as_ref(), &profile, true)
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/fedi] リモートアクター upsert 失敗: {}", e))
+            })?;
     let remote_actor_id = outcome.actor_id;
 
     check_not_blocked(config, local_actor_id, remote_actor_id).await?;
