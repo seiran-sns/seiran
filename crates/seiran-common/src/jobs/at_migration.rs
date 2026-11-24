@@ -513,7 +513,7 @@ async fn import_next_record(
             JobError::Transient(format!("[MigrationImportProcess] レコード取得失敗: {e}"))
         })?
     {
-        // CIDは`commit_generic_record`/`commit_post_record`が再計算する（内容一致のはず）
+        // CIDは`import_record`が再計算する（内容一致のはず）
         import_staged_record(ic, id, collection, rkey, &bytes).await?;
         repo.mark_record_imported(id, ic.now).await.map_err(|e| {
             JobError::Transient(format!(
@@ -536,6 +536,7 @@ async fn import_next_record(
         return Ok(ImportNextAction::RetryAfter(delay_until(next_at)));
     }
 
+    announce_activation(ic).await?;
     crate::repository::at_migration::start_blob_import(ic.pool, request_id)
         .await
         .map_err(|e| {
@@ -563,6 +564,40 @@ async fn import_next_record(
         request_id
     );
     Ok(ImportNextAction::Continue)
+}
+
+/// レコードを取り込み終えたアカウントを、Relay/AppView に有効なアカウントとして知らせる
+/// （`#account`→`#identity`→`#sync`）。公式 PDS で転入先が`importRepo`の後に`activateAccount`
+/// を呼ぶのに当たる。続けて、取り込み中に利用者が seiran でした書き込み（有効化まで積んで
+/// いた）を流す。リポジトリが揃ってから知らせるのは、レコードの欠けたリポジトリを最新の
+/// 状態として伝えないため。blob はリポジトリの中身ではないので待たない。途中で止まっても、
+/// やり直しでイベントをもう一度送り、残りの書き込みを流すだけで害は無い。
+async fn announce_activation(ic: &ImportContext<'_>) -> Result<(), JobError> {
+    let actor = ic
+        .follow_exec
+        .actors
+        .find_by_id(ic.actor_id)
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!("[MigrationImportProcess] アクター取得失敗: {e}"))
+        })?
+        .ok_or_else(|| {
+            JobError::Permanent("[MigrationImportProcess] アクターが見つかりません".to_string())
+        })?;
+    let handle = format!(
+        "{}.{}",
+        crate::username::to_atp_username(&actor.username),
+        ic.follow_exec.local_domain
+    );
+    ic.follow_exec
+        .atp_service
+        .activate_migrated_account(ic.actor_id, &handle, chrono::Utc::now())
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!(
+                "[MigrationImportProcess] アカウントの有効化失敗: {e}"
+            ))
+        })
 }
 
 /// `importing_blobs`: 取り込み待ちの blob を1件、転入元から取得して seiran のストレージへ
@@ -719,29 +754,24 @@ async fn import_staged_record(
         ))
     })?;
 
-    if collection == "app.bsky.feed.post" {
-        let post_id = materialize_migrated_post(ic, &rkey, &value).await?;
-        ic.follow_exec
-            .atp_service
-            .commit_post_record(ic.actor_id, post_id, rkey.clone(), &value, "create", ic.now)
-            .await
-            .map_err(|e| {
-                JobError::Transient(format!(
-                    "[MigrationImportProcess] commit_post_record失敗 (rkey={rkey}): {e}"
-                ))
-            })?;
+    // 取り込むレコードは firehose に流さない（`AtpCommitService::import_record`）。取り込み後の
+    // 状態は、レコードを取り込み終えたときの`announce_activation`でまとめて知らせる。
+    let post_id = if collection == "app.bsky.feed.post" {
+        Some(materialize_migrated_post(ic, &rkey, &value).await?)
     } else {
-        ic.follow_exec.atp_service
-            .commit_generic_record(ic.actor_id, collection.clone(), rkey.clone(), &value, "create", ic.now)
-            .await
-            .map_err(|e| {
-                JobError::Transient(format!(
-                    "[MigrationImportProcess] commit_generic_record失敗 (collection={collection}, rkey={rkey}): {e}"
-                ))
-            })?;
-        if collection == "app.bsky.actor.profile" && rkey == "self" {
-            sync_imported_profile(ic, &value).await;
-        }
+        None
+    };
+    ic.follow_exec
+        .atp_service
+        .import_record(ic.actor_id, collection.clone(), rkey.clone(), &value, post_id, ic.now)
+        .await
+        .map_err(|e| {
+            JobError::Transient(format!(
+                "[MigrationImportProcess] レコードのコミット失敗 (collection={collection}, rkey={rkey}): {e}"
+            ))
+        })?;
+    if collection == "app.bsky.actor.profile" && rkey == "self" {
+        sync_imported_profile(ic, &value).await;
     }
     Ok(())
 }

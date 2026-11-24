@@ -11,11 +11,21 @@ export function useMigrationImportActive(): boolean {
   return !!user?.migration_status && IMPORTING_STATUSES.includes(user.migration_status);
 }
 
+/**
+ * Bluesky への配送が転入の取り込み完了まで保留されるか。レコードを取り込み終えるまで
+ * （`importing_data`）、サーバーは ATP への書き込みを積んでおき、取り込み完了時に流す
+ * （`docs/account_migration.md` 3節）。投稿フォームの Bluesky ボタンに注意の印を出すのに使う。
+ */
+export function useBskyDeliveryDeferred(): boolean {
+  const { user } = useAuth();
+  return user?.migration_status === "importing_data";
+}
+
 const WATCH_INTERVAL_MS = 60_000;
 
 /**
- * 取り込みが続いている間、終わったかを定期的に確かめ、終わったらログイン中のユーザー情報の
- * `migration_status` を消す（バッジが消える）。`AppShell` で1回だけ呼ぶ。
+ * 取り込みが続いている間、状態を定期的に確かめてログイン中のユーザー情報の `migration_status`
+ * に写す。終わったら消す（バッジが消える）。`AppShell` で1回だけ呼ぶ。
  */
 export function useMigrationImportWatcher() {
   const active = useMigrationImportActive();
@@ -30,7 +40,10 @@ export function useMigrationImportWatcher() {
       api.account
         .migration()
         .then((res) => {
-          if (res && IMPORTING_STATUSES.includes(res.status)) return;
+          if (res && IMPORTING_STATUSES.includes(res.status)) {
+            updateUserRef.current({ migration_status: res.status });
+            return;
+          }
           updateUserRef.current({ migration_status: null });
         })
         .catch(() => {

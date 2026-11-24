@@ -8,13 +8,14 @@ use crate::event_bus::EventBus;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
-    build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex,
-    cid_from_str, cid_to_string, collect_blob_cids, create_commit, encode_bsky_actor_profile,
-    encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
-    encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
-    encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
-    encode_seiran_actor_declaration, generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet,
-    BskyPostReply, Cid, CommitEvtOp, FeedPostRecord, RepoError, NSFW_SELF_LABEL,
+    build_account_frame, build_commit_frame, build_identity_frame, build_mst, build_sync_frame,
+    cid_from_dagcbor, cid_from_sha256_hex, cid_from_str, cid_to_string, collect_blob_cids,
+    create_commit, encode_bsky_actor_profile, encode_bsky_feed_like, encode_bsky_feed_post,
+    encode_bsky_feed_repost, encode_bsky_graph_block, encode_bsky_graph_follow,
+    encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car, encode_chat_actor_declaration,
+    encode_content_visibility_declaration, encode_generic_record, encode_seiran_actor_declaration,
+    generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet, BskyPostReply, Cid, CommitEvtOp,
+    FeedPostRecord, RepoError, NSFW_SELF_LABEL,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +68,26 @@ pub struct CommitRecord {
     pub blob_cids: Vec<Cid>,
 }
 
+impl CommitRecord {
+    /// レコード値の JSON をそのまま DAG-CBOR にしたレコード（参照する blob も値から拾う）。
+    fn from_json(
+        collection: String,
+        rkey: String,
+        value: &serde_json::Value,
+        action: &'static str,
+    ) -> Result<Self, AtpCommitError> {
+        let (cbor, cid) = encode_generic_record(value)?;
+        Ok(Self {
+            collection,
+            rkey,
+            cbor,
+            cid,
+            action,
+            blob_cids: collect_blob_cids(value),
+        })
+    }
+}
+
 /// コミットで MST に加える変更。
 enum RepoWrite {
     Put(CommitRecord),
@@ -92,12 +113,48 @@ impl RepoWrite {
 /// 直列化失敗でコミットをやり直す上限。同じアクターへのコミットが同時に数件重なる程度を想定する。
 const MAX_SERIALIZATION_RETRIES: u32 = 10;
 
-/// コミット処理の結果
+/// コミット処理の結果。DID 転入の有効化前で書き込みを積んだだけのとき（`Announce::Firehose`
+/// で `actors.atp_activation_pending`）も同じ値を返す（呼び出し側はレコードの URI を組み立てる
+/// のに DID を使うだけで、コミットされたかどうかで動きを変えない）。
 pub struct CommitResult {
-    pub commit_cid: Cid,
-    pub rev: String,
-    pub seq: i64,
     pub at_did: String,
+}
+
+/// 書き込みをどう扱うか。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Announce {
+    /// 通常のコミット。`#commit` を流す。DID 転入の有効化前のアカウント
+    /// （`actors.atp_activation_pending`）では、コミットせずに `atp_deferred_writes` へ積む。
+    /// 取り込んだレコードは `#commit` で流していないので、有効化（`#sync`）より前に流すと
+    /// その `since`/`prevData` が Relay の知らないコミットを指して連鎖が切れ、Relay に拒まれる。
+    Firehose,
+    /// リポジトリだけを更新し、`#commit` を出さない。DID 転入で取り込むレコードに使う。
+    /// 取り込むレコードは転入元で既に Relay/AppView に載っているので、1件ずつ作り直しとして
+    /// 流すと、大量のいいね・フォローを短時間に作ったのと同じに見える。取り込み後の状態は
+    /// `activate_migrated_account` の `#sync` でまとめて知らせる。
+    Silent,
+    /// 有効化の後、積んであった書き込み（`atp_deferred_writes.id`）を通常のコミットとして流す。
+    /// 積んだ行の削除も同じトランザクションで行い、同じ書き込みを二度流さない。
+    Drain(i64),
+}
+
+/// 流そうとしている積んだ書き込み（`drained_write_is_moot` の引数）。
+struct DrainedWrite<'a> {
+    actor_id: i64,
+    deferred_id: i64,
+    /// 流す前のリポジトリのキーと CID。
+    entries: &'a [(String, Cid)],
+    entry_key: &'a str,
+    write: &'a RepoWrite,
+    post_id: Option<i64>,
+}
+
+/// `try_apply_write` の結果。
+enum WriteOutcome {
+    /// コミットした。firehose に流すなら `(seq, フレーム)` を持つ。
+    Committed(CommitResult, Option<(i64, Vec<u8>)>),
+    /// 有効化前なので積んだ、または積んであった書き込みが不要になって捨てた。
+    Deferred(CommitResult),
 }
 
 /// `atp_blocks` へ新規ブロックを一括INSERTする。コミットのたびに数個〜数十個の
@@ -400,8 +457,14 @@ impl AtpCommitService {
         now: DateTime<Utc>,
         post_id: Option<i64>,
     ) -> Result<CommitResult, AtpCommitError> {
-        self.apply_write(actor_id, &RepoWrite::Put(record), now, post_id)
-            .await
+        self.apply_write(
+            actor_id,
+            &RepoWrite::Put(record),
+            now,
+            post_id,
+            Announce::Firehose,
+        )
+        .await
     }
 
     /// 共通コミットパイプライン。リポジトリの先頭（`actors.at_repo_*`）とレコード一覧の
@@ -414,19 +477,21 @@ impl AtpCommitService {
         write: &RepoWrite,
         now: DateTime<Utc>,
         post_id: Option<i64>,
+        announce: Announce,
     ) -> Result<CommitResult, AtpCommitError> {
         let mut attempt = 1;
         loop {
-            match self.try_apply_write(actor_id, write, now, post_id).await {
-                Ok((result, frame)) => {
-                    if let Some(frame) = frame {
-                        self.publish_event(AtpCommitEvent {
-                            frame_bytes: frame,
-                            seq: result.seq,
-                        });
+            match self
+                .try_apply_write(actor_id, write, now, post_id, announce)
+                .await
+            {
+                Ok(WriteOutcome::Committed(result, frame)) => {
+                    if let Some((seq, frame_bytes)) = frame {
+                        self.publish_event(AtpCommitEvent { frame_bytes, seq });
                     }
                     return Ok(result);
                 }
+                Ok(WriteOutcome::Deferred(result)) => return Ok(result),
                 Err(AtpCommitError::Db(e))
                     if crate::db::is_serialization_failure(&e)
                         && attempt < MAX_SERIALIZATION_RETRIES =>
@@ -448,14 +513,17 @@ impl AtpCommitService {
 
     /// MST 構築 → commit 署名 → CAR 生成 → atp_blocks 保存 → actors 更新
     /// → atp_records 反映 → atp_repo_events 記録までを1トランザクションで行い、
-    /// コミット結果と subscribeRepos へ流すフレームを返す。
+    /// コミット結果と subscribeRepos へ流すフレームを返す（`Announce::Silent` では
+    /// atp_repo_events に記録せず、フレームも返さない）。有効化前のアカウントへの
+    /// `Announce::Firehose` は、コミットせずに積む（`defer_write`）。
     async fn try_apply_write(
         &self,
         actor_id: i64,
         write: &RepoWrite,
         now: DateTime<Utc>,
         post_id: Option<i64>,
-    ) -> Result<(CommitResult, Option<Vec<u8>>), AtpCommitError> {
+        announce: Announce,
+    ) -> Result<WriteOutcome, AtpCommitError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
             .execute(&mut *tx)
@@ -463,7 +531,8 @@ impl AtpCommitService {
 
         // ① アクター情報取得
         let actor_row = sqlx::query(
-            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid
+            "SELECT at_did, at_signing_key_pem, at_repo_cid, at_repo_rev, at_repo_data_cid,
+                    atp_activation_pending
              FROM actors WHERE id = $1",
         )
         .bind(actor_id)
@@ -473,6 +542,12 @@ impl AtpCommitService {
         let at_did: String = actor_row
             .try_get::<Option<String>, _>("at_did")?
             .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        let activation_pending: bool = actor_row.try_get("atp_activation_pending")?;
+        if announce == Announce::Firehose && activation_pending {
+            Self::defer_write(&mut tx, actor_id, write, post_id).await?;
+            tx.commit().await?;
+            return Ok(WriteOutcome::Deferred(CommitResult { at_did }));
+        }
         let signing_key_pem: String = actor_row
             .try_get::<Option<String>, _>("at_signing_key_pem")?
             .ok_or(AtpCommitError::ActorConfig("at_signing_key_pem が未設定"))?;
@@ -491,6 +566,29 @@ impl AtpCommitService {
         // 2つ入ってしまい、AppView がリジェクトする不正な木になる。
         let mut entries = Self::load_atp_entries(&mut tx, actor_id).await?;
         let entry_key = format!("{}/{}", write.collection(), write.rkey());
+        if let Announce::Drain(deferred_id) = announce {
+            // 先に積んだ行を消す。消せなければ別の処理が先に流したので、何もしない
+            // （トランザクションを捨てる）。
+            if !Self::delete_deferred_write(&mut tx, deferred_id).await? {
+                return Ok(WriteOutcome::Deferred(CommitResult { at_did }));
+            }
+            let moot = Self::drained_write_is_moot(
+                &mut tx,
+                DrainedWrite {
+                    actor_id,
+                    deferred_id,
+                    entries: &entries,
+                    entry_key: &entry_key,
+                    write,
+                    post_id,
+                },
+            )
+            .await?;
+            if moot {
+                tx.commit().await?;
+                return Ok(WriteOutcome::Deferred(CommitResult { at_did }));
+            }
+        }
         entries.retain(|(k, _)| k != &entry_key);
         if let RepoWrite::Put(record) = write {
             entries.push((entry_key.clone(), record.cid));
@@ -608,6 +706,11 @@ impl AtpCommitService {
             }
         };
 
+        if announce == Announce::Silent {
+            tx.commit().await?;
+            return Ok(WriteOutcome::Committed(CommitResult { at_did }, None));
+        }
+
         // ⑩ atp_repo_events INSERT → seq 取得
         let event_row = sqlx::query(
             "INSERT INTO atp_repo_events
@@ -656,15 +759,103 @@ impl AtpCommitService {
 
         tx.commit().await?;
 
-        Ok((
-            CommitResult {
-                commit_cid,
-                rev: new_rev,
-                seq,
-                at_did,
-            },
-            frame_opt,
+        Ok(WriteOutcome::Committed(
+            CommitResult { at_did },
+            frame_opt.map(|frame| (seq, frame)),
         ))
+    }
+
+    /// 有効化前のアカウントへの書き込みを、コミットせずに `atp_deferred_writes` へ積む。
+    /// まだ積んだままの同じキーへの書き込みがあれば、削除はそれらを打ち消すだけで済むことがある
+    /// が、リポジトリに既にあるレコードの削除でもありうるので、判定は流すとき
+    /// （`drained_write_is_moot`）に任せて、ここでは順番どおり積むだけにする。
+    async fn defer_write(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        actor_id: i64,
+        write: &RepoWrite,
+        post_id: Option<i64>,
+    ) -> Result<(), AtpCommitError> {
+        let (action, cbor, blob_cids): (&str, Option<&[u8]>, Vec<String>) = match write {
+            RepoWrite::Put(record) => (
+                record.action,
+                Some(record.cbor.as_slice()),
+                record.blob_cids.iter().map(cid_to_string).collect(),
+            ),
+            RepoWrite::Delete { .. } => ("delete", None, Vec::new()),
+        };
+        sqlx::query(
+            "INSERT INTO atp_deferred_writes
+             (actor_id, collection, rkey, action, record_cbor, blob_cids, post_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        )
+        .bind(actor_id)
+        .bind(write.collection())
+        .bind(write.rkey())
+        .bind(action)
+        .bind(cbor)
+        .bind(&blob_cids)
+        .bind(post_id)
+        .execute(&mut **tx)
+        .await?;
+        tracing::info!(
+            "[atp] 転入の有効化前のため書き込みを積みました: actor_id={}, {} {}/{}",
+            actor_id,
+            action,
+            write.collection(),
+            write.rkey()
+        );
+        Ok(())
+    }
+
+    /// 積んであった書き込みが、流す時点ではもう不要か。次のものは流さない。
+    /// - リポジトリに無いレコードの削除。Relay は存在しないキーの削除を連鎖の検証で拒む。
+    /// - 後で削除も積まれているレコードの作成・更新。流しても直後に消すだけなので省く
+    ///   （作成も積んだままだったなら、続く削除も「リポジトリに無いレコードの削除」で省かれる）。
+    /// - 作成後に消された投稿の作成。投稿の削除は ATP の列（`posts.at_rkey`）を見て削除を
+    ///   積むので、まだ列の無い積んだ投稿には削除が積まれない。
+    async fn drained_write_is_moot(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        w: DrainedWrite<'_>,
+    ) -> Result<bool, AtpCommitError> {
+        if matches!(w.write, RepoWrite::Delete { .. }) {
+            return Ok(!w.entries.iter().any(|(k, _)| k == w.entry_key));
+        }
+        let deleted_later: bool = sqlx::query_scalar(
+            "SELECT EXISTS (
+                 SELECT 1 FROM atp_deferred_writes
+                 WHERE actor_id = $1 AND collection = $2 AND rkey = $3
+                   AND action = 'delete' AND id > $4)",
+        )
+        .bind(w.actor_id)
+        .bind(w.write.collection())
+        .bind(w.write.rkey())
+        .bind(w.deferred_id)
+        .fetch_one(&mut **tx)
+        .await?;
+        if deleted_later {
+            return Ok(true);
+        }
+        let Some(post_id) = w.post_id else {
+            return Ok(false);
+        };
+        let live: Option<bool> =
+            sqlx::query_scalar("SELECT deleted_at IS NULL FROM posts WHERE id = $1")
+                .bind(post_id)
+                .fetch_optional(&mut **tx)
+                .await?;
+        Ok(live != Some(true))
+    }
+
+    /// 積んだ行を消す。消せたら true。
+    async fn delete_deferred_write(
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        deferred_id: i64,
+    ) -> Result<bool, AtpCommitError> {
+        let res = sqlx::query("DELETE FROM atp_deferred_writes WHERE id = $1")
+            .bind(deferred_id)
+            .execute(&mut **tx)
+            .await?;
+        Ok(res.rows_affected() == 1)
     }
 
     /// 外部ATクライアントの `com.atproto.repo.createRecord`/`putRecord` 用。
@@ -684,16 +875,8 @@ impl AtpCommitService {
         action: &'static str,
         now: DateTime<Utc>,
     ) -> Result<(CommitResult, Cid), AtpCommitError> {
-        let (cbor, cid) = encode_generic_record(value)?;
-        let blob_cids = collect_blob_cids(value);
-        let record = CommitRecord {
-            collection,
-            rkey,
-            cbor,
-            cid,
-            action,
-            blob_cids,
-        };
+        let record = CommitRecord::from_json(collection, rkey, value, action)?;
+        let cid = record.cid;
         let result = self
             .commit_record_inner(actor_id, record, now, None)
             .await?;
@@ -715,21 +898,37 @@ impl AtpCommitService {
         action: &'static str,
         now: DateTime<Utc>,
     ) -> Result<(CommitResult, Cid), AtpCommitError> {
-        let (cbor, cid) = encode_generic_record(value)?;
-        let blob_cids = collect_blob_cids(value);
-        let record = CommitRecord {
-            collection: "app.bsky.feed.post".to_string(),
-            rkey,
-            cbor,
-            cid,
-            action,
-            blob_cids,
-        };
+        let record =
+            CommitRecord::from_json("app.bsky.feed.post".to_string(), rkey, value, action)?;
+        let cid = record.cid;
         let result = self
             .commit_record_inner(actor_id, record, now, Some(post_id))
             .await?;
         self.spawn_request_crawl();
         Ok((result, cid))
+    }
+
+    /// DID 転入で取り込むレコードを、firehose に流さずにリポジトリへ入れる（`Announce::Silent`）。
+    /// `post_id` を渡すと `commit_post_record` と同じく `posts` の ATP 列も更新する。
+    /// 取り込み後の状態は `activate_migrated_account` で知らせる。
+    pub async fn import_record(
+        &self,
+        actor_id: i64,
+        collection: String,
+        rkey: String,
+        value: &serde_json::Value,
+        post_id: Option<i64>,
+        now: DateTime<Utc>,
+    ) -> Result<CommitResult, AtpCommitError> {
+        let record = CommitRecord::from_json(collection, rkey, value, "create")?;
+        self.apply_write(
+            actor_id,
+            &RepoWrite::Put(record),
+            now,
+            post_id,
+            Announce::Silent,
+        )
+        .await
     }
 
     /// ポスト作成コミット（posts テーブル更新を追加）。通常投稿・引用投稿（`embed` に
@@ -1138,7 +1337,8 @@ impl AtpCommitService {
             collection: collection.to_string(),
             rkey: rkey.to_string(),
         };
-        self.apply_write(actor_id, &write, now, None).await?;
+        self.apply_write(actor_id, &write, now, None, Announce::Firehose)
+            .await?;
 
         tracing::info!(
             "[atp] {} delete commit 完了: actor_id={}, rkey={}",
@@ -1459,6 +1659,201 @@ impl AtpCommitService {
             did,
             active,
             seq
+        );
+        Ok(())
+    }
+
+    /// DID 転入でレコードを取り込み終えたアカウントを有効にする。`#account`/`#identity`/`#sync`
+    /// を流し（`broadcast_account_activation`）、有効化前に積んでいた書き込みを順に通常の
+    /// コミットとして流してから、積むのをやめる（`actors.atp_activation_pending`）。
+    /// 途中で失敗してもやり直せる（イベントの送り直しは害が無く、積んだ書き込みは流すたびに
+    /// 消すので二度流さない）。
+    pub async fn activate_migrated_account(
+        &self,
+        actor_id: i64,
+        handle: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        self.broadcast_account_activation(actor_id, handle, now)
+            .await?;
+        let mut drained = 0usize;
+        let mut attempt = 1;
+        loop {
+            let next = sqlx::query(
+                "SELECT id, collection, rkey, action, record_cbor, blob_cids, post_id
+                 FROM atp_deferred_writes WHERE actor_id = $1 ORDER BY id LIMIT 1",
+            )
+            .bind(actor_id)
+            .fetch_optional(&self.pool)
+            .await?;
+            let Some(row) = next else {
+                match self.finish_activation(actor_id).await {
+                    Ok(true) => break,
+                    // 確かめている間に新しく積まれた。続けて流す。
+                    Ok(false) => continue,
+                    Err(AtpCommitError::Db(e))
+                        if crate::db::is_serialization_failure(&e)
+                            && attempt < MAX_SERIALIZATION_RETRIES =>
+                    {
+                        attempt += 1;
+                        continue;
+                    }
+                    Err(e) => return Err(e),
+                }
+            };
+            let deferred_id: i64 = row.try_get("id")?;
+            let collection: String = row.try_get("collection")?;
+            let rkey: String = row.try_get("rkey")?;
+            let action: String = row.try_get("action")?;
+            let post_id: Option<i64> = row.try_get("post_id")?;
+            let write = match row.try_get::<Option<Vec<u8>>, _>("record_cbor")? {
+                Some(cbor) => {
+                    let blob_cids: Vec<String> = row.try_get("blob_cids")?;
+                    RepoWrite::Put(CommitRecord {
+                        collection,
+                        rkey,
+                        cid: cid_from_dagcbor(&cbor),
+                        cbor,
+                        action: if action == "update" {
+                            "update"
+                        } else {
+                            "create"
+                        },
+                        blob_cids: blob_cids
+                            .iter()
+                            .filter_map(|c| cid_from_str(c).ok())
+                            .collect(),
+                    })
+                }
+                None => RepoWrite::Delete { collection, rkey },
+            };
+            self.apply_write(actor_id, &write, now, post_id, Announce::Drain(deferred_id))
+                .await?;
+            drained += 1;
+        }
+        self.spawn_request_crawl();
+        tracing::info!(
+            "[atp] 転入アカウントを有効化しました: actor_id={}, 積んでいた書き込み {} 件を流しました",
+            actor_id,
+            drained
+        );
+        Ok(())
+    }
+
+    /// 積んだ書き込みが残っていなければ、積むのをやめる。残っていれば false。書き込みの積み込み
+    /// （`try_apply_write`）と同じく SERIALIZABLE で行い、確かめてから止めるまでの間に
+    /// 積まれた書き込みが取り残されないようにする（競合すればどちらかが直列化失敗になる）。
+    async fn finish_activation(&self, actor_id: i64) -> Result<bool, AtpCommitError> {
+        let mut tx = self.pool.begin().await?;
+        sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+            .execute(&mut *tx)
+            .await?;
+        let remaining: bool = sqlx::query_scalar(
+            "SELECT EXISTS (SELECT 1 FROM atp_deferred_writes WHERE actor_id = $1)",
+        )
+        .bind(actor_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        if remaining {
+            return Ok(false);
+        }
+        sqlx::query("UPDATE actors SET atp_activation_pending = FALSE WHERE id = $1")
+            .bind(actor_id)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(true)
+    }
+
+    /// DID 転入でリポジトリを取り込み終えたアカウントを、Relay/AppView に有効なアカウントとして
+    /// 知らせる。公式 PDS の `activateAccount` と同じく `#account`（active）→`#identity`→`#sync`
+    /// を1トランザクションで記録してから流す。取り込んだレコードは `#commit` で流していない
+    /// （`Announce::Silent`）ので、`#sync` がリポジトリの最新の commit を伝え、Relay はこれを
+    /// 起点に以後の `#commit` を検証する。
+    async fn broadcast_account_activation(
+        &self,
+        actor_id: i64,
+        handle: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut tx = self.pool.begin().await?;
+
+        let row = sqlx::query(
+            "SELECT a.at_did, a.at_repo_cid, a.at_repo_rev, b.bytes AS commit_bytes
+             FROM actors a
+             LEFT JOIN atp_blocks b ON b.actor_id = a.id AND b.cid = a.at_repo_cid
+             WHERE a.id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let did: String = row
+            .try_get::<Option<String>, _>("at_did")?
+            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        // 取り込むレコードが1件も無かった（リポジトリが空の）ときは、知らせる commit が無いので
+        // `#sync` は出さない。
+        let sync = match (
+            row.try_get::<Option<String>, _>("at_repo_cid")?,
+            row.try_get::<Option<String>, _>("at_repo_rev")?,
+            row.try_get::<Option<Vec<u8>>, _>("commit_bytes")?,
+        ) {
+            (Some(cid_str), Some(rev), Some(bytes)) => {
+                let commit_cid = cid_from_str(&cid_str)?;
+                let car = encode_car(&commit_cid, &[(commit_cid, bytes)])?;
+                Some((cid_str, rev, car))
+            }
+            _ => None,
+        };
+        let event_types: &[&str] = if sync.is_some() {
+            &["account", "identity", "sync"]
+        } else {
+            &["account", "identity"]
+        };
+
+        let mut frames: Vec<(i64, Vec<u8>)> = Vec::with_capacity(event_types.len());
+        for &event_type in event_types {
+            let sync_cols = sync
+                .as_ref()
+                .filter(|_| event_type == "sync")
+                .map(|(cid, rev, _)| (cid.as_str(), rev.as_str()));
+            let seq: i64 = sqlx::query_scalar(
+                "INSERT INTO atp_repo_events (event_type, actor_id, did, handle, commit_cid, rev)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id",
+            )
+            .bind(event_type)
+            .bind(actor_id)
+            .bind(&did)
+            .bind(handle)
+            .bind(sync_cols.map(|(cid, _)| cid))
+            .bind(sync_cols.map(|(_, rev)| rev))
+            .fetch_one(&mut *tx)
+            .await?;
+            let frame = match (event_type, &sync) {
+                ("account", _) => build_account_frame(seq, &did, handle, &time_str, true, None)?,
+                ("identity", _) => build_identity_frame(seq, &did, handle, &time_str)?,
+                (_, Some((_, rev, car))) => build_sync_frame(seq, &did, rev, car, &time_str)?,
+                _ => unreachable!("sync が無ければ #sync を積まない"),
+            };
+            let compressed =
+                zstd::encode_all(&frame[..], 3).map_err(|e| RepoError::Cbor(e.to_string()))?;
+            sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                .bind(&compressed)
+                .bind(seq)
+                .execute(&mut *tx)
+                .await?;
+            frames.push((seq, frame));
+        }
+        tx.commit().await?;
+
+        for (seq, frame_bytes) in frames {
+            self.publish_event(AtpCommitEvent { frame_bytes, seq });
+        }
+        tracing::info!(
+            "[atp] account activation broadcast: did={}, rev={:?}",
+            did,
+            sync.as_ref().map(|(_, rev, _)| rev)
         );
         Ok(())
     }

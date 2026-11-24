@@ -39,6 +39,7 @@ ID の採番は2系統:
 | `hashtags` / `post_hashtags` / `pinned_hashtags` | ハッシュタグ、ポストとの m:n、ホームへのピン留め |
 | `post_recipients` / `dm_read_states` / `bsky_convo_links` | DM の宛先、既読カーソル、Bsky convoId の対応 |
 | `atp_records` / `atp_blocks` / `atp_repo_events` | ATP の非 post レコード、MST のブロックストア、`subscribeRepos` のイベントログ |
+| `atp_deferred_writes` | DID 転入の有効化まで積んでおく ATP への書き込み |
 | `post_record_blobs` / `post_record_blobs_backfill` | ローカル投稿の ATP レコードが参照する blob の `media_files` 行、その既存投稿分のバックフィル待ち |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
 | `at_migration_requests` / `at_migration_records` / `at_migration_blobs` / `at_migration_resume_tokens` | DID 転入の状態機械とステージング、再開リンク |
@@ -99,6 +100,7 @@ ID の採番は2系統:
 - `hide_from_algorithmic_recommendations`: `contentVisibilityDeclaration` のローカルキャッシュ（`docs/protocols.md` 3節）。
 - `is_locked`: フォロー承認制。投稿の公開範囲には影響しない（`docs/protocols.md` 2節）。
 - `at_rotation_key_pem`: アカウント単位の PLC ローテーションキー（`docs/account_migration.md` 6節）。NULL は、この列より前に作られた/転入したアカウントの取り残しだけ。
+- `atp_activation_pending`: DID 転入でレコードを取り込み終えて有効化するまで true。この間の ATP への書き込みはコミットせず `atp_deferred_writes` に積む（下記「ATP リポジトリ関連」）。転入のアカウント作成（`materialize_account`）で立て、有効化で積んだ書き込みを流し終えたら下ろす。
 - `did_moved_out_at`: DID 転出済みの時刻（`submitPlcOperation` 成功か `deactivateAccount` で設定）。読み取りは通常どおりで、書き込みだけ拒否する。
 - `claimed_ap_uri`/`claimed_at_did`: 相互申告マージ（#236）用の、まだ確認できていない自己申告（`bsky` 行が申告する AP Actor URI、`fedi` 行が申告する DID）。相互一致で結婚したら `remote_seiran` に昇格して NULL に戻す。相互に申告し合う2行の共存は複合 UNIQUE `actors_mutual_claim_key` で禁止し、既存行へ申告を書き足して相互に申告し合う形になるときは2行を統合する（`docs/protocols.md` 11節、`seiran_actor_merge`・`repository::actor_merge`・`unique_retry`）。
 - `at_handle`: ATP ハンドル。`remote_seiran` の `username` は Fedi 側のまま固定されるので、Bsky ID の表示にはこれを使う。発見・再訪問のたびに最新にする（`discover_bsky_actor`）。
@@ -297,7 +299,9 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - 取得は `fetch_link_cards_map`（`post_id` 一覧 → `HashMap<i64, Vec<LinkCardResponse>>`）で一括して `NoteResponse.link_cards` に入れる。
 
 ### ATP リポジトリ関連（`atp_records` / `atp_blocks` / `atp_repo_events`)
-`app.bsky.feed.post` は `posts` で管理し、`atp_records` にはそれ以外のコレクション（`app.bsky.actor.profile` 等）だけを持つ。`atp_blocks` は CAR ブロックの実体。`atp_repo_events` は Relay に配る `subscribeRepos` フレームのログで、`id`（BIGSERIAL）がそのままカーソル（seq）になる。`frame_bytes` にコミット時のフレームをそのまま保存し、再送時に作り直さない（バイト列の差で Relay が切断するのを避ける）。
+`app.bsky.feed.post` は `posts` で管理し、`atp_records` にはそれ以外のコレクション（`app.bsky.actor.profile` 等）だけを持つ。`atp_blocks` は CAR ブロックの実体。`atp_repo_events` は Relay に配る `subscribeRepos` フレームのログで、`id`（BIGSERIAL）がそのままカーソル（seq）になる。`frame_bytes` にコミット時のフレームをそのまま保存し、再送時に作り直さない（バイト列の差で Relay が切断するのを避ける）。`event_type` は `commit`/`identity`/`account`/`sync`。
+
+`atp_deferred_writes` は、DID 転入の有効化前（`actors.atp_activation_pending`）のアカウントへの ATP への書き込みを、コミットせずに順番どおり積む。取り込んだレコードは `#commit` で流さないので、有効化の `#sync` より前に `#commit` を流すと Relay の知らないコミットを指して連鎖が切れる。1行が1件の書き込みで、`action`（`create`/`update`/`delete`）・レコードの DAG-CBOR（削除では NULL）・参照する blob の CID・投稿なら `post_id` を持つ。有効化の後に `id` 順に通常のコミットとして流し、流したコミットと同じトランザクションで行を消す（`docs/protocols.md`「MSTコミット・subscribeRepos」）。
 
 ### `post_record_blobs`（投稿レコードの blob 参照）
 ローカル投稿の `app.bsky.feed.post` レコードが参照する blob の `media_files` 行（`(post_id, media_file_id)` が主キー、どちらも `ON DELETE CASCADE`）。URL カードのサムネイル（`embed.external.thumb`）は seiran で取得・再ホストしても外部クライアントが `uploadBlob` しても `post_attachments` に載らないため、これが無いと孤立ファイル GC に消され、AppView/CDN が `getBlob` で取り直すと 404 になる。

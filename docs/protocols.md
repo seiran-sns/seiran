@@ -199,7 +199,7 @@ seiran は自前の PDS を実装しており、外部 PDS（bsky.social 等）�
 
 ### 構成
 - `seiran-common::atp`
-  - `repo.rs` — MST 構築、TID（rkey）生成、P-256 署名の commit、CARv1、各レコードの DAG-CBOR、`subscribeRepos` フレーム（`#commit`/`#identity`/`#account`/`#error`）
+  - `repo.rs` — MST 構築、TID（rkey）生成、P-256 署名の commit、CARv1、各レコードの DAG-CBOR、`subscribeRepos` フレーム（`#commit`/`#identity`/`#account`/`#sync`/`#error`）
   - `service.rs` — `AtpCommitService`。共通パイプライン `apply_write`（追加・更新は `commit_record_inner`、削除は `delete_atp_record_generic` から）と `commit_post`（通常・引用・CW 共通、内容は `PostCommit`）/`commit_repost`/`commit_like`/`commit_follow`/`commit_graph_list(item)`/各種 delete/`commit_profile`
   - `plc.rs` — `did:plc` genesis operation の生成・登録
   - `did_resolve.rs` — サービス間認証 JWT 検証用の DID 解決
@@ -237,6 +237,13 @@ ATP ハンドルは常に小文字（`username::to_atp_username`）。`actors.us
 6. `subscribeRepos` フレームを zstd 圧縮して `atp_repo_events.frame_bytes` に保存し、commit 後に配信（`AtpCommitEvent::bus`。`REDIS_URL` があれば全プロセスの接続へ、`docs/architecture.md` 3節）
 
 1〜6 は1つの SERIALIZABLE トランザクションで行う。同じアクターへのコミットが並行すると（同一プロセス内でも、無停止更新で新旧のプロセスが重なっている間でも）、両方が同じ prev から rev を作ってリポジトリが分岐する。SERIALIZABLE なら後から commit する方が `actors` の更新で直列化失敗（40001）になるので、直列化失敗とデッドロック（40P01）はトランザクションを頭から最大10回やり直す。ジョブ（`BskyPostCommitDeferred`・`AccountWithdrawUnfollowAll`）も api と同じ `AtpCommitService` を使い、コミットを subscribeRepos へ流す。
+
+**DID 転入の取り込みと有効化**: 公式 PDS の `importRepo`→`activateAccount` に合わせる。
+- 取り込むレコード（`AtpCommitService::import_record`）は、1〜5 のうち `atp_repo_events` を書かず、`#commit` を流さない（`requestCrawl` も送らない）。取り込むレコードは転入元で既に Relay/AppView に載っており、1件ずつ作り直しとして流すと、大量のいいね・フォローを短時間に作ったのと同じに見えるため。公式 PDS の `importRepo` も firehose にイベントを出さない。
+- 取り込み中（`actors.atp_activation_pending`）にそのアカウントへ来た通常の書き込み（利用者の投稿・いいね・フォロー・プロフィール編集・削除等、パイプラインを通るものすべて）はコミットせず、`atp_deferred_writes` に順番どおり積む。Relay は `#commit` の `since`/`prevData` が自分の知る直前の状態と連ならなければ拒むので、流していない取り込みのコミットを指す `#commit` を有効化より前に出せない。
+- レコードを取り込み終えたら `activate_migrated_account` が、`#account`（active）→`#identity`→`#sync` を1トランザクションで `atp_repo_events` に記録してから流す（公式 PDS の `sequenceAccountActivation` と同じ順）。`#sync` の `blocks` はリポジトリの最新の commit ブロックだけを含む CAR（ルートはその commit）で、Relay はこれを起点に以後の `#commit` を検証する。リポジトリが空なら `#sync` は出さない。
+- 続けて積んだ書き込みを `id` 順に通常のコミットとして流す（行の削除はそのコミットと同じトランザクション）。リポジトリに無いレコードの削除（作成も積んだままだったもの）、後で削除も積まれたレコードの作成・更新、作成後に消された投稿の作成は流さない。積みが空になったら、SERIALIZABLE のトランザクションで空を確かめて `atp_activation_pending` を下ろす（確かめてから下ろすまでに積まれた書き込みを取り残さないため）。最後に `requestCrawl` を送る。
+- 積んでいる間、投稿の ATP 列（`posts.at_uri` 等）は流すまで空のまま。
 
 `subscribeRepos` は `cursor` 指定時、`atp_repo_events` の未送信分を500件ずつ送り切ってからリアルタイム配信に移る。
 

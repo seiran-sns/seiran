@@ -204,7 +204,8 @@
       "buttonTitle": "Insérer un identifiant utilisateur",
       "modalTitle": "Insérer un identifiant utilisateur",
       "noResults": "Aucun utilisateur correspondant trouvé"
-    }
+    },
+    "bskyDeliveryDeferredHint": "La diffusion vers Bluesky est suspendue jusqu’à la fin de l’importation depuis Bluesky, puis elle est envoyée."
   },
   "reactionChips": {
     "clickToRemove": "Cliquez pour supprimer",

@@ -29,6 +29,7 @@ import {
 } from "../../lib/format";
 import { containsKnownCustomEmojiShortcode, fetchCustomEmojis } from "../../lib/customEmojis";
 import { useAuth } from "../../contexts/AuthContext";
+import { useBskyDeliveryDeferred } from "../../hooks/useMigrationImport";
 import { canPostPublic } from "../../lib/roles";
 import {
   clearComposerDraft,
@@ -240,6 +241,7 @@ export default function PostComposer({
 }: PostComposerProps) {
   const { t } = useTranslation();
   const { user } = useAuth();
+  const bskyDeliveryDeferred = useBskyDeliveryDeferred();
   const publicAllowed = canPostPublic(user?.role);
   const replyConstraint = replyTo ? replyVisibilityConstraint(replyTo, publicAllowed) : null;
   // 返信の配送先トグルは、返信先ポストが実際に持つプロトコル実体のみ表示する（持たない
@@ -1032,15 +1034,15 @@ export default function PostComposer({
             className={`${styles.iconBtn} ${deliverBsky ? styles.scopeActive : ""} ${hasBskyIncompatibleEmoji ? styles.iconBtnEmojiWarn : ""}`}
             onClick={() => setDeliverBsky((v) => !v)}
             onKeyDown={(e) => handleControlBtnKeyDown(e, "bsky")}
-            title={
-              hasBskyIncompatibleEmoji
-                ? `${t("home:postComposer.deliverBskyHint")}\n${t("home:postComposer.bskyEmojiWarningHint")}`
-                : t("home:postComposer.deliverBskyHint")
-            }
+            title={[
+              t("home:postComposer.deliverBskyHint"),
+              ...(hasBskyIncompatibleEmoji ? [t("home:postComposer.bskyEmojiWarningHint")] : []),
+              ...(bskyDeliveryDeferred ? [t("home:postComposer.bskyDeliveryDeferredHint")] : []),
+            ].join("\n")}
             aria-label={t("home:postComposer.deliverBskyHint")}
           >
             <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
-            {hasBskyIncompatibleEmoji && (
+            {(hasBskyIncompatibleEmoji || bskyDeliveryDeferred) && (
               <span className={styles.bskyEmojiWarnBadge} aria-hidden="true">
                 <TwemojiEmoji emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} />
               </span>

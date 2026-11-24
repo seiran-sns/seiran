@@ -204,7 +204,8 @@
       "buttonTitle": "Insert a user ID",
       "modalTitle": "Insert user ID",
       "noResults": "No matching users found"
-    }
+    },
+    "bskyDeliveryDeferredHint": "Delivery to Bluesky is held until your Bluesky import finishes, and goes out after it completes."
   },
   "reactionChips": {
     "clickToRemove": "Click to remove",

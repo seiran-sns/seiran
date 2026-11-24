@@ -992,6 +992,13 @@ pub async fn materialize_account(
         }
     };
 
+    // レコードを取り込み終えて有効化するまで、ATP への書き込みを積ませる
+    // （`AtpCommitService::activate_migrated_account`、`docs/account_migration.md` 3節）。
+    sqlx::query("UPDATE actors SET atp_activation_pending = TRUE WHERE id = $1")
+        .bind(actor_id)
+        .execute(&mut *tx)
+        .await?;
+
     let username_moved = sqlx::query(
         "UPDATE local_username_claims SET actor_id = $2
          WHERE migration_request_id = $1 AND actor_id IS NULL AND username_lower = LOWER($3)",
