@@ -56,6 +56,7 @@ pub async fn search_actors(
                  username,
                  domain,
                  display_name,
+                 emoji_map,
                  actor_type,
                  avatar_url,
              }| {
@@ -70,6 +71,7 @@ pub async fn search_actors(
                     "username": username,
                     "domain": domain,
                     "display_name": display_name,
+                    "emojis": seiran_common::emoji_map::to_string_map(emoji_map.as_ref()),
                     "actor_type": actor_type,
                     "avatar_url": avatar_url,
                     "target": target,
@@ -117,6 +119,7 @@ pub async fn suggest_actors(
                  username,
                  domain,
                  display_name,
+                 emoji_map,
                  actor_type,
                  avatar_url,
              }| {
@@ -128,6 +131,7 @@ pub async fn suggest_actors(
                     "username": username,
                     "domain": domain,
                     "display_name": display_name,
+                    "emojis": seiran_common::emoji_map::to_string_map(emoji_map.as_ref()),
                     "actor_type": actor_type,
                     "avatar_url": avatar_url,
                     "target": target,

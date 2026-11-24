@@ -12,6 +12,8 @@ pub struct FollowListRow {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL、`emoji_map::to_string_map` で変換）。
+    pub emoji_map: Option<serde_json::Value>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     /// Misskey互換API（`POST /api/users/following`・`followers`）の`createdAt`用。
@@ -576,7 +578,7 @@ impl FollowRepository for PgFollowRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
-            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map, a.emoji_map, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at

@@ -15,6 +15,7 @@ import RemoteImg from "../common/RemoteImg";
 import panel from "../common/Panel.module.css";
 import Avatar from "../note/Avatar";
 import EmojiText from "../note/EmojiText";
+import DisplayName from "../common/DisplayName";
 import NoteHoverPreview from "../note/NoteHoverPreview";
 import UserContextMenu from "../note/UserContextMenu";
 import UserHoverArea from "../note/UserHoverArea";
@@ -28,13 +29,6 @@ import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import CardStack from "../common/CardStack";
 import { groupNotifications } from "../../lib/notificationGroups";
-
-/** Misskey本家仕様のコロンなしshortcodeキー（`user.emojis`）を、`EmojiText` が期待する
- * `:shortcode:` 形式のキーへ変換する（#186）。 */
-function colonizeEmojiKeys(emojis?: Record<string, string>): Record<string, string> | undefined {
-  if (!emojis) return undefined;
-  return Object.fromEntries(Object.entries(emojis).map(([code, url]) => [`:${code}:`, url]));
-}
 
 const PAGE_SIZE = 20;
 /** 未読だった通知を目立たせておく時間（10秒＋元の背景へ戻る1.5秒。CSS の notifFresh と揃える）。 */
@@ -85,7 +79,7 @@ export function resolveClickTargetNoteId(n: NotificationItem): string | undefine
 }
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
- * `who`（表示名部分）は呼び出し側で `EmojiText` を通す前提でプレーンテキストのまま返す。 */
+ * `who`（表示名部分）は呼び出し側で `DisplayName` を通す前提でプレーンテキストのまま返す。 */
 export function describeNotification(n: NotificationItem): {
   icon: string;
   iconUrl?: string;
@@ -473,7 +467,7 @@ export default function NotificationsPanel({
     ) : (
       <span />
     );
-    const emojiName = <EmojiText text={who} emojis={colonizeEmojiKeys(whoEmojis)} />;
+    const emojiName = <DisplayName name={who} fallback="" emojis={whoEmojis} />;
     const avatar = <Avatar url={n.user?.avatarUrl} name={who} size={20} />;
     const message = (
       <Trans
@@ -515,7 +509,7 @@ export default function NotificationsPanel({
             <span className={styles.singleLine}>{message}</span>
             {summary && (
               <span className={`${styles.singleLine} ${styles.targetLine}`}>
-                <EmojiText text={summary} emojis={colonizeEmojiKeys(targetNote(n)?.emojis)} />
+                <EmojiText text={summary} emojis={targetNote(n)?.emojis} />
               </span>
             )}
           </span>

@@ -7,10 +7,16 @@ export function FilterBar({ children }: { children: ReactNode }) {
   return <div className={styles.bar}>{children}</div>;
 }
 
+/** 表示欄に並べるタグ1つ。`label` は表示名（絵文字展開込み）等の要素でもよいので、識別は `key` で行う。 */
+export interface FilterTag {
+  key: string;
+  label: ReactNode;
+}
+
 interface FilterFieldProps {
   label: string;
   placeholder: string;
-  tags: string[];
+  tags: FilterTag[];
   /** 指定を全部外す。タグがあるときだけ✕ボタンを出す。 */
   onClear: () => void;
   children: ReactNode;
@@ -66,8 +72,8 @@ export default function FilterField({ label, placeholder, tags, onClear, childre
           <>
             <span className={styles.tags} ref={tagsRef}>
               {tags.map((tag) => (
-                <span key={tag} className={styles.tag}>
-                  {tag}
+                <span key={tag.key} className={styles.tag}>
+                  {tag.label}
                 </span>
               ))}
             </span>

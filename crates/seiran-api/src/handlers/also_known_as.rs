@@ -30,6 +30,8 @@ pub struct AlsoKnownAsItem {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     /// 相手側（fedi/ローカルのみ、bskyは対象外）も逆向きにこちらを`also_known_as`として
@@ -53,6 +55,7 @@ impl From<AlsoKnownAsRow> for AlsoKnownAsItem {
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             actor_type: r.actor_type,
             avatar_url,
             verified: r.verified,

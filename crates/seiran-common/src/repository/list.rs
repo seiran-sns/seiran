@@ -28,6 +28,8 @@ pub struct ListMemberRow {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL、`emoji_map::to_string_map` で変換）。
+    pub emoji_map: Option<serde_json::Value>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     pub added_at: DateTime<Utc>,
@@ -284,7 +286,7 @@ impl ListRepository for PgListRepository {
 
     async fn members(&self, list_id: i64) -> Result<Vec<ListMemberRow>, sqlx::Error> {
         sqlx::query_as::<_, ListMemberRow>(
-            "SELECT a.id AS actor_id, a.username, a.domain, a.display_name,
+            "SELECT a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     lm.added_at, lm.at_rkey, lm.at_uri

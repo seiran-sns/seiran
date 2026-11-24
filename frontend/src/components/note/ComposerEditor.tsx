@@ -16,6 +16,7 @@ import { SHORTCODE_SOURCE, WORD_CHAR_RE } from "../../lib/richTextPatterns";
 import { findTwemojiMatches } from "../../lib/twemoji";
 import RemoteImg from "../common/RemoteImg";
 import styles from "./ComposerEditor.module.css";
+import DisplayName from "../common/DisplayName";
 
 /** `PostComposer` から絵文字ショートコード・ユーザーIDピッカーで選んだ値をカーソル位置へ
  * 挿入するために、本文DOM要素へ`insertAtCursor`を生やして公開する。 */
@@ -559,7 +560,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
                       <RemoteImg src={candidate.actor.avatar_url} alt="" />
                     )}
                     <span>
-                      {candidate.actor.display_name || candidate.actor.username}
+                      <DisplayName name={candidate.actor.display_name} fallback={candidate.actor.username} emojis={candidate.actor.emojis} />
                     </span>
                     <small>{candidate.value}</small>
                   </>

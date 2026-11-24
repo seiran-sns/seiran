@@ -9,6 +9,7 @@ pub mod crypto;
 pub mod db;
 pub mod denied_host;
 pub mod did_provision;
+pub mod emoji_map;
 pub mod event_bus;
 pub mod fedi_content_warning;
 pub mod follow_approval;

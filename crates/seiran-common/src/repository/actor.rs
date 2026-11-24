@@ -813,6 +813,8 @@ pub struct SuspendedActorRow {
     pub domain: String,
     pub actor_type: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL、`emoji_map::to_string_map` で変換）。
+    pub emoji_map: Option<serde_json::Value>,
     pub avatar_url: Option<String>,
     pub suspended_at: chrono::DateTime<chrono::Utc>,
     /// ローカルアクターの場合のみ `Some`。
@@ -827,7 +829,7 @@ pub async fn list_suspended(
     limit: i64,
 ) -> Result<Vec<SuspendedActorRow>, sqlx::Error> {
     sqlx::query_as(
-        "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name,
+        "SELECT a.id, a.username, a.domain, a.actor_type::text AS actor_type, a.display_name, a.emoji_map,
                 COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                 a.suspended_at, a.user_id, u.email
          FROM actors a

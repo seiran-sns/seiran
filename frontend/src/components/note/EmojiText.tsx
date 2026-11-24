@@ -7,7 +7,8 @@ const SHORTCODE_RE = new RegExp(SHORTCODE_SOURCE, "g");
 
 interface EmojiTextProps {
   text: string;
-  /** shortcode（`:name:`）→画像URLのマップ（`Note.emojis`）。未指定/空ならプレーンテキストのまま。 */
+  /** shortcode→画像URLのマップ（`Note.emojis` 等）。キーは `:name:` 形式・コロンなしの `name` 形式
+   * （Misskey本家仕様の `user.emojis`）のどちらでもよい。未指定/空ならプレーンテキストのまま。 */
   emojis?: Record<string, string>;
 }
 
@@ -36,7 +37,7 @@ export default function EmojiText({ text, emojis }: EmojiTextProps) {
       if (nextChar && WORD_CHAR_RE.test(nextChar)) {
         continue;
       }
-      const url = emojis[shortcode];
+      const url = emojis[shortcode] ?? emojis[shortcode.slice(1, -1)];
       if (!url) continue;
       if (match.index > lastIndex) {
         rawParts.push(text.slice(lastIndex, match.index));

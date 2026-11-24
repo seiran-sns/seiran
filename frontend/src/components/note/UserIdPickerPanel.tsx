@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ActorSuggestion, api } from "../../api/client";
 import Avatar from "./Avatar";
 import styles from "./UserIdPickerPanel.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface UserIdPickerPanelProps {
   onPick: (actor: ActorSuggestion) => void;
@@ -74,7 +75,7 @@ export default function UserIdPickerPanel({ onPick }: UserIdPickerPanelProps) {
                 >
                   <Avatar url={s.avatar_url} name={s.display_name || s.username} size={28} />
                   <span className={styles.name}>
-                    {s.display_name || s.username}
+                    <DisplayName name={s.display_name} fallback={s.username} emojis={s.emojis} />
                     <span className={styles.handle}>
                       @{s.username}
                       {s.domain ? `@${s.domain}` : ""}

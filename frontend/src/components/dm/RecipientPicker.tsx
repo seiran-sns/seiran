@@ -2,12 +2,15 @@ import { KeyboardEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ActorSuggestion } from "../../api/client";
 import styles from "./RecipientPicker.module.css";
+import DisplayName from "../common/DisplayName";
 
 export interface RecipientChip {
   actorId: string;
   username: string;
   domain: string;
   displayName?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
   actorType: string;
   avatarUrl?: string;
   /** サジェスト非選択で確定した文字列が既知のアクターと解決できなかった場合。 */
@@ -83,6 +86,7 @@ export default function RecipientPicker({ value, onChange }: RecipientPickerProp
       username: s.username,
       domain: s.domain,
       displayName: s.display_name,
+      emojis: s.emojis,
       actorType: s.actor_type,
       avatarUrl: s.avatar_url,
     });
@@ -101,6 +105,7 @@ export default function RecipientPicker({ value, onChange }: RecipientPickerProp
           username: exact.username,
           domain: exact.domain,
           displayName: exact.display_name,
+          emojis: exact.emojis,
           actorType: exact.actor_type,
           avatarUrl: exact.avatar_url,
         });
@@ -147,7 +152,7 @@ export default function RecipientPicker({ value, onChange }: RecipientPickerProp
             <span key={`${chip.actorId}-${idx}`} className={`${styles.chip} ${isInvalid ? styles.chipInvalid : ""}`}>
               {chip.avatarUrl && <img src={chip.avatarUrl} alt="" className={styles.chipAvatar} />}
               <span className={styles.chipLabel}>
-                {chip.displayName || chip.username}
+                <DisplayName name={chip.displayName} fallback={chip.username} emojis={chip.emojis} />
                 {chip.domain ? `@${chip.domain}` : ""}
               </span>
               <button type="button" className={styles.chipRemove} onClick={() => removeChip(chip.actorId)}>
@@ -185,7 +190,7 @@ export default function RecipientPicker({ value, onChange }: RecipientPickerProp
                   {s.avatar_url ? <img src={s.avatar_url} alt="" /> : <span>{(s.display_name || s.username)[0]?.toUpperCase()}</span>}
                 </span>
                 <span className={styles.suggestName}>
-                  {s.display_name || s.username}
+                  <DisplayName name={s.display_name} fallback={s.username} emojis={s.emojis} />
                   <span className={styles.suggestHandle}>
                     @{s.username}
                     {s.domain ? `@${s.domain}` : ""}

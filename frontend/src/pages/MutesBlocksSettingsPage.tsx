@@ -9,6 +9,7 @@ import { useToast } from "../contexts/ToastContext";
 import { profilePath, profileQuery } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./MutesBlocksSettings.module.css";
+import DisplayName from "../components/common/DisplayName";
 
 /** メインメニュー「設定」内のミュート・ブロック管理（#55）。対象者一覧とその解除。 */
 export default function MutesBlocksSettingsPage() {
@@ -116,7 +117,7 @@ export default function MutesBlocksSettingsPage() {
               <Link to={profilePath(actor.username, actor.domain)} className={styles.actorLink}>
                 <Avatar url={actor.avatar_url} name={actor.display_name || actor.username} size={40} />
                 <div className={styles.names}>
-                  <span className={styles.displayName}>{actor.display_name || actor.username}</span>
+                  <span className={styles.displayName}><DisplayName name={actor.display_name} fallback={actor.username} emojis={actor.emojis} /></span>
                   <span className={styles.acct}>
                     @{actor.username}
                     {actor.domain && actor.domain !== window.location.hostname && `@${actor.domain}`}

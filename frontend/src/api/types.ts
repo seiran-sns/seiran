@@ -62,6 +62,8 @@ export interface SuspendedActor {
   /** ローカルアクターの場合のみ設定。 */
   user_id: string | null;
   email: string | null;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 export interface AdminReport {
@@ -466,6 +468,8 @@ export interface RepostEntry {
   createdAt: string;
   /** 取り消し済み（Undo済み）リポストか。 */
   deleted: boolean;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 export interface ReactResult {
@@ -490,6 +494,8 @@ export interface AlsoKnownAsItem {
   /** 相手側（fedi/ローカルのみ）も逆向きにこちらを指定していれば`true`。 */
   verified: boolean;
   last_checked_at?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** ProfileResponse（バックエンドは snake_case のまま）。 */
@@ -587,6 +593,8 @@ export interface FollowListItem {
   domain: string;
   display_name?: string;
   avatar_url?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** リモートFediアクターのフォロー中/フォロワー全件取得の1件（#68）。ローカルDB未登録の
@@ -598,6 +606,8 @@ export interface RemoteFollowSummaryItem {
   domain: string;
   display_name?: string;
   avatar_url?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** `GET /users/remote-follow-summary` のレスポンス（#68）。 */
@@ -835,6 +845,8 @@ export interface MutedOrBlockedActor {
   domain: string;
   display_name?: string;
   avatar_url?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** 発行済みアプリトークンの1件（#60、`GET /account/app-tokens`）。 */
@@ -994,6 +1006,8 @@ export interface ListMember {
   actor_type: string;
   avatar_url?: string;
   added_at: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 export interface ListDetail extends ListSummary {
@@ -1019,6 +1033,8 @@ export interface ActorSuggestion {
   avatar_url?: string;
   /** `api.lists.addMember` にそのまま渡せるターゲット文字列。 */
   target: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** DMセッション一覧の相手表示情報（`handlers::dm::DmPeerResponse`）。 */
@@ -1029,6 +1045,8 @@ export interface DmPeer {
   displayName?: string;
   actorType: string;
   avatarUrl?: string;
+  /** 表示名中の `:shortcode:` → 画像URL。 */
+  emojis?: Record<string, string>;
 }
 
 /** DMセッション（スレッド起点を同じくするdirect投稿の集合）の要約。 */

@@ -17,6 +17,8 @@ pub struct AlsoKnownAsRow {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL、`emoji_map::to_string_map` で変換）。
+    pub emoji_map: Option<serde_json::Value>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     /// 自分のAP actor文書へ`alsoKnownAs`として公開する際、fediターゲットのURIに使う。
@@ -129,7 +131,7 @@ impl AlsoKnownAsRepository for PgAlsoKnownAsRepository {
         owner_actor_id: i64,
     ) -> Result<Vec<AlsoKnownAsRow>, sqlx::Error> {
         sqlx::query_as::<_, AlsoKnownAsRow>(
-            "SELECT a.id AS target_actor_id, a.username, a.domain, a.display_name,
+            "SELECT a.id AS target_actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     a.ap_uri, a.at_did,

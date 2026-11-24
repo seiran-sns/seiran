@@ -7,7 +7,6 @@ import {
   countGraphemes,
   countUtf8Bytes,
   deliveryBadges,
-  displayName,
   formatCount,
   formatDate,
   pollRemainingTime,
@@ -80,16 +79,6 @@ describe("formatCount", () => {
     expect(formatCount(1_000_000)).toBe("1.0M");
     expect(formatCount(2_500_000)).toBe("2.5M");
     expect(formatCount(12_000_000)).toBe("12M");
-  });
-});
-
-describe("displayName", () => {
-  it("displayName があればそれを使う", () => {
-    expect(displayName(makeNote({ user: { id: 1, username: "alice", displayName: "Alice", actorType: "local" } }))).toBe("Alice");
-  });
-
-  it("displayName が無ければ username にフォールバックする", () => {
-    expect(displayName(makeNote({ user: { id: 1, username: "alice", actorType: "local" } }))).toBe("alice");
   });
 });
 

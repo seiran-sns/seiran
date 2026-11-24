@@ -26,6 +26,8 @@ pub struct DmPeerResponse {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub actor_type: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub avatar_url: Option<String>,
@@ -107,6 +109,7 @@ pub async fn sessions(
                     username: p.username,
                     domain: p.domain,
                     display_name: p.display_name,
+                    emojis: seiran_common::emoji_map::to_string_map(p.emoji_map.as_ref()),
                     actor_type: p.actor_type,
                     avatar_url,
                 },

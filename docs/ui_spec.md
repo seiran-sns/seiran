@@ -497,6 +497,6 @@ Unicode 絵文字（本文・表示名・リアクション・ピッカー・装
 - `components/common/TwemojiImg`: `<img>` を描く部品。読み込みに失敗したら OS のグリフにフォールバックする。parser（17系）と svg（15.0.0で更新停止）のカバレッジがずれていて、新しい結合絵文字等で 404 になることがあるため。
 - `TwemojiEmoji`: 絵文字1つを変換する（絵文字でなければそのまま）。ナビアイコン・バッジ・通知アイコン等。
 - `TwemojiText`: 絵文字混じりのラベルの絵文字部分だけを変換する（`ActionsMenu` の項目等）。
-- `components/note/EmojiText`: カスタム絵文字を画像にした残りのテキストにも同じ変換をかける（本文・表示名）。
+- `components/note/EmojiText`: カスタム絵文字を画像にした残りのテキストにも同じ変換をかける（本文・表示名）。表示名は `components/common/DisplayName` 経由で描き、カスタム絵文字のショートコードはどの画面（NoteCard・通知・フォロー一覧・リスト・DM・設定画面・プロフィールの「別のアカウント」等）でも画像に展開する。
 
 絵文字は `<img alt="...">` になって `textContent` に含まれないので、テストでは `textContent` ではなく `getByRole` のアクセシブル名で判定する。

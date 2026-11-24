@@ -91,11 +91,7 @@ pub async fn reaction_actors(
                 &a.domain,
                 a.id,
             );
-            let emojis = a
-                .emoji_map
-                .as_ref()
-                .map(crate::handlers::users::json_map_to_string_map)
-                .unwrap_or_default();
+            let emojis = seiran_common::emoji_map::to_string_map(a.emoji_map.as_ref());
             serde_json::json!({
                 "id": a.id.to_string(),
                 "username": a.username,
@@ -141,8 +137,10 @@ pub async fn note_reposts(
                 &e.domain,
                 e.actor_id,
             );
+            let emojis = seiran_common::emoji_map::to_string_map(e.emoji_map.as_ref());
             dto::RepostEntryResponse {
                 id: e.id.to_string(),
+                emojis,
                 user: dto::NoteUserInfo {
                     id: e.actor_id.to_string(),
                     username: e.username,

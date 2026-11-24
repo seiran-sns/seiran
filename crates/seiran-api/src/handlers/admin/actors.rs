@@ -26,6 +26,8 @@ pub struct SuspendedActorResponse {
     pub domain: String,
     pub actor_type: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
     pub suspended_at: DateTime<Utc>,
     pub user_id: Option<String>,
@@ -42,6 +44,7 @@ impl From<SuspendedActorRow> for SuspendedActorResponse {
             domain: r.domain,
             actor_type: r.actor_type,
             display_name: r.display_name,
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             avatar_url,
             suspended_at: r.suspended_at,
             user_id: r.user_id.map(|v| v.to_string()),

@@ -5,7 +5,6 @@ import { api, getErrorMessage, Note } from "../../api/client";
 import {
   acct,
   deliveryBadges,
-  displayName,
   formatDate,
   profilePath,
   profileQuery,
@@ -41,6 +40,7 @@ import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
 import RemoteImg from "../common/RemoteImg";
 import styles from "./NoteCard.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface NoteCardProps {
   note: Note;
@@ -90,7 +90,7 @@ export function QuoteCard({ note }: { note: Note }) {
           />
           <span className={styles.quoteNames}>
             <strong>
-              <EmojiText text={displayName(note)} emojis={note.emojis} />
+              <DisplayName name={note.user.displayName} fallback={note.user.username} emojis={note.emojis} />
             </strong>
             <span>{acct(note)}</span>
           </span>
@@ -442,7 +442,7 @@ function PostContent({
                   onClick={(e) => e.stopPropagation()}
                 >
                   <span className={styles.displayName}>
-                    <EmojiText text={displayName(note)} emojis={note.emojis} />
+                    <DisplayName name={note.user.displayName} fallback={note.user.username} emojis={note.emojis} />
                   </span>
                 </Link>
               </UserContextMenu>
@@ -835,7 +835,7 @@ function RepostRail({ note }: { note: Note }) {
       <TwemojiEmoji emoji="🔁" />{" "}
       <UserContextMenu target={repostTarget}>
         <strong>
-          <EmojiText text={displayName(note)} emojis={note.emojis} />
+          <DisplayName name={note.user.displayName} fallback={note.user.username} emojis={note.emojis} />
         </strong>
       </UserContextMenu>{" "}
       {t("home:noteCard.repostedConnector")}{" "}

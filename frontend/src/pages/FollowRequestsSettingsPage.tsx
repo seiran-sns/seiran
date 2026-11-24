@@ -9,6 +9,7 @@ import { useToast } from "../contexts/ToastContext";
 import { profilePath } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./FollowRequestsSettings.module.css";
+import DisplayName from "../components/common/DisplayName";
 
 /** 設定画面「承認待ちフォロー」（承認制フォロー中のみメニューに出現）。
  * 一覧の【承認】/【拒否】操作を行う。実際のATPコミット/AP Accept・Reject送信は
@@ -75,7 +76,7 @@ export default function FollowRequestsSettingsPage() {
               <Link to={profilePath(item.username, item.domain)} className={styles.actorLink}>
                 <Avatar url={item.avatar_url} name={item.display_name || item.username} size={40} />
                 <div className={styles.names}>
-                  <span className={styles.displayName}>{item.display_name || item.username}</span>
+                  <span className={styles.displayName}><DisplayName name={item.display_name} fallback={item.username} emojis={item.emojis} /></span>
                   <span className={styles.acct}>
                     @{item.username}
                     {item.domain && item.domain !== window.location.hostname && `@${item.domain}`}

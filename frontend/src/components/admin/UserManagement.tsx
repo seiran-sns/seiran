@@ -3,11 +3,11 @@ import { useTranslation } from "react-i18next";
 import { api, AdminUser, getErrorMessage } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
-import EmojiText from "../note/EmojiText";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 import { isPrivilegedRole } from "../../lib/roles";
 import ConfirmModal from "../common/ConfirmModal";
+import DisplayName from "../common/DisplayName";
 
 const ROLES = ["quarantine", "silence", "user", "emoji-editor", "moderator", "admin"];
 const PAGE_SIZE = 30;
@@ -155,7 +155,7 @@ export default function UserManagement() {
               <div className={styles.grow}>
                 <div className={styles.primaryText}>
                   {u.display_name || u.username ? (
-                    <EmojiText text={u.display_name || u.username || ""} emojis={u.emojis} />
+                    <DisplayName name={u.display_name} fallback={u.username ?? ""} emojis={u.emojis} />
                   ) : (
                     t("admin:userManagement.noActorLabel")
                   )}
