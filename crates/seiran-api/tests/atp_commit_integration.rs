@@ -141,39 +141,82 @@ async fn concurrent_commits_to_one_actor_form_a_single_chain() {
     assert_eq!(last_since, prev.map(|(_, rev)| rev));
 }
 
-/// DID 転入で取り込むレコード（`import_record`）は firehose に流さずリポジトリだけを進め、
-/// 取り込み後の`broadcast_account_activation`が`#account`→`#identity`→`#sync`を流す。
-/// `#sync`はリポジトリの最新の commit ブロックだけを含む CAR を持つ。
+fn like_value(i: usize) -> serde_json::Value {
+    serde_json::json!({
+        "$type": "app.bsky.feed.like",
+        "subject": {
+            "uri": format!("at://did:plc:other/app.bsky.feed.post/{i}"),
+            "cid": "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm",
+        },
+        "createdAt": "2026-10-11T00:00:00.000Z",
+    })
+}
+
+/// DID 転入の流れ: 有効化前（`atp_activation_pending`）の通常の書き込みはコミットせずに積み、
+/// 取り込むレコード（`import_record`）は firehose に流さずリポジトリだけを進める。
+/// `activate_migrated_account` が `#account`→`#identity`→`#sync` を流し、続けて積んだ書き込みを
+/// `#sync` から連なる `#commit` として流す。作成も積んだままだったレコードの削除は流さない。
 #[tokio::test]
 #[ignore]
-async fn imported_records_are_announced_by_one_sync_event() {
+async fn migrated_account_defers_writes_until_activation() {
     use ipld_core::ipld::Ipld;
 
     let pool = support::test_db_pool().await;
     let actor_id = create_atp_actor(&pool).await;
+    sqlx::query("UPDATE actors SET atp_activation_pending = TRUE WHERE id = $1")
+        .bind(actor_id)
+        .execute(&pool)
+        .await
+        .unwrap();
     let service = commit_service(&pool);
+    let now = chrono::Utc::now;
 
+    // 取り込みの途中で、利用者が seiran で書き込む（積まれる）。
+    service
+        .commit_generic_record(
+            actor_id,
+            "app.bsky.feed.like".to_string(),
+            "own0".to_string(),
+            &like_value(100),
+            "create",
+            now(),
+        )
+        .await
+        .expect("書き込みに失敗");
     for i in 0..3 {
-        let value = serde_json::json!({
-            "$type": "app.bsky.feed.like",
-            "subject": {
-                "uri": format!("at://did:plc:other/app.bsky.feed.post/{i}"),
-                "cid": "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm",
-            },
-            "createdAt": "2026-10-11T00:00:00.000Z",
-        });
         service
             .import_record(
                 actor_id,
                 "app.bsky.feed.like".to_string(),
                 format!("imported{i}"),
-                &value,
+                &like_value(i),
                 None,
-                chrono::Utc::now(),
+                now(),
             )
             .await
             .expect("取り込みのコミットに失敗");
     }
+    // 作成も積んだままのレコードを消す（流すときに作成・削除とも打ち消す）。
+    service
+        .commit_generic_record(
+            actor_id,
+            "app.bsky.feed.like".to_string(),
+            "own1".to_string(),
+            &like_value(101),
+            "create",
+            now(),
+        )
+        .await
+        .unwrap();
+    service
+        .delete_atp_like(actor_id, "own1", now())
+        .await
+        .unwrap();
+    // 取り込んだレコードの削除は流す。
+    service
+        .delete_atp_like(actor_id, "imported0", now())
+        .await
+        .unwrap();
 
     let events_before: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM atp_repo_events WHERE actor_id = $1")
@@ -181,39 +224,30 @@ async fn imported_records_are_announced_by_one_sync_event() {
             .fetch_one(&pool)
             .await
             .unwrap();
-    assert_eq!(
-        events_before, 0,
-        "取り込んだレコードが firehose に流れている"
-    );
-    let records: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.feed.like'",
-    )
-    .bind(actor_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
-    assert_eq!(records, 3);
-
-    service
-        .broadcast_account_activation(actor_id, "atpc.example.test", chrono::Utc::now())
-        .await
-        .expect("有効化の送出に失敗");
-
-    let (head_cid, head_rev): (String, String) =
-        sqlx::query_as("SELECT at_repo_cid, at_repo_rev FROM actors WHERE id = $1")
+    assert_eq!(events_before, 0, "有効化前に firehose に流れている");
+    let deferred: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM atp_deferred_writes WHERE actor_id = $1")
             .bind(actor_id)
             .fetch_one(&pool)
             .await
             .unwrap();
+    assert_eq!(deferred, 4);
+
+    service
+        .activate_migrated_account(actor_id, "atpc.example.test", now())
+        .await
+        .expect("有効化に失敗");
+
     let events = sqlx::query(
-        "SELECT event_type, frame_bytes FROM atp_repo_events WHERE actor_id = $1 ORDER BY id",
+        "SELECT event_type, rev, since_rev, ops_json, frame_bytes FROM atp_repo_events
+         WHERE actor_id = $1 ORDER BY id",
     )
     .bind(actor_id)
     .fetch_all(&pool)
     .await
     .unwrap();
     let types: Vec<String> = events.iter().map(|e| e.get("event_type")).collect();
-    assert_eq!(types, ["account", "identity", "sync"]);
+    assert_eq!(types, ["account", "identity", "sync", "commit", "commit"]);
 
     // フレームはヘッダーと本体の2つの DAG-CBOR 値が連続したもの。
     let decode_frame = |row: &sqlx::postgres::PgRow| -> (Ipld, Ipld) {
@@ -238,15 +272,57 @@ async fn imported_records_are_announced_by_one_sync_event() {
     assert_eq!(field(&header, "t"), Ipld::String("#account".into()));
     assert_eq!(field(&body, "active"), Ipld::Bool(true));
 
+    // #sync は、取り込みと有効化前の書き込みを流す前のリポジトリの commit だけを持つ。
     let (header, body) = decode_frame(&events[2]);
     assert_eq!(field(&header, "t"), Ipld::String("#sync".into()));
-    assert_eq!(field(&body, "rev"), Ipld::String(head_rev));
+    let sync_rev: String = events[2].get("rev");
+    assert_eq!(field(&body, "rev"), Ipld::String(sync_rev.clone()));
     let Ipld::Bytes(car) = field(&body, "blocks") else {
         panic!("blocks が bytes ではない")
     };
     let car = seiran_common::atp::car::decode_car(&car).unwrap();
-    let head = seiran_common::atp::cid_from_str(&head_cid).unwrap();
-    assert_eq!(car.roots, vec![head]);
     assert_eq!(car.blocks.len(), 1);
-    assert_eq!(car.blocks[0].0, head);
+    assert_eq!(car.roots, vec![car.blocks[0].0]);
+
+    // 積んだ書き込みは #sync から連なる #commit として順に流れる。
+    let first_since: Option<String> = events[3].get("since_rev");
+    assert_eq!(first_since.as_deref(), Some(sync_rev.as_str()));
+    let first_rev: String = events[3].get("rev");
+    let second_since: Option<String> = events[4].get("since_rev");
+    assert_eq!(second_since, Some(first_rev));
+    let paths: Vec<String> = events[3..]
+        .iter()
+        .map(|e| {
+            let ops: serde_json::Value = e.get("ops_json");
+            format!(
+                "{} {}",
+                ops[0]["action"].as_str().unwrap(),
+                ops[0]["path"].as_str().unwrap()
+            )
+        })
+        .collect();
+    assert_eq!(
+        paths,
+        [
+            "create app.bsky.feed.like/own0",
+            "delete app.bsky.feed.like/imported0",
+        ]
+    );
+
+    let (head_rev, pending): (String, bool) =
+        sqlx::query_as("SELECT at_repo_rev, atp_activation_pending FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(!pending, "有効化の後も書き込みを積み続けている");
+    let last_rev: String = events[4].get("rev");
+    assert_eq!(head_rev, last_rev);
+    let left: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM atp_deferred_writes WHERE actor_id = $1")
+            .bind(actor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(left, 0);
 }

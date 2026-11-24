@@ -204,7 +204,8 @@
       "buttonTitle": "插入用户ID",
       "modalTitle": "插入用户ID",
       "noResults": "未找到匹配的用户"
-    }
+    },
+    "bskyDeliveryDeferredHint": "在从 Bluesky 迁入的数据导入完成之前，投递到 Bluesky 的内容会暂缓，导入完成后再送达。"
   },
   "reactionChips": {
     "clickToRemove": "点击删除",

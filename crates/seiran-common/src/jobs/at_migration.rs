@@ -568,9 +568,10 @@ async fn import_next_record(
 
 /// レコードを取り込み終えたアカウントを、Relay/AppView に有効なアカウントとして知らせる
 /// （`#account`→`#identity`→`#sync`）。公式 PDS で転入先が`importRepo`の後に`activateAccount`
-/// を呼ぶのに当たる。リポジトリが揃ってから知らせるのは、レコードの欠けたリポジトリを
-/// 最新の状態として伝えないため。blob はリポジトリの中身ではないので待たない。送った後に
-/// `importing_blobs`へ進む前で止まっても、やり直しでもう一度送るだけで害は無い。
+/// を呼ぶのに当たる。続けて、取り込み中に利用者が seiran でした書き込み（有効化まで積んで
+/// いた）を流す。リポジトリが揃ってから知らせるのは、レコードの欠けたリポジトリを最新の
+/// 状態として伝えないため。blob はリポジトリの中身ではないので待たない。途中で止まっても、
+/// やり直しでイベントをもう一度送り、残りの書き込みを流すだけで害は無い。
 async fn announce_activation(ic: &ImportContext<'_>) -> Result<(), JobError> {
     let actor = ic
         .follow_exec
@@ -590,11 +591,11 @@ async fn announce_activation(ic: &ImportContext<'_>) -> Result<(), JobError> {
     );
     ic.follow_exec
         .atp_service
-        .broadcast_account_activation(ic.actor_id, &handle, chrono::Utc::now())
+        .activate_migrated_account(ic.actor_id, &handle, chrono::Utc::now())
         .await
         .map_err(|e| {
             JobError::Transient(format!(
-                "[MigrationImportProcess] #account/#identity/#sync の送出失敗: {e}"
+                "[MigrationImportProcess] アカウントの有効化失敗: {e}"
             ))
         })
 }

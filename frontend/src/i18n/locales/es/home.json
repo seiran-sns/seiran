@@ -204,7 +204,8 @@
       "buttonTitle": "Insertar un ID de usuario",
       "modalTitle": "Insertar ID de usuario",
       "noResults": "No se encontraron usuarios coincidentes"
-    }
+    },
+    "bskyDeliveryDeferredHint": "La entrega a Bluesky queda en espera hasta que termine la importación desde Bluesky y se envía después."
   },
   "reactionChips": {
     "clickToRemove": "Haga clic para eliminar",

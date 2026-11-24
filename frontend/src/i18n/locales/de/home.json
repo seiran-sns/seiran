@@ -204,7 +204,8 @@
       "buttonTitle": "Benutzer-ID einfügen",
       "modalTitle": "Benutzer-ID einfügen",
       "noResults": "Keine passenden Benutzer gefunden"
-    }
+    },
+    "bskyDeliveryDeferredHint": "Die Zustellung an Bluesky wird zurückgehalten, bis dein Bluesky-Import abgeschlossen ist, und erfolgt danach."
   },
   "reactionChips": {
     "clickToRemove": "Klicken Sie zum Entfernen",

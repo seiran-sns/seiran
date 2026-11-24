@@ -238,7 +238,12 @@ ATP ハンドルは常に小文字（`username::to_atp_username`）。`actors.us
 
 1〜6 は1つの SERIALIZABLE トランザクションで行う。同じアクターへのコミットが並行すると（同一プロセス内でも、無停止更新で新旧のプロセスが重なっている間でも）、両方が同じ prev から rev を作ってリポジトリが分岐する。SERIALIZABLE なら後から commit する方が `actors` の更新で直列化失敗（40001）になるので、直列化失敗とデッドロック（40P01）はトランザクションを頭から最大10回やり直す。ジョブ（`BskyPostCommitDeferred`・`AccountWithdrawUnfollowAll`）も api と同じ `AtpCommitService` を使い、コミットを subscribeRepos へ流す。
 
-DID 転入で取り込むレコード（`AtpCommitService::import_record`）だけは、1〜5 のうち `atp_repo_events` を書かず、`#commit` を流さない（`requestCrawl` も送らない）。取り込むレコードは転入元で既に Relay/AppView に載っており、1件ずつ作り直しとして流すと、大量のいいね・フォローを短時間に作ったのと同じに見えるため。公式 PDS の `importRepo` も firehose にイベントを出さない。レコードを取り込み終えたら `broadcast_account_activation` が、公式 PDS の `activateAccount` と同じく `#account`（active）→`#identity`→`#sync` を1トランザクションで `atp_repo_events` に記録してから流し、`requestCrawl` を送る。`#sync` の `blocks` はリポジトリの最新の commit ブロックだけを含む CAR（ルートはその commit）で、Relay はこれを起点に以後の `#commit` の `since`/`prevData` を検証する。取り込み中に利用者が seiran でした投稿等は通常どおり `#commit` で流れ、その `since`/`prevData` は流していない取り込みのコミットを指すが、有効化の `#sync` が起点を置き直す（`docs/account_migration.md` 3節）。
+**DID 転入の取り込みと有効化**: 公式 PDS の `importRepo`→`activateAccount` に合わせる。
+- 取り込むレコード（`AtpCommitService::import_record`）は、1〜5 のうち `atp_repo_events` を書かず、`#commit` を流さない（`requestCrawl` も送らない）。取り込むレコードは転入元で既に Relay/AppView に載っており、1件ずつ作り直しとして流すと、大量のいいね・フォローを短時間に作ったのと同じに見えるため。公式 PDS の `importRepo` も firehose にイベントを出さない。
+- 取り込み中（`actors.atp_activation_pending`）にそのアカウントへ来た通常の書き込み（利用者の投稿・いいね・フォロー・プロフィール編集・削除等、パイプラインを通るものすべて）はコミットせず、`atp_deferred_writes` に順番どおり積む。Relay は `#commit` の `since`/`prevData` が自分の知る直前の状態と連ならなければ拒むので、流していない取り込みのコミットを指す `#commit` を有効化より前に出せない。
+- レコードを取り込み終えたら `activate_migrated_account` が、`#account`（active）→`#identity`→`#sync` を1トランザクションで `atp_repo_events` に記録してから流す（公式 PDS の `sequenceAccountActivation` と同じ順）。`#sync` の `blocks` はリポジトリの最新の commit ブロックだけを含む CAR（ルートはその commit）で、Relay はこれを起点に以後の `#commit` を検証する。リポジトリが空なら `#sync` は出さない。
+- 続けて積んだ書き込みを `id` 順に通常のコミットとして流す（行の削除はそのコミットと同じトランザクション）。リポジトリに無いレコードの削除（作成も積んだままだったもの）、後で削除も積まれたレコードの作成・更新、作成後に消された投稿の作成は流さない。積みが空になったら、SERIALIZABLE のトランザクションで空を確かめて `atp_activation_pending` を下ろす（確かめてから下ろすまでに積まれた書き込みを取り残さないため）。最後に `requestCrawl` を送る。
+- 積んでいる間、投稿の ATP 列（`posts.at_uri` 等）は流すまで空のまま。
 
 `subscribeRepos` は `cursor` 指定時、`atp_repo_events` の未送信分を500件ずつ送り切ってからリアルタイム配信に移る。
 

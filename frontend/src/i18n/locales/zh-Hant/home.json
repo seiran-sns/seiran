@@ -204,7 +204,8 @@
       "buttonTitle": "插入使用者ID",
       "modalTitle": "插入使用者ID",
       "noResults": "找不到符合的使用者"
-    }
+    },
+    "bskyDeliveryDeferredHint": "在從 Bluesky 遷入的資料匯入完成之前，傳送到 Bluesky 的內容會暫緩，匯入完成後再送達。"
   },
   "reactionChips": {
     "clickToRemove": "點擊以移除",

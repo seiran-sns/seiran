@@ -204,7 +204,8 @@
       "buttonTitle": "ユーザーIDを挿入",
       "modalTitle": "ユーザーIDを挿入",
       "noResults": "該当するユーザーが見つかりません"
-    }
+    },
+    "bskyDeliveryDeferredHint": "Bluesky からの転入の取り込みが終わるまで、Bluesky への配送は保留され、取り込みが終わってから届きます。"
   },
   "reactionChips": {
     "clickToRemove": "クリックで取り消す",
