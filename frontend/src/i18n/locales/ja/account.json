@@ -32,7 +32,7 @@
     "languageFr": "Français",
     "saved": "言語設定を保存しました。",
     "emojiReactionsTitle": "絵文字リアクション",
-    "emojiReactionsLabel": "絵文字リアクションを使う（オフにすると❤️だけで反応し、付いたリアクションも表示しない）",
+    "emojiReactionsLabel": "絵文字リアクションを使う",
     "quickReactionsTitle": "ワンタッチリアクションバー",
     "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する",
     "deviceGroupTitle": "この端末だけの設定",
