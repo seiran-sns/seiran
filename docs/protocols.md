@@ -138,6 +138,13 @@ Authorized Fetch（secure mode）のインスタンスは未署名 GET に 401 �
 
 こうしないと、投稿者や会話の参加者のサーバーでブースト数・リアクション数が更新されない。DM（`deliver_direct_message_to_ap`）は対象外で、宛先は `post_recipients` のみ。
 
+**Note の組み立て（`deliver/note_object.rs::build_local_note`）**: ローカル投稿の Note（アンケート付きなら Question）は、Create・Update（`seiranPost` 補完）・DM の配送と `GET /notes/:id`（`get_note_ap`）のすべてでこの関数が DB から組み立てる。ジョブ（`PostToFollowers{post_id}`）にも呼び出し元にも本文・引用・返信先を持たせない。経路ごとに組み立てていた頃は、`GET /notes/:id` にだけ `inReplyTo` が無く、URL から照会した返信が通常ノートとして取り込まれた。DB から決めるのは次のとおり:
+- `inReplyTo`: 返信先の `ap_object_id`（Bsky にしか実体が無い返信先なら付けない）
+- 引用: ブリッジポストの付け替え（`with_bridge_delivery_targets`）後に AP 実体があれば `quoteUrl`/`_misskey_quote`、Bsky にしか無ければ本文末尾に bsky.app URL（`ApQuote::AppendUrl`）
+- 本文末尾の URL: `post_link_cards` の URL のうち本文に無いもの（Bsky embed の URL 選択・チェックボックスのリンクカードとも、配送ジョブを積む前に保存済み）
+- Bsky にしか実体が無い投稿のリポスト: 代替本文 `🔁 {表示名}: {bsky.app URL}`（メンション変換・`seiranPost` 無し）。AP 実体がある投稿のリポストは Announce なので Note を返さない（`GET /notes/:id` も 404）
+- DM: `to` は `post_recipients` の Fedi アクター、`seiranUuid`/`seiranPost` 無し
+
 通常投稿（`PostToFollowers`）は本文でメンションした相手の inbox もフォロー関係と無関係に加える（`fetch_inboxes_by_ap_uris`）。既知なら DB から、未知ならアクター文書を取得して解決する（DBには保存しない）。`to` にもメンション先の actor URI を入れる。取得に失敗したメンション先はスキップする。
 
 ### リモートFediアクターのフォロー中/フォロワー全件取得（#68）
@@ -335,11 +342,11 @@ ATP は1投稿に embed を1種類（画像最大4枚 / 動画1本 / 外部リ�
 - **選択（`CreateNoteRequest.bsky_embed_choice`、`dto.rs::BskyEmbedChoice`）**: `Poll`／`Images`（非アニメ静止画グループ、最大4枚）／`Attachment{id}`（アニメGIF・動画・音声の1件）／`Url{url}`（本文中のURL）。省略すると `delivery.rs::resolve_bsky_embed` がアンケート → 静止画 → アニメGIF → 動画/音声 → 本文URL の順（同種内は先頭）で自動選択する。送らないクライアント（Misskey 互換等）があるのでバックエンドは省略を許し、「候補が複数あるのに未選択」はフロント（`PostComposer`）が送信ボタンを無効化して防ぐ。
 - **アニメGIF判定**: `media_files.is_animated_image`。音声は Bsky では動画 embed になるので「動画」候補として扱う。
 - **URL選択**: `resolve_bsky_embed` が選ばれた URL の OGP を同期取得して `embed.external` を組み立て、同じ内容を `post_link_cards`（`position=0`）にも保存する（oEmbed で許可されれば `embed_src`/`embed_type` も）。静止画等と違い URL は選んで初めてカードになるので、seiran の表示にも反映するため。本文から URL を消しても選択は有効なまま残る（フロントも他を選ぶまでその項目を残す）。OGP 取得に失敗しても title/description 空の External でコミットする。
-- **URL選択の AP 配送への反映（`fedi_url_append_needed`）**: AP には embed が無いので、選択 URL が本文に無ければ AP 配送用の本文（`PostToFollowers.body` の上書き。`posts.body` は変えない）の末尾に `\n\n{url}` を足す（クロスプロトコル引用の `ApQuote::AppendUrl` と同じ仕組み）。引用投稿では `bsky_embed_choice` 自体を使わないので対象外。
+- **URL選択の AP 配送への反映**: AP には embed が無いので、選択 URL が本文に無ければ AP の本文（`posts.body` は変えない）の末尾に `\n\n{url}` を足す。選択 URL は `post_link_cards` に保存されるので、`build_local_note` がリンクカードの URL として扱う（「Note の組み立て」参照）。引用投稿では `bsky_embed_choice` 自体を使わないので対象外。
 - **引用＋静止画（`embed.recordWithMedia`）**: 引用投稿に静止画があれば、選択によらず先頭4枚を `recordWithMedia` の media として一緒に配送する（`delivery::collect_bsky_quote_images`）。動画・GIF・URL・アンケートは対象外（動画は `BskyPostCommitDeferred` との組み合わせが複雑なため未対応）。Fedi リモート引用のフォールバック（`BskyEmbed::External`）は external が media と併記できないので対象外。
 - **動画パイプライン待ち**: 選択された動画/音声の `bsky_video_status` が `ready`/`failed` でなければ、`resolve_bsky_embed` は `Pending(media_file_id)` を返し、`Job::BskyPostCommitDeferred` がその1件の状態だけを見てコミットする（`ready` → Video embed、`failed` か70秒超過 → 簡易視聴ページ `/api/media/{id}/watch` のリンクカード）。
 - **チェックボックスでのURLカード（`link_card_urls`、`delivery::attach_link_cards_from_urls`）**: ラジオボタン（単一選択）は「Bsky 配送オンかつ CW でない」ときだけ出る。それ以外でも本文に URL があれば、seiran は1投稿に複数カードを持てるのでチェックボックスを出し、選んだ URL を順に OGP 取得して `post_link_cards`（`position=0..N`）に保存する（Bsky 向けのサムネイル再ホストはしない）。孤児化の扱いはラジオと同じ。ラジオが出せる状態に切り替わった瞬間、チェック済みで最も前の URL が `bskyEmbedChoice` に引き継がれる。
-- **AP 配送への反映（`fedi_link_card_urls_append_needed`）**: `link_card_urls` は Bsky 配送・CW の状態によらず使われるので、常に判定する。本文（引用なら `quote_body`）に無いチェック済み URL を出現順に集め、`fedi_append_url` と合わせて AP 配送用本文の末尾に改行区切りで足す。
+- **AP 配送への反映**: Bsky 配送・CW の状態によらず、`build_local_note` が `post_link_cards` の URL のうち本文（Bsky 限定引用の URL 追記後）に無いものを position 順に集め、本文の末尾に改行区切りで足す。
 - **投稿直後の反映**: `create_regular_post` は `deliver_regular_post` の後に `fetch_link_cards_map` でカードを読み戻して `NoteResponse.link_cards` に入れる。投稿者の即時表示とWS配信の両方でリロード無しにカードが出る。
 
 ### アンケート（#228）
@@ -376,7 +383,7 @@ Fediverse 仕様のアンケート（選択肢2〜10・単一/複数選択・期
   - `text` は投稿本文ではなく CW ガイド文（メンション変換・facet もガイド文に対して行う）
   - embed は詳細ページURL＋`#open_cw`、`title` は固定の `"Open"`、description/thumb 無し
   - 引用投稿でも CW を優先する（隠れた本文・添付・引用は seiran の詳細ページで見る）
-  - `fedi_url_append_needed` も呼ばない
+  - URL 選択を使わないので `post_link_cards` に URL 選択のカードは入らない（チェックボックスのカードは AP 本文に追記される）
 
 ### フォロワー検知ポーリング（`seiran-atp-repo::bsky_follower_poll`）
 Jetstream の `wantedDids` は発行者 DID の絞り込みなので、新たに自分をフォローしてきたアクターは事前に分からず検知できない。代わりに `app.bsky.graph.getFollowers`（認証不要）を Bsky 連携済みのローカルユーザーごとに `BSKY_FOLLOWER_POLL_INTERVAL_SECS`（既定60秒）間隔でポーリングし、`follows` との差分で新規フォローを検知する（`seiran-atp-repo::run` 内の常駐タスク）。
@@ -584,7 +591,7 @@ DID 解決は常に公開 AppView（`public.api.bsky.app` の `getProfile`/`reso
   - `@username.{local_domain}` → brid.gy を試さず、上と同じ Mention にする（Bsky 表記のまま Fedi に出さない）。
   - `@user@domain` → テキストはそのまま。DB の `ap_uri` か WebFinger で href が取れたときだけ Mention。
   - `@handle.tld`（他の Bsky ハンドル） → brid.gy の WebFinger（`acct:{handle}@bsky.brid.gy`）で解決できれば `@handle.tld@bsky.brid.gy` の Mention、できなければ `bsky.app/profile/{handle}` へのリンク。ブリッジは相手が brid.gy 連携を有効にしていないと存在しないので、後者は珍しくない。
-  - `deliver/text.rs::plain_to_html_with_mentions` がスパンを `<a>` にし（Mention だけ `class="mention u-url"`）、Mention を `tag[]` にも加える。push 配送（`override_body` 未指定時）と `get_note_ap` の両方でこれを共有する。リポストのフォールバック本文（`override_body` 指定時）はメンション変換しない。
+  - `deliver/text.rs::plain_to_html_with_mentions` がスパンを `<a>` にし（Mention だけ `class="mention u-url"`）、Mention を `tag[]` にも加える。push 配送と `get_note_ap` は同じ `build_local_note` を通る。リポストのフォールバック本文はメンション変換しない。
 
 ### Bsky向け本文の文字数上限
 `app.bsky.feed.post` の本文は300書記素・3000バイトまで。メンション変換でテキストが伸びるので、`create_regular_post` は INSERT 前に `convert_mentions_for_bsky` を実行し、変換後テキストで上限を検証する（超過なら `TEXT_TOO_LONG`）。Bsky に送らない場合は入力テキストに対する緩い上限（3000書記素・10000バイト）だけを見る。

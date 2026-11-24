@@ -3,15 +3,11 @@ use axum::{
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use seiran_common::ap::deliver::at_uri_to_bsky_app_url;
 use seiran_common::repository::ap_public::OutboxRow;
 use serde::Deserialize;
 use std::sync::Arc;
 
-use super::ap_collection::{
-    activity_json, fetch_attachment_documents, public_create, public_note, CollectionOwner,
-    AS_PUBLIC,
-};
+use super::ap_collection::{activity_json, local_note, AS_PUBLIC};
 use crate::AppState;
 
 #[derive(Deserialize)]
@@ -67,22 +63,14 @@ pub async fn outbox_handler(
         }
     };
 
-    let post_ids: Vec<i64> = rows.iter().map(|r| r.id).collect();
-    let mut att_map = fetch_attachment_documents(&state.db, &post_ids).await;
-
     let actor_uri = format!("{}/users/{}", base, username);
     let followers_uri = format!("{}/followers", actor_uri);
-    let owner = CollectionOwner {
-        actor_uri: &actor_uri,
-        followers_uri: &followers_uri,
-    };
-    let ordered_items: Vec<serde_json::Value> = rows
-        .iter()
-        .filter_map(|row| {
-            let attachments = att_map.remove(&row.id).unwrap_or_default();
-            outbox_item(&base, &owner, row, attachments)
-        })
-        .collect();
+    let mut ordered_items: Vec<serde_json::Value> = Vec::with_capacity(rows.len());
+    for row in &rows {
+        if let Some(item) = outbox_item(&state, actor_id, &actor_uri, &followers_uri, row).await {
+            ordered_items.push(item);
+        }
+    }
 
     let mut page = serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
@@ -101,66 +89,40 @@ pub async fn outbox_handler(
 }
 
 /// 投稿1件を outbox の項目（Create または Announce）に変換する。表現できない行は `None`。
-fn outbox_item(
-    base: &str,
-    owner: &CollectionOwner<'_>,
+/// Create の Note は配送・`GET /notes/:id` と同じ`build_local_note`で組み立てる。
+async fn outbox_item(
+    state: &AppState,
+    actor_id: i64,
+    actor_uri: &str,
+    followers_uri: &str,
     row: &OutboxRow,
-    attachments: Vec<serde_json::Value>,
 ) -> Option<serde_json::Value> {
-    let published = row.created_at.to_rfc3339();
-    let activity_id = format!("{}/activities/{}", base, row.id);
-
+    // AP 実体を持つ投稿のリポストは、push 配送（deliver_ap_announce）と同じ Announce。
     if row.repost_of_post_id.is_some() {
-        return repost_item(owner, row, &activity_id, &published);
-    }
-
-    let note_id = row
-        .ap_object_id
-        .clone()
-        .unwrap_or_else(|| format!("{}/notes/{}", base, row.id));
-    let note_obj = public_note(owner, &note_id, &row.body, &published, attachments);
-    Some(public_create(owner, &activity_id, &published, note_obj))
-}
-
-/// リポスト行: body は常に空文字列のため、push 配送（deliver_ap_announce /
-/// deliver_post_to_ap_followers）と同じ表現で Announce または Create(Note)
-/// として組み立てる。素通しで body を Create(Note) 化すると、push 側とは
-/// 別の AP object id を持つ「空の通常ポスト」がリモートに二重出現する。
-fn repost_item(
-    owner: &CollectionOwner<'_>,
-    row: &OutboxRow,
-    activity_id: &str,
-    published: &str,
-) -> Option<serde_json::Value> {
-    let own_id = row.ap_object_id.as_deref()?;
-
-    if let Some(orig_id) = &row.orig_ap_object_id {
-        let mut cc = vec![owner.followers_uri.to_string()];
-        if let Some(orig_actor_uri) = &row.orig_actor_uri {
-            cc.push(orig_actor_uri.clone());
+        if let Some(orig_id) = &row.orig_ap_object_id {
+            let own_id = row.ap_object_id.as_deref()?;
+            let mut cc = vec![followers_uri.to_string()];
+            if let Some(orig_actor_uri) = &row.orig_actor_uri {
+                cc.push(orig_actor_uri.clone());
+            }
+            return Some(serde_json::json!({
+                "type": "Announce",
+                "id": own_id,
+                "actor": actor_uri,
+                "published": row.created_at.to_rfc3339(),
+                "to": [AS_PUBLIC],
+                "cc": cc,
+                "object": orig_id
+            }));
         }
-        return Some(serde_json::json!({
-            "type": "Announce",
-            "id": own_id,
-            "actor": owner.actor_uri,
-            "published": published,
-            "to": [AS_PUBLIC],
-            "cc": cc,
-            "object": orig_id
-        }));
     }
 
-    // Bsky ネイティブ投稿のリポスト → Fedi フォールバック（テキスト投稿）。
-    // push 配送側（deliver_repost）と同じ本文を組み立てる。
-    // リポスト元がどちらの ID も持たない（削除済み等）場合は表現不能のためスキップ。
-    let orig_at_uri = row.orig_at_uri.as_deref()?;
-    let orig_username = row.orig_username.as_deref().unwrap_or_default();
-    let author_name = row.orig_display_name.as_deref().unwrap_or(orig_username);
-    let text = format!(
-        "🔁 {}: {}",
-        author_name,
-        at_uri_to_bsky_app_url(orig_at_uri)
-    );
-    let note_obj = public_note(owner, own_id, &text, published, Vec::new());
-    Some(public_create(owner, activity_id, published, note_obj))
+    // 通常投稿と、Bsky にしか実体が無い投稿のリポスト（代替本文の Note）。
+    let note = local_note(state, row.id, actor_id).await?;
+    let mut activity =
+        seiran_common::ap::deliver::local_note_create_activity(&state.local_domain, row.id, &note);
+    if let Some(obj) = activity.as_object_mut() {
+        obj.remove("@context");
+    }
+    Some(activity)
 }

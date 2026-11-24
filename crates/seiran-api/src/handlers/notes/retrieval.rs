@@ -192,129 +192,30 @@ pub async fn get_note_ap(
         return ApiError::NotFound("NOT_FOUND").into_response();
     }
 
-    let actor_uri = format!("https://{}/users/{}", state.local_domain, post.username);
-    let note_id = format!("https://{}/notes/{}", state.local_domain, post.id);
-    // 配送された Create の埋め込み object と、受信側が object.id を再取得した結果を
-    // 一致させる。Bsky-only 引用は配送時と同じく bsky.app URL を本文末尾へ追加する。
-    let (ap_body, quote_url) = if let Some(quote_id) = post.quote_of_post_id {
-        match state.posts.find_delivery_meta(quote_id).await {
-            Ok(Some(meta)) => {
-                delivery::ap_delivery_quote_fields(&post.body, delivery::ap_quote_from_meta(&meta))
-            }
-            _ => (None, None),
-        }
-    } else {
-        (None, None)
-    };
-    let ap_body = ap_body.as_deref().unwrap_or(&post.body);
-    let (converted_body, mentions) = seiran_common::mention::convert_mentions_for_ap(
-        ap_body,
-        &state.local_domain,
+    // 配送する Create/Update の object と同じものを返す（`build_local_note`が唯一の組み立て
+    // 経路）。受信側は object.id を再取得したり、Misskey の照会のように URL から直接
+    // 取り込んだりするため、ここだけ別に組み立てると返信関係などが落ちる。
+    // followers_only/direct は上の`find_by_id_for_viewer(post_id, None)`で既に404。
+    let note = match seiran_common::ap::deliver::build_local_note(
+        &state.ap_client,
         &state.db,
-        state.ap_client.http.as_ref(),
+        &state.local_domain,
+        post_id,
+        post.actor_id,
     )
-    .await;
-    let content_html = plain_to_html_with_mentions(&converted_body, &mentions);
-    let mut tag = seiran_common::mention::ap_inline_mentions_to_tag_json(&mentions);
-    // 配送された Create(Note) を受信側が canonical URL から再取得しても
-    // カスタム絵文字情報を失わないよう、配送JSONと同じ Emoji tag を返す。
-    // Misskey系は受信時に object.id を再取得することがあるため、ここに tag が
-    // 無いと Create 側に含めても shortcode のまま保存される（#126）。
-    if let Some(emoji_map) = post
-        .post_emoji_map
-        .as_ref()
-        .and_then(serde_json::Value::as_object)
+    .await
     {
-        for shortcode in extract_shortcode_candidates(&post.body) {
-            let name = format!(":{}:", shortcode);
-            let Some(url) = emoji_map.get(&name).and_then(serde_json::Value::as_str) else {
-                continue;
-            };
-            tag.push(serde_json::json!({
-                "type": "Emoji",
-                "name": name,
-                "icon": {
-                    "type": "Image",
-                    "url": url
-                }
-            }));
+        Ok(Some(note)) => note,
+        // Announce で配送したリポストラッパーは Note ではない
+        Ok(None) => return ApiError::NotFound("NOT_FOUND").into_response(),
+        Err(e) => {
+            tracing::error!("[get_note_ap] Note 組み立てエラー: {}", e);
+            return ApiError::Internal(e.to_string()).into_response();
         }
-    }
-
-    let attachments: Vec<serde_json::Value> =
-        seiran_common::repository::note_extras::local_attachments_for_posts(&state.db, &[post_id])
-            .await
-            .unwrap_or_default()
-            .iter()
-            .map(seiran_common::ap::local_attachment_document)
-            .collect();
-
-    // find_by_id_for_viewer(post_id, None) により followers_only/direct は既に404化されている
-    // ため、ここに到達する時点で post.visibility は public/unlisted のいずれか。
-    let followers_uri = format!("{}/followers", actor_uri);
-    let (to, cc): (Vec<String>, Vec<String>) = if post.visibility == "unlisted" {
-        (
-            vec![followers_uri],
-            vec!["https://www.w3.org/ns/activitystreams#Public".to_string()],
-        )
-    } else {
-        (
-            vec!["https://www.w3.org/ns/activitystreams#Public".to_string()],
-            vec![followers_uri],
-        )
     };
-
-    let mut ap_note = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": "Note",
-        "id": note_id,
-        "url": note_id,
-        "attributedTo": actor_uri,
-        "content": content_html,
-        "published": post.created_at.to_rfc3339(),
-        "to": to,
-        "cc": cc,
-    });
-    if !attachments.is_empty() {
-        seiran_common::ap::apply_note_sensitive(&mut ap_note, &attachments);
-        ap_note["attachment"] = serde_json::Value::Array(attachments);
-    }
-    if !tag.is_empty() {
-        ap_note["tag"] = serde_json::Value::Array(tag);
-    }
-    if let Some(url) = quote_url {
-        ap_note["quoteUrl"] = serde_json::Value::String(url.clone());
-        ap_note["_misskey_quote"] = serde_json::Value::String(url);
-    }
-    // フォロー関係が無いリモート（Mastodon等）は Create 配送を受け取らず、
-    // このエンドポイントを直接 GET してオブジェクトを取得することがある。
-    // Create 側と同じ Question 変換をしないと本文だけの Note に見えてしまう。
-    if let Some(poll) = post.poll.as_ref() {
-        seiran_common::ap::apply_poll_to_note_object(&mut ap_note, poll);
-    }
-    // 配送時（`deliver_post_to_ap_followers`）と同じ`summary`（CW）・`seiranPost`拡張
-    // オブジェクトをここにも埋め込む。フォロー関係が無いリモートはCreateを受け取らず
-    // このエンドポイントの直接GETのみでオブジェクトを取得するため、ここが欠けていると
-    // CW・#237のロスレス往復（添付NSFW/GIF/寸法・複数URLカード等）がPush配送時にしか
-    // 機能しない片手落ちになる。
-    if let Ok(basis) =
-        seiran_common::ap::deliver::fetch_post_activity_basis(&state.db, post_id, post.actor_id)
-            .await
-    {
-        if let Some(cw) = basis.content_warning.as_deref() {
-            ap_note["summary"] = serde_json::Value::String(cw.to_string());
-        }
-        if let Ok(Some(seiran_post)) = seiran_common::ap::deliver::build_seiran_post_for_basis(
-            &state.db,
-            post_id,
-            &basis,
-            &converted_body,
-        )
-        .await
-        {
-            ap_note["seiranPost"] = seiran_post.to_value();
-        }
-    }
+    let mut ap_note = note.object;
+    ap_note["@context"] =
+        serde_json::Value::String("https://www.w3.org/ns/activitystreams".to_string());
 
     (
         [(

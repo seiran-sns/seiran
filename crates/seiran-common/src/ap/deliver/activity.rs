@@ -78,9 +78,10 @@ pub(super) fn visibility_to_to_cc(
 /// `note_obj` をアンケート付き投稿用に`Question`型へ書き換える（#228）。
 /// `poll`は`{multiple, options:[{name,votes}], endTime}`（`posts.poll`と同じ形、
 /// 受信側`normalize_ap_poll`と対称の構築）。
-/// Create 配送だけでなく、`GET /notes/:id` の AP レスポンス（`handlers::notes::get_note_ap`）
-/// からもフォロー関係なしの直接取得時に同じ変換が必要なため公開する。
-pub fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_json::Value) {
+pub(super) fn apply_poll_to_note_object(
+    note_obj: &mut serde_json::Value,
+    poll: &serde_json::Value,
+) {
     note_obj["type"] = serde_json::Value::String("Question".to_string());
     let multiple = poll["multiple"].as_bool().unwrap_or(false);
     let choices: Vec<serde_json::Value> = poll["options"]
@@ -111,7 +112,10 @@ pub fn apply_poll_to_note_object(note_obj: &mut serde_json::Value, poll: &serde_
 }
 
 /// Create(Note)/Update(Note) 共通の Note オブジェクトを組み立てる（what: 純関数）。
-fn build_note_object(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
+pub(super) fn build_note_object(
+    addr: &LocalActorAddress,
+    p: &NoteActivityParams,
+) -> serde_json::Value {
     let note_id = format!("https://{}/notes/{}", p.local_domain, p.post_id);
     let (to, cc) = visibility_to_to_cc(
         addr,
@@ -160,98 +164,68 @@ fn build_note_object(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_
     note_obj
 }
 
-/// Create(Note) アクティビティを組み立てる。
+/// Create(Note) アクティビティを組み立てる。`note`は`build_note_object`
+/// （`note_object::build_local_note`）で組み立てたもので、to/cc・published はそこから写す。
 pub(super) fn build_create_note_activity(
     addr: &LocalActorAddress,
-    p: &NoteActivityParams,
+    local_domain: &str,
+    post_id: i64,
+    note: &serde_json::Value,
 ) -> serde_json::Value {
-    let activity_id = format!("https://{}/activities/{}", p.local_domain, p.post_id);
-    let (to, cc) = visibility_to_to_cc(
-        addr,
-        p.visibility,
-        p.direct_recipients,
-        p.mention_recipients,
-    );
-    let note_obj = build_note_object(addr, p);
-
+    let activity_id = format!("https://{}/activities/{}", local_domain, post_id);
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Create",
         "id": activity_id,
         "actor": addr.actor_uri,
-        "published": p.published,
-        "to": to,
-        "cc": cc,
-        "object": note_obj
+        "published": note["published"],
+        "to": note["to"],
+        "cc": note["cc"],
+        "object": note
     })
 }
 
 /// Update(Note) アクティビティを組み立てる（#237、狭いスコープの`seiranPost.counterpartPostId`
-/// 補完専用）。Note オブジェクト自体は`build_create_note_activity`と同一の組み立てを使うため、
-/// `p.seiran_post`に確定済みの`counterpartPostId`を積んで渡すこと。
+/// 補完専用）。Note オブジェクトは Create と同じ`note_object::build_local_note`の結果を使う。
 /// アクティビティIDはCreateのもの（`/activities/{post_id}`）とは別の値にする
 /// （同一IDのUpdateはMastodon等の実装で「本文編集」の再取得トリガーと解釈されうるため、
 /// 意図的に区別する）。
 pub(super) fn build_update_note_activity(
     addr: &LocalActorAddress,
-    p: &NoteActivityParams,
+    local_domain: &str,
+    post_id: i64,
+    note: &serde_json::Value,
     published: &str,
 ) -> serde_json::Value {
     let activity_id = format!(
         "https://{}/activities/seiranpost-update-{}",
-        p.local_domain, p.post_id
+        local_domain, post_id
     );
-    let (to, cc) = visibility_to_to_cc(
-        addr,
-        p.visibility,
-        p.direct_recipients,
-        p.mention_recipients,
-    );
-    let note_obj = build_note_object(addr, p);
-
     serde_json::json!({
         "@context": "https://www.w3.org/ns/activitystreams",
         "type": "Update",
         "id": activity_id,
         "actor": addr.actor_uri,
         "published": published,
-        "to": to,
-        "cc": cc,
-        "object": note_obj
+        "to": note["to"],
+        "cc": note["cc"],
+        "object": note
     })
 }
 
 /// 添付に NSFW 指定（Document の `sensitive`）が1つでもあれば、Note 自体にも
 /// `sensitive: true` を付ける。添付ごとの指定を読むのは Misskey 系だけで、Mastodon 系は
 /// Note の `sensitive` で投稿の添付全体をぼかすため、両方に載せる。
-pub fn apply_note_sensitive(note_obj: &mut serde_json::Value, attachments: &[serde_json::Value]) {
+pub(super) fn apply_note_sensitive(
+    note_obj: &mut serde_json::Value,
+    attachments: &[serde_json::Value],
+) {
     if attachments
         .iter()
         .any(|a| a["sensitive"].as_bool().unwrap_or(false))
     {
         note_obj["sensitive"] = serde_json::Value::Bool(true);
     }
-}
-
-/// 取得済みのローカル添付 1 件を AP の Document にする（Note の再取得・outbox 用。
-/// URL は取得時に組み立て済みで blurhash は載せない）。
-pub fn local_attachment_document(
-    row: &crate::repository::note_extras::LocalAttachmentRow,
-) -> serde_json::Value {
-    let mut doc = serde_json::json!({
-        "type": "Document",
-        "mediaType": row.mime_type,
-        "url": row.url,
-    });
-    // 動画・音声は寸法を持たないことがある。
-    if let (Some(w), Some(h)) = (row.width, row.height) {
-        doc["width"] = w.into();
-        doc["height"] = h.into();
-    }
-    if row.is_sensitive {
-        doc["sensitive"] = serde_json::Value::Bool(true);
-    }
-    doc
 }
 
 /// 添付ファイル 1 件分の AP Document の元になる値。
@@ -742,9 +716,27 @@ mod tests {
         local_actor_address("seiran.example", "alice")
     }
 
+    fn create_activity(addr: &LocalActorAddress, p: &NoteActivityParams) -> serde_json::Value {
+        build_create_note_activity(addr, p.local_domain, p.post_id, &build_note_object(addr, p))
+    }
+
+    fn update_activity(
+        addr: &LocalActorAddress,
+        p: &NoteActivityParams,
+        published: &str,
+    ) -> serde_json::Value {
+        build_update_note_activity(
+            addr,
+            p.local_domain,
+            p.post_id,
+            &build_note_object(addr, p),
+            published,
+        )
+    }
+
     #[test]
     fn create_note_activity_minimal() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -779,7 +771,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_with_content_warning_sets_summary() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -807,7 +799,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_without_content_warning_omits_summary() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -840,7 +832,7 @@ mod tests {
             ],
             "endTime": "2026-08-01T00:00:00+00:00"
         });
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -879,7 +871,7 @@ mod tests {
             "options": [{"name": "A", "votes": 3}],
             "endTime": null
         });
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -921,7 +913,7 @@ mod tests {
             attachments: vec![],
             link_cards: vec![],
         };
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -949,7 +941,7 @@ mod tests {
 
     #[test]
     fn update_note_activity_has_distinct_id_and_type() {
-        let activity = build_update_note_activity(
+        let activity = update_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -1007,7 +999,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_unlisted_to_cc() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -1041,7 +1033,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_followers_only_to_cc() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -1070,7 +1062,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_with_quote_reply_uuid() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -1100,7 +1092,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_public_includes_mention_recipients_in_to() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",
@@ -1136,7 +1128,7 @@ mod tests {
 
     #[test]
     fn create_note_activity_followers_only_includes_mention_recipients_in_to() {
-        let activity = build_create_note_activity(
+        let activity = create_activity(
             &addr(),
             &NoteActivityParams {
                 local_domain: "seiran.example",

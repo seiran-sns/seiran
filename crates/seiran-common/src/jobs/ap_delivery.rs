@@ -55,20 +55,11 @@ pub async fn handle(
     };
 
     match kind {
-        ApDeliveryKind::PostToFollowers {
-            post_id,
-            body,
-            quote_url,
-            in_reply_to,
-        } => deliver_post_to_ap_followers(
-            &sender,
-            post_id,
-            body.as_deref(),
-            quote_url.as_deref(),
-            in_reply_to.as_deref(),
-        )
-        .await
-        .map_err(JobError::from),
+        ApDeliveryKind::PostToFollowers { post_id } => {
+            deliver_post_to_ap_followers(&sender, post_id)
+                .await
+                .map_err(JobError::from)
+        }
         ApDeliveryKind::DirectMessage { post_id } => deliver_direct_message_to_ap(&sender, post_id)
             .await
             .map_err(JobError::from),

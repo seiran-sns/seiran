@@ -356,42 +356,6 @@ pub async fn insert_link_card(pool: &PgPool, card: &NewLinkCard<'_>) -> Result<(
     .map(|_| ())
 }
 
-/// AP の `Document` として配るローカル添付（ストレージの公開 URL を持つもの）。
-#[derive(Debug, sqlx::FromRow)]
-pub struct LocalAttachmentRow {
-    pub post_id: i64,
-    pub url: String,
-    pub mime_type: String,
-    /// 動画・音声は持たないことがある。
-    pub width: Option<i32>,
-    pub height: Option<i32>,
-    /// 投稿者が付けた NSFW 指定。
-    pub is_sensitive: bool,
-}
-
-/// 投稿ごとのローカル添付を `position` 順に返す。
-pub async fn local_attachments_for_posts(
-    pool: &PgPool,
-    post_ids: &[i64],
-) -> Result<Vec<LocalAttachmentRow>, sqlx::Error> {
-    if post_ids.is_empty() {
-        return Ok(Vec::new());
-    }
-    sqlx::query_as(
-        "SELECT pa.post_id,
-                rtrim(sp.public_url, '/') || '/' || mf.storage_key AS url,
-                mf.mime_type, mf.width, mf.height, pa.is_sensitive
-         FROM post_attachments pa
-         JOIN media_files mf ON mf.id = pa.media_file_id
-         JOIN storage_providers sp ON sp.id = mf.storage_provider_id
-         WHERE pa.post_id = ANY($1)
-         ORDER BY pa.post_id, pa.position",
-    )
-    .bind(post_ids)
-    .fetch_all(pool)
-    .await
-}
-
 /// 投稿に NSFW 指定の添付が1つでもあるか。投稿単位でしか指定できない配送先（Bluesky の
 /// self-label）へ、添付ごとの指定を投稿全体の指定として伝えるのに使う。
 pub async fn post_has_sensitive_attachment(

@@ -140,12 +140,9 @@ pub async fn outbox_page(
 }
 
 /// ピン留めの公開投稿 `(id, body, created_at)`（ピン留めの新しい順）。
-pub async fn featured_posts(
-    pool: &PgPool,
-    actor_id: i64,
-) -> Result<Vec<(i64, String, DateTime<Utc>)>, sqlx::Error> {
-    sqlx::query_as(sqlx::AssertSqlSafe(format!(
-        "SELECT p.id, p.body, p.created_at
+pub async fn featured_posts(pool: &PgPool, actor_id: i64) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT p.id
          FROM pinned_posts pp
          JOIN posts p ON p.id = pp.post_id
          WHERE pp.actor_id = $1 AND {PUBLIC_POST_CONDITION}

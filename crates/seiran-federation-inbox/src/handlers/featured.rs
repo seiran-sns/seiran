@@ -5,9 +5,7 @@ use axum::{
 };
 use std::sync::Arc;
 
-use super::ap_collection::{
-    activity_json, fetch_attachment_documents, public_note, CollectionOwner,
-};
+use super::ap_collection::{activity_json, local_note};
 use crate::AppState;
 
 /// GET /users/:username/collections/featured
@@ -32,8 +30,6 @@ pub async fn featured_handler(
 
     let base = format!("https://{}", state.local_domain);
     let featured_uri = format!("{}/users/{}/collections/featured", base, username);
-    let actor_uri = format!("{}/users/{}", base, username);
-    let followers_uri = format!("{}/followers", actor_uri);
 
     // このエンドポイントは認証なしの完全匿名アクセスのため、followers_only/direct な
     // ピン留め投稿は常に除外する（可視性による閲覧制御）。
@@ -47,26 +43,13 @@ pub async fn featured_handler(
         }
     };
 
-    let post_ids: Vec<i64> = rows.iter().map(|(id, _, _)| *id).collect();
-    let mut att_map = fetch_attachment_documents(&state.db, &post_ids).await;
-    let owner = CollectionOwner {
-        actor_uri: &actor_uri,
-        followers_uri: &followers_uri,
-    };
-
     // featured collection は Note オブジェクトを直接（Create でラップせずに）並べる
-    // （Mastodon 等の実装と同じ慣習）。
+    // （Mastodon 等の実装と同じ慣習）。Note は配送と同じ`build_local_note`で組み立てる。
     let mut ordered_items = Vec::new();
-    for (post_id, body, created_at) in rows {
-        let note_id = format!("{}/notes/{}", base, post_id);
-        let attachments = att_map.remove(&post_id).unwrap_or_default();
-        ordered_items.push(public_note(
-            &owner,
-            &note_id,
-            &body,
-            &created_at.to_rfc3339(),
-            attachments,
-        ));
+    for post_id in rows {
+        if let Some(note) = local_note(&state, post_id, actor_id).await {
+            ordered_items.push(note.object);
+        }
     }
 
     let body = serde_json::json!({

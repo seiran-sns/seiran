@@ -304,3 +304,71 @@ async fn create_note_resolves_local_custom_emoji_shortcode_in_body() {
         .await
         .ok();
 }
+
+/// 返信ポストを `GET /notes/:id`（AP JSON）で取得すると `inReplyTo` に返信先の AP ID が入る。
+/// Misskey の「照会」等で URL から直接取り込まれる場合は Create を経由せずこの結果だけで
+/// 保存されるため、ここに `inReplyTo` が無いと通常ノートとして取り込まれてしまう。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn note_ap_json_includes_in_reply_to() {
+    let app = test_router().await;
+    let token = login_test_user(&app, "seiran1").await;
+    let nonce = chrono::Utc::now().timestamp_nanos_opt().unwrap_or(0);
+
+    let create = |text: String, reply_to_id: Option<String>| {
+        let mut body = serde_json::json!({
+            "text": text,
+            "deliver_to_fedi": false,
+            "deliver_to_bsky": false,
+        });
+        if let Some(id) = reply_to_id {
+            body["reply_to_id"] = serde_json::Value::String(id);
+        }
+        authed_json_request("POST", "/api/notes/create", &token, body)
+    };
+
+    let parent_res = app
+        .clone()
+        .oneshot(create(format!("返信先 {}", nonce), None))
+        .await
+        .unwrap();
+    assert_eq!(parent_res.status(), StatusCode::OK);
+    let parent_id = body_json(parent_res).await["id"]
+        .as_str()
+        .expect("id フィールドがありません")
+        .to_string();
+
+    let reply_res = app
+        .clone()
+        .oneshot(create(format!("返信 {}", nonce), Some(parent_id.clone())))
+        .await
+        .unwrap();
+    assert_eq!(reply_res.status(), StatusCode::OK);
+    let reply_id = body_json(reply_res).await["id"]
+        .as_str()
+        .expect("id フィールドがありません")
+        .to_string();
+
+    let fetch_ap = |id: &str| {
+        Request::builder()
+            .method("GET")
+            .uri(format!("/notes/{}", id))
+            .header("accept", "application/activity+json")
+            .body(Body::empty())
+            .unwrap()
+    };
+
+    let res = app.clone().oneshot(fetch_ap(&reply_id)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    let note = body_json(res).await;
+    let parent_ap_id = note["id"]
+        .as_str()
+        .expect("id がありません")
+        .replace(&reply_id, &parent_id);
+    assert_eq!(note["inReplyTo"], parent_ap_id, "{:?}", note);
+
+    // 返信でないポストには inReplyTo を付けない
+    let res = app.clone().oneshot(fetch_ap(&parent_id)).await.unwrap();
+    assert_eq!(res.status(), StatusCode::OK);
+    assert!(body_json(res).await.get("inReplyTo").is_none());
+}

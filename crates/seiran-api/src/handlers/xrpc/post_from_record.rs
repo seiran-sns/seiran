@@ -23,9 +23,7 @@ use seiran_common::{
 };
 
 use crate::error::ApiError;
-use crate::handlers::notes::delivery::{
-    ap_delivery_quote_fields, ap_quote_from_meta, resolve_reply_context,
-};
+use crate::handlers::notes::delivery::resolve_reply_context;
 use crate::AppState;
 
 use super::repo::resolve_blob_media_id;
@@ -164,7 +162,6 @@ pub async fn create_post_from_record(
     // ブロック関係にあれば拒否する。未取得の引用先は通常投稿として保存する。
     let mut quote_of_post_id: Option<i64> = None;
     let mut quote_notif_recipient: Option<i64> = None;
-    let mut ap_quote = None;
     if let Some(quote_uri) = &quote_uri {
         if let Ok(Some(qid)) = state.posts.find_id_by_at_uri(quote_uri).await {
             match state.posts.find_delivery_meta(qid).await {
@@ -178,7 +175,6 @@ pub async fn create_post_from_record(
                     if meta.actor_type == "local" && meta.actor_id != actor.id {
                         quote_notif_recipient = Some(meta.actor_id);
                     }
-                    ap_quote = ap_quote_from_meta(&meta);
                     quote_of_post_id = Some(qid);
                 }
                 Ok(None) => {}
@@ -191,13 +187,11 @@ pub async fn create_post_from_record(
     // （Bskyプロトコルには可視性の概念が無く、この経路の投稿は常にpublic（ロールによってはunlisted）のため、
     // `resolve_reply_context` の親可視性チェックは実質発生しない）。
     let mut reply_to_post_id: Option<i64> = None;
-    let mut ap_in_reply_to: Option<String> = None;
     let mut parent_local_actor_id: Option<i64> = None;
     if let Some(uri) = reply_parent_uri {
         if let Ok(Some(rid)) = state.posts.find_id_by_at_uri(uri).await {
             let ctx = resolve_reply_context(state, &rid.to_string(), actor.id).await?;
             reply_to_post_id = Some(rid);
-            ap_in_reply_to = ctx.ap_in_reply_to;
             parent_local_actor_id = ctx.parent_local_actor_id;
         }
     }
@@ -374,17 +368,9 @@ pub async fn create_post_from_record(
         .await
         .map_err(|e| ApiError::Internal(format!("[createRecord] ATP コミット失敗: {}", e)))?;
 
-    let (fedi_body, quote_url) = ap_delivery_quote_fields(&body_text, ap_quote);
+    // Note（本文・引用・返信先）は配送時に DB から組み立てる（`build_local_note`）。
     state
-        .enqueue_ap_delivery(
-            actor.id,
-            ApDeliveryKind::PostToFollowers {
-                post_id,
-                body: fedi_body,
-                quote_url,
-                in_reply_to: ap_in_reply_to,
-            },
-        )
+        .enqueue_ap_delivery(actor.id, ApDeliveryKind::PostToFollowers { post_id })
         .await;
 
     Ok(AtpPostRecordResult {
