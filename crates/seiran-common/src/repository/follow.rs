@@ -578,7 +578,7 @@ impl FollowRepository for PgFollowRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
-            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map, a.emoji_map, a.emoji_map,
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
@@ -613,7 +613,7 @@ impl FollowRepository for PgFollowRepository {
         since_id: Option<i64>,
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
-            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
@@ -709,7 +709,7 @@ impl FollowRepository for PgFollowRepository {
         limit: i64,
     ) -> Result<Vec<FollowListRow>, sqlx::Error> {
         sqlx::query_as::<_, FollowListRow>(
-            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name,
+            "SELECT f.id AS follow_id, a.id AS actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url,
                     f.created_at
