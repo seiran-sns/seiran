@@ -1,6 +1,6 @@
 import Avatar from "../note/Avatar";
-import EmojiText from "../note/EmojiText";
 import styles from "./UserItem.module.css";
+import DisplayName from "./DisplayName";
 
 export interface UserItemProps {
   avatarUrl?: string;
@@ -29,7 +29,7 @@ export default function UserItem({
   return (
     <div className={`${styles.userItem} ${className || ""}`}>
       <Avatar url={avatarUrl} name={name} size={avatarSize} />
-      <span className={styles.name}><EmojiText text={name} emojis={emojis} /></span>
+      <span className={styles.name}><DisplayName name={displayName} fallback={username} emojis={emojis} /></span>
     </div>
   );
 }

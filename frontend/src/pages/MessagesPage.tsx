@@ -1,10 +1,11 @@
-import { FormEvent, lazy, Suspense, useEffect, useRef, useState } from "react";
+import { FormEvent, Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, DmSession, getErrorMessage, Note } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import Avatar from "../components/note/Avatar";
 import EmojiText from "../components/note/EmojiText";
+import DisplayName from "../components/common/DisplayName";
 import MessageContent from "../components/note/MessageContent";
 import MessageContextMenu from "../components/note/MessageContextMenu";
 import MessageReactions from "../components/note/MessageReactions";
@@ -34,6 +35,23 @@ function peerLabel(session: DmSession, myActorId: string | undefined, t: (key: s
       return p.id === myActorId ? `${name} ${t("dm:messagesPage.selfSuffix")}` : name;
     })
     .join(", ");
+}
+
+/** `peerLabel` の画面表示版。表示名中のショートコードを画像に展開する。 */
+function PeerNames({ session, myActorId }: { session: DmSession; myActorId: string | undefined }) {
+  const { t } = useTranslation();
+  if (session.peers.length === 0) return <>{t("dm:messagesPage.unknownPeer")}</>;
+  return (
+    <>
+      {session.peers.map((p, i) => (
+        <Fragment key={p.id}>
+          {i > 0 && ", "}
+          <DisplayName name={p.displayName} fallback={p.username} emojis={p.emojis} />
+          {p.id === myActorId && ` ${t("dm:messagesPage.selfSuffix")}`}
+        </Fragment>
+      ))}
+    </>
+  );
 }
 
 /** `compose`: `/messages/new`（宛先未選択の作成画面）。幅広では `/messages` と同じ表示で、
@@ -243,7 +261,9 @@ export default function MessagesPage({ compose = false }: { compose?: boolean })
             >
               <Avatar url={s.peers[0]?.avatarUrl} name={peerLabel(s, user?.actor_id, t)} size={36} />
               <span className={styles.sessionInfo}>
-                <span className={styles.sessionName}>{peerLabel(s, user?.actor_id, t)}</span>
+                <span className={styles.sessionName}>
+                  <PeerNames session={s} myActorId={user?.actor_id} />
+                </span>
                 <span className={styles.sessionPreview}>
                   {s.lastMessage.contentWarning ? (
                     <>

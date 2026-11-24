@@ -66,6 +66,7 @@ pub struct KnownActorRow {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    pub emoji_map: Option<serde_json::Value>,
     pub avatar_url: Option<String>,
 }
 
@@ -77,7 +78,7 @@ pub async fn known_actors_by_ap_uris(
         return Ok(Vec::new());
     }
     sqlx::query_as(
-        "SELECT id, ap_uri, username, domain, display_name, avatar_url FROM actors WHERE ap_uri = ANY($1)",
+        "SELECT id, ap_uri, username, domain, display_name, emoji_map, avatar_url FROM actors WHERE ap_uri = ANY($1)",
     )
     .bind(ap_uris)
     .fetch_all(pool)

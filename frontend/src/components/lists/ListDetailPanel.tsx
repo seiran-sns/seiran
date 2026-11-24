@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ActorSuggestion, ListDetail } from "../../api/client";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/ListsSettings.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface ListDetailPanelProps {
   selectedId: string | null;
@@ -122,7 +123,7 @@ export default function ListDetailPanel({
                       )}
                     </span>
                     <span className={styles.suggestName}>
-                      {s.display_name || s.username}
+                      <DisplayName name={s.display_name} fallback={s.username} emojis={s.emojis} />
                       <span className={styles.suggestHandle}>
                         @{s.username}
                         {s.domain ? `@${s.domain}` : ""}
@@ -148,7 +149,7 @@ export default function ListDetailPanel({
               {m.avatar_url ? <img src={m.avatar_url} alt="" /> : <span>{(m.display_name || m.username)[0]?.toUpperCase()}</span>}
             </span>
             <span className={styles.memberName}>
-              {m.display_name || m.username}
+              <DisplayName name={m.display_name} fallback={m.username} emojis={m.emojis} />
               <span className={styles.memberHandle}>
                 @{m.username}
                 {m.domain ? `@${m.domain}` : ""}

@@ -213,6 +213,8 @@ pub struct FollowListItem {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
 }
 
@@ -230,6 +232,7 @@ impl From<seiran_common::repository::FollowListRow> for FollowListItem {
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             avatar_url,
         }
     }
@@ -323,19 +326,6 @@ pub struct ProfileField {
 /// 空配列として扱う（ベストエフォート、プロフィール表示自体は失敗させない）。
 fn profile_fields_from_json(v: &serde_json::Value) -> Vec<ProfileField> {
     serde_json::from_value(v.clone()).unwrap_or_default()
-}
-
-/// `actors.emoji_map`（JSONB、`:shortcode:` → 画像URL）を `HashMap` にデコードする。
-pub(crate) fn json_map_to_string_map(
-    v: &serde_json::Value,
-) -> std::collections::HashMap<String, String> {
-    v.as_object()
-        .map(|obj| {
-            obj.iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default()
 }
 
 #[derive(Serialize)]
@@ -1176,16 +1166,12 @@ async fn resolve_profile_emojis(
                 }
             }
         };
-        if let Some(m) = actor.emoji_map.as_ref() {
-            resolved.extend(json_map_to_string_map(m));
-        }
+        resolved.extend(seiran_common::emoji_map::to_string_map(
+            actor.emoji_map.as_ref(),
+        ));
         resolved
     } else {
-        actor
-            .emoji_map
-            .as_ref()
-            .map(json_map_to_string_map)
-            .unwrap_or_default()
+        seiran_common::emoji_map::to_string_map(actor.emoji_map.as_ref())
     }
 }
 
@@ -1445,7 +1431,7 @@ async fn fetch_remote_profile(
         at_handle: None,
         did_status: None,
         bio,
-        emojis: json_map_to_string_map(&emoji_map),
+        emojis: seiran_common::emoji_map::to_string_map(Some(&emoji_map)),
         avatar_url,
         banner_url,
         follow_status: "not_following".to_string(),
@@ -1819,6 +1805,8 @@ pub struct RemoteFollowSummaryItem {
     pub handle: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
 }
 
@@ -2083,6 +2071,7 @@ async fn resolve_remote_follow_items(
                 handle: row.username,
                 domain: row.domain,
                 display_name: row.display_name,
+                emojis: seiran_common::emoji_map::to_string_map(row.emoji_map.as_ref()),
                 avatar_url: row.avatar_url,
             },
         );
@@ -2102,6 +2091,7 @@ async fn resolve_remote_follow_items(
                     handle,
                     domain,
                     display_name: None,
+                    emojis: Default::default(),
                     avatar_url: None,
                 }
             }

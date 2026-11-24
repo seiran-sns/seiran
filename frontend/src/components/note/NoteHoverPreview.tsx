@@ -6,8 +6,9 @@ import Avatar from "./Avatar";
 import EmojiText from "./EmojiText";
 import ContentWarningText from "./ContentWarningText";
 import TwemojiEmoji from "../common/TwemojiEmoji";
-import { acct, displayName } from "../../lib/format";
+import { acct } from "../../lib/format";
 import styles from "./NoteHoverPreview.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface NoteHoverPreviewProps {
   noteId: string;
@@ -143,7 +144,7 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
                 />
                 <span className={styles.names}>
                   <span className={styles.name}>
-                  <EmojiText text={displayName(target)} emojis={target.emojis} />
+                  <DisplayName name={target.user.displayName} fallback={target.user.username} emojis={target.emojis} />
                 </span>
                   <span className={styles.acctText}>{acct(target)}</span>
                 </span>

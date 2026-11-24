@@ -56,11 +56,7 @@ pub async fn about(State(state): State<AppState>) -> Result<Json<AboutResponse>,
                 &state.local_domain,
                 r.actor_id,
             ),
-            emojis: r
-                .emoji_map
-                .as_ref()
-                .map(crate::handlers::users::json_map_to_string_map)
-                .unwrap_or_default(),
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             username: r.username,
             display_name: r.display_name,
         })

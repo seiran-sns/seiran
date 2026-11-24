@@ -338,19 +338,6 @@ pub struct NoteResponse {
     pub content_html: Option<String>,
 }
 
-/// `serde_json::Value`（JSONB由来のオブジェクト、`None`/非オブジェクトなら空）を
-/// `HashMap<String, String>` に変換する。カスタム絵文字マップ（shortcode→画像URL）の
-/// デコードに使う。
-fn json_map_to_string_map(v: Option<serde_json::Value>) -> HashMap<String, String> {
-    v.and_then(|v| v.as_object().cloned())
-        .map(|obj| {
-            obj.into_iter()
-                .filter_map(|(k, v)| v.as_str().map(|s| (k, s.to_string())))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 #[derive(Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct NoteUserInfo {
@@ -511,8 +498,10 @@ pub fn to_note_response(
     attachments: Vec<AttachmentResponse>,
     link_cards: Vec<LinkCardResponse>,
 ) -> NoteResponse {
-    let mut emojis = json_map_to_string_map(p.post_emoji_map);
-    emojis.extend(json_map_to_string_map(p.actor_emoji_map));
+    let mut emojis = seiran_common::emoji_map::to_string_map(p.post_emoji_map.as_ref());
+    emojis.extend(seiran_common::emoji_map::to_string_map(
+        p.actor_emoji_map.as_ref(),
+    ));
 
     let actor_type = if p.actor_type.is_empty() {
         "local".to_string()
@@ -680,7 +669,9 @@ pub fn to_reaction_event_response(r: ReactionFeedRow) -> ReactionEventResponse {
             is_blocked_by: None,
             is_repost_muted: None,
         },
-        target_user_emojis: json_map_to_string_map(r.target_actor_emoji_map),
+        target_user_emojis: seiran_common::emoji_map::to_string_map(
+            r.target_actor_emoji_map.as_ref(),
+        ),
     }
 }
 
@@ -735,6 +726,8 @@ pub struct RepostEntryResponse {
     /// フロント側でリンク化しない。
     pub id: String,
     pub user: NoteUserInfo,
+    /// `user` の表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: HashMap<String, String>,
     pub created_at: String,
     pub deleted: bool,
 }

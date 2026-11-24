@@ -21,6 +21,8 @@ pub struct FollowRequestItem {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub avatar_url: Option<String>,
 }
 
@@ -38,6 +40,7 @@ impl From<FollowListRow> for FollowRequestItem {
             username: r.username,
             domain: r.domain,
             display_name: r.display_name,
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             avatar_url,
         }
     }

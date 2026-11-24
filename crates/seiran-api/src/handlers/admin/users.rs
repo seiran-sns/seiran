@@ -49,11 +49,7 @@ impl From<AdminUserRow> for AdminUserResponse {
             avatar_url,
             totp_enabled: r.totp_enabled,
             passkey_count: r.passkey_count,
-            emojis: r
-                .emoji_map
-                .as_ref()
-                .map(crate::handlers::users::json_map_to_string_map)
-                .unwrap_or_default(),
+            emojis: seiran_common::emoji_map::to_string_map(r.emoji_map.as_ref()),
             withdrawn_at: r.withdrawn_at,
         }
     }

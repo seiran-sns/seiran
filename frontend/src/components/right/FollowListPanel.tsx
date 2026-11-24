@@ -9,6 +9,7 @@ import { getRemoteFollowSummary } from "../../lib/remoteFollowSummaryCache";
 import Avatar from "../note/Avatar";
 import panel from "../common/Panel.module.css";
 import styles from "./FollowListPanel.module.css";
+import DisplayName from "../common/DisplayName";
 
 const PAGE_SIZE = 30;
 
@@ -104,7 +105,7 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
         <Link key={item.follow_id} to={profilePath(item.username, item.domain)} className={styles.row}>
           <Avatar url={item.avatar_url} name={item.display_name || item.username} size={40} />
           <div className={styles.names}>
-            <span className={styles.displayName}>{item.display_name || item.username}</span>
+            <span className={styles.displayName}><DisplayName name={item.display_name} fallback={item.username} emojis={item.emojis} /></span>
             <span className={styles.acct}>
               @{item.username}
               {item.domain && item.domain !== window.location.hostname && `@${item.domain}`}
@@ -122,7 +123,7 @@ export default function FollowListPanel({ actorId, kind, onError, isRemoteFedi }
           <Link key={item.uri} to={profilePath(item.handle, item.domain)} className={styles.row}>
             <Avatar url={item.avatar_url} name={item.display_name || item.handle} size={40} />
             <div className={styles.names}>
-              <span className={styles.displayName}>{item.display_name || item.handle}</span>
+              <span className={styles.displayName}><DisplayName name={item.display_name} fallback={item.handle} emojis={item.emojis} /></span>
               <span className={styles.acct}>@{item.handle}@{item.domain}</span>
             </div>
           </Link>

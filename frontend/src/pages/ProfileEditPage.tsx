@@ -7,6 +7,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { calcLimit } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
+import DisplayName from "../components/common/DisplayName";
 
 /** プロフィール編集フォームで扱う固定スロット数（#62、Mastodon のデフォルト4件に合わせる）。 */
 const PROFILE_FIELD_SLOTS = 4;
@@ -357,7 +358,7 @@ export default function ProfileEditPage() {
                             )}
                           </span>
                           <span className={styles.suggestName}>
-                            {s.display_name || s.username}
+                            <DisplayName name={s.display_name} fallback={s.username} emojis={s.emojis} />
                             <span className={styles.suggestHandle}>
                               @{s.username}
                               {s.domain ? `@${s.domain}` : ""}
@@ -392,7 +393,7 @@ export default function ProfileEditPage() {
                     )}
                   </span>
                   <span className={styles.akaName}>
-                    {item.display_name || item.username}
+                    <DisplayName name={item.display_name} fallback={item.username} emojis={item.emojis} />
                     <span className={styles.akaHandle}>
                       @{item.username}
                       {item.domain ? `@${item.domain}` : ""}

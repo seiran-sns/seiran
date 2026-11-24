@@ -7,7 +7,7 @@ import { profilePath } from "../../lib/format";
 import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
 import RemoteImg from "../common/RemoteImg";
 import Avatar from "./Avatar";
-import EmojiText from "./EmojiText";
+import DisplayName from "../common/DisplayName";
 import NoteHoverPreview from "./NoteHoverPreview";
 import UserContextMenu from "./UserContextMenu";
 import UserHoverArea from "./UserHoverArea";
@@ -32,7 +32,6 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
-  const who = event.targetUser.displayName || event.targetUser.username;
   const relationshipTarget = toRelationshipTarget({
     id: event.targetUser.id,
     username: event.targetUser.username,
@@ -45,7 +44,13 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
       className={styles.userLink}
     />
   );
-  const emojiName = <EmojiText text={who} emojis={event.targetUserEmojis} />;
+  const emojiName = (
+    <DisplayName
+      name={event.targetUser.displayName}
+      fallback={event.targetUser.username}
+      emojis={event.targetUserEmojis}
+    />
+  );
 
   return (
     <div className={styles.item} onClick={() => navigate(`/notes/${event.targetNoteId}`)}>
@@ -72,7 +77,7 @@ export default function ReactionEventCard({ event }: ReactionEventCardProps) {
                 className={styles.avatarLink}
                 onClick={(e) => e.stopPropagation()}
               >
-                <Avatar url={event.targetUser.avatarUrl} name={who} size={20} />
+                <Avatar url={event.targetUser.avatarUrl} name={event.targetUser.displayName || event.targetUser.username} size={20} />
               </Link>
             </UserContextMenu>
           </UserHoverArea>

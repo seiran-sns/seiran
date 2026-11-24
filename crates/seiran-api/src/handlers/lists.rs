@@ -75,6 +75,8 @@ pub struct ListMemberResponse {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL）。
+    pub emojis: std::collections::HashMap<String, String>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     pub added_at: chrono::DateTime<chrono::Utc>,
@@ -93,6 +95,7 @@ impl From<ListMemberRow> for ListMemberResponse {
             username: row.username,
             domain: row.domain,
             display_name: row.display_name,
+            emojis: seiran_common::emoji_map::to_string_map(row.emoji_map.as_ref()),
             actor_type: row.actor_type,
             avatar_url,
             added_at: row.added_at,

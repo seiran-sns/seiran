@@ -25,7 +25,6 @@ import {
   acct,
   calcRemaining,
   countGraphemes,
-  displayName,
   extractBodyUrls,
 } from "../../lib/format";
 import { containsKnownCustomEmojiShortcode, fetchCustomEmojis } from "../../lib/customEmojis";
@@ -52,6 +51,7 @@ import Modal from "../common/Modal";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
+import DisplayName from "../common/DisplayName";
 
 // 絵文字データセット・ユーザー検索UIは、実際にボタンを押してピッカーを開くまでロードしない
 // （バンドルサイズ対策、`ReactionPicker`と同じ方針）。
@@ -913,7 +913,9 @@ export default function PostComposer({
         <div className={styles.replyBanner}>
           <span className={styles.replyTo}>
             {t("home:postComposer.replyToPrefix")}{" "}
-            <strong>{displayName(replyTo)}</strong> {acct(replyTo)}
+            <strong>
+              <DisplayName name={replyTo.user.displayName} fallback={replyTo.user.username} emojis={replyTo.emojis} />
+            </strong> {acct(replyTo)}
           </span>
           <span className={styles.replySnippet}>{replyTo.text}</span>
         </div>
@@ -922,7 +924,9 @@ export default function PostComposer({
         <div className={styles.replyBanner}>
           <span className={styles.replyTo}>
             {t("home:postComposer.quoteToPrefix")}{" "}
-            <strong>{displayName(quoteTo)}</strong> {acct(quoteTo)}
+            <strong>
+              <DisplayName name={quoteTo.user.displayName} fallback={quoteTo.user.username} emojis={quoteTo.emojis} />
+            </strong> {acct(quoteTo)}
           </span>
           <span className={styles.replySnippet}>{quoteTo.text}</span>
         </div>

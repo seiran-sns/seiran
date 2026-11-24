@@ -58,7 +58,7 @@ export default function ProfileFeedFilterBar({ filter, onChange }: ProfileFeedFi
       <FilterField
         label={t("profile:feedFilter.kindLabel")}
         placeholder={t("profile:feedFilter.kindPlaceholder")}
-        tags={filter.kinds.map(kindLabel)}
+        tags={filter.kinds.map((kind) => ({ key: kind, label: kindLabel(kind) }))}
         onClear={() => onChange({ ...filter, kinds: [] })}
       >
         <FilterCheckList
@@ -70,7 +70,7 @@ export default function ProfileFeedFilterBar({ filter, onChange }: ProfileFeedFi
       <FilterField
         label={t("profile:feedFilter.mediaLabel")}
         placeholder={t("profile:feedFilter.mediaPlaceholder")}
-        tags={filter.media.map(mediaLabel)}
+        tags={filter.media.map((media) => ({ key: media, label: mediaLabel(media) }))}
         onClear={() => onChange({ ...filter, media: [] })}
       >
         {/* 「なし」と他は同時に成り立たないので、片方を選んでいる間はもう片方を選べなくする。

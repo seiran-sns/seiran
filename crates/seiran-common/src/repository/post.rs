@@ -387,6 +387,8 @@ pub struct RepostEntry {
     pub username: String,
     pub domain: String,
     pub display_name: Option<String>,
+    /// 表示名中のカスタム絵文字（`:shortcode:` → 画像URL、`emoji_map::to_string_map` で変換）。
+    pub emoji_map: Option<serde_json::Value>,
     pub actor_type: String,
     pub avatar_url: Option<String>,
     pub created_at: DateTime<Utc>,
@@ -1444,7 +1446,7 @@ impl PostRepository for PgPostRepository {
 
     async fn reposts_of(&self, post_id: i64, limit: i64) -> Result<Vec<RepostEntry>, sqlx::Error> {
         sqlx::query_as::<_, RepostEntry>(
-            "SELECT p.id, p.actor_id, a.username, a.domain, a.display_name,
+            "SELECT p.id, p.actor_id, a.username, a.domain, a.display_name, a.emoji_map,
                     a.actor_type::text AS actor_type,
                     COALESCE(rtrim(asp.public_url, '/') || '/' || amf.storage_key, a.avatar_url) AS avatar_url,
                     p.created_at, p.deleted_at

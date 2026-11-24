@@ -41,6 +41,7 @@ import TwemojiText from "../components/common/TwemojiText";
 import blueskyLogo from "../assets/bluesky-logo.svg";
 import fediverseLogo from "../assets/fediverse-logo.svg";
 import styles from "./ProfilePage.module.css";
+import DisplayName from "../components/common/DisplayName";
 
 const PAGE_SIZE = 20;
 
@@ -353,7 +354,7 @@ export default function ProfilePage() {
 
           <div className={styles.names}>
             <span className={styles.displayName}>
-              <EmojiText text={profile.display_name || profile.username} emojis={profile.emojis} />
+              <DisplayName name={profile.display_name} fallback={profile.username} emojis={profile.emojis} />
             </span>
             {isLocal ? (
               <>
@@ -518,7 +519,7 @@ export default function ProfilePage() {
                       <span>{(item.display_name || item.username)[0]?.toUpperCase()}</span>
                     )}
                   </span>
-                  {item.display_name || item.username}
+                  <DisplayName name={item.display_name} fallback={item.username} emojis={item.emojis} />
                   {item.verified && (
                     <span
                       className={styles.akaBadgeVerified}

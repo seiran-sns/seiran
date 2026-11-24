@@ -32,11 +32,6 @@ export function formatCount(n: number): string {
   return `${intPart}${suffix}`;
 }
 
-/** ノートの表示名（display_name 優先、なければ username）。 */
-export function displayName(note: Note): string {
-  return note.user.displayName || note.user.username;
-}
-
 /** ノート投稿者の acct 文字列（`@user` または `@user@domain`）。ローカルユーザーは domain を省略。 */
 export function acct(note: Note): string {
   return note.user.domain && note.user.domain !== window.location.hostname

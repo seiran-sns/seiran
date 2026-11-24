@@ -3,9 +3,9 @@ import { useTranslation } from "react-i18next";
 import { api, SuspendedActor, getErrorMessage } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
-import EmojiText from "../note/EmojiText";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
+import DisplayName from "../common/DisplayName";
 
 const PAGE_SIZE = 30;
 
@@ -88,7 +88,7 @@ export default function SuspendedActorsPanel() {
               </div>
               <div className={styles.grow}>
                 <div className={styles.primaryText}>
-                  <EmojiText text={a.display_name || a.username} emojis={undefined} />
+                  <DisplayName name={a.display_name} fallback={a.username} emojis={a.emojis} />
                 </div>
                 <div className={styles.subText}>
                   @{a.username}

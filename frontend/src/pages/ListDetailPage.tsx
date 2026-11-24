@@ -8,6 +8,7 @@ import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ListDetailPage.module.css";
+import DisplayName from "../components/common/DisplayName";
 
 const PAGE_SIZE = 30;
 
@@ -85,7 +86,7 @@ export default function ListDetailPage() {
             {detail.members.map((m) => (
               <span key={m.actor_id} className={styles.memberBadge}>
                 {m.avatar_url ? <img src={m.avatar_url} alt="" /> : <span>{(m.display_name || m.username)[0]?.toUpperCase()}</span>}
-                {m.display_name || m.username}
+                <DisplayName name={m.display_name} fallback={m.username} emojis={m.emojis} />
               </span>
             ))}
           </div>

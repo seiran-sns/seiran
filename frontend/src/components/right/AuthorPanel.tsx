@@ -4,12 +4,12 @@ import { Link } from "react-router-dom";
 import { api, Note, UserProfile, getErrorMessage } from "../../api/client";
 import { profilePath, profileQuery } from "../../lib/format";
 import Avatar from "../note/Avatar";
-import EmojiText from "../note/EmojiText";
 import NoteCard from "../note/NoteCard";
 import ProfileBio from "../note/ProfileBio";
 import { useResolvedLinks } from "../../hooks/useResolvedLinks";
 import panel from "../common/Panel.module.css";
 import styles from "./AuthorPanel.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface AuthorPanelProps {
   /** 表示対象のポスト。リポストの場合は呼び出し側でリポスト元実体を渡すこと。 */
@@ -59,7 +59,7 @@ export default function AuthorPanel({ note }: AuthorPanelProps) {
         />
         <div className={styles.names}>
           <span className={styles.displayName}>
-            <EmojiText text={profile.display_name || profile.username} emojis={profile.emojis} />
+            <DisplayName name={profile.display_name} fallback={profile.username} emojis={profile.emojis} />
           </span>
           <span className={styles.acct}>
             @{profile.username}

@@ -38,4 +38,11 @@ describe("EmojiText", () => {
     const html = renderToStaticMarkup(<EmojiText text="こんにちは" />);
     expect(html).toBe("こんにちは");
   });
+
+  it("コロンなしのキー（Misskey本家仕様の user.emojis）でも展開する", () => {
+    const html = renderToStaticMarkup(
+      <EmojiText text="名前:blobcat:" emojis={{ blobcat: "https://example.com/blobcat.png" }} />,
+    );
+    expect(html).toContain("blobcat.png");
+  });
 });

@@ -4,6 +4,7 @@ import Avatar from "../note/Avatar";
 import UserIdPickerPanel from "../note/UserIdPickerPanel";
 import FilterField, { FilterBar, FilterCheckList } from "../common/FilterField";
 import styles from "./NotificationFilterBar.module.css";
+import DisplayName from "../common/DisplayName";
 
 /** 絞り込める通知種別（`NotificationItem.type` の値。Misskey 本家の種別名）。 */
 export const NOTIFICATION_TYPES = [
@@ -68,7 +69,7 @@ export default function NotificationFilterBar({ filter, onChange }: Notification
       <FilterField
         label={t("notifications:filter.typeLabel")}
         placeholder={t("notifications:filter.typePlaceholder")}
-        tags={filter.types.map(typeLabel)}
+        tags={filter.types.map((type) => ({ key: type, label: typeLabel(type) }))}
         onClear={() => onChange({ ...filter, types: [] })}
       >
         <FilterCheckList
@@ -80,7 +81,7 @@ export default function NotificationFilterBar({ filter, onChange }: Notification
       <FilterField
         label={t("notifications:filter.userLabel")}
         placeholder={t("notifications:filter.userPlaceholder")}
-        tags={filter.users.map((u) => u.display_name || u.username)}
+        tags={filter.users.map((u) => ({ key: u.actor_id, label: <DisplayName name={u.display_name} fallback={u.username} emojis={u.emojis} /> }))}
         onClear={() => onChange({ ...filter, users: [] })}
       >
         <UserIdPickerPanel onPick={addUser} />
@@ -90,7 +91,7 @@ export default function NotificationFilterBar({ filter, onChange }: Notification
               <li key={u.actor_id} className={styles.selectedUser}>
                 <Avatar url={u.avatar_url} name={u.display_name || u.username} size={24} />
                 <span className={styles.selectedName}>
-                  {u.display_name || u.username}
+                  <DisplayName name={u.display_name} fallback={u.username} emojis={u.emojis} />
                   <span className={styles.selectedHandle}>
                     @{u.username}
                     {u.domain ? `@${u.domain}` : ""}

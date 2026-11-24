@@ -7,6 +7,7 @@ import Avatar from "../note/Avatar";
 import panel from "../common/Panel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
 import styles from "./RepostListPanel.module.css";
+import DisplayName from "../common/DisplayName";
 
 interface RepostListPanelProps {
   /** リポスト元の実体。呼び出し側でリポスト元実体を渡すこと。 */
@@ -53,7 +54,9 @@ export default function RepostListPanel({ note }: RepostListPanelProps) {
           <>
             <Avatar url={r.user.avatarUrl} name={r.user.displayName || r.user.username} size={36} />
             <div className={styles.info}>
-              <span className={styles.name}>{r.user.displayName || r.user.username}</span>
+              <span className={styles.name}>
+                <DisplayName name={r.user.displayName} fallback={r.user.username} emojis={r.emojis} />
+              </span>
               <span className={styles.time}>
                 {formatDate(r.createdAt)}
                 {r.deleted && ` · ${t("home:noteDetailPage.repostUndone")}`}
