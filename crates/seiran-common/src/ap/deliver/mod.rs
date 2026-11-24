@@ -14,6 +14,7 @@
 mod activity;
 mod actor;
 mod announce;
+mod follow_response;
 mod infra;
 mod note;
 mod note_object;
@@ -25,6 +26,10 @@ pub use activity::{
 };
 pub use actor::{deliver_delete_actor, deliver_update_actor};
 pub use announce::{deliver_ap_announce, deliver_undo_announce};
+pub use follow_response::{
+    build_follow_response_activity, deliver_follow_response, enqueue_follow_response,
+    FollowResponse, FollowResponseKind,
+};
 pub use note::{
     deliver_delete_note, deliver_direct_message_to_ap, deliver_post_to_ap_followers,
     deliver_seiranpost_update,

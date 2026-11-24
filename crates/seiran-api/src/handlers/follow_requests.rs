@@ -124,16 +124,14 @@ pub async fn accept_follow_request(
 ) -> Result<Json<()>, ApiError> {
     let (follower, target) = load_pending_pair(&state, &user, follower_actor_id).await?;
 
-    let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
     let cfg = ApprovalConfig {
         db: &state.db,
         follows: &state.follows,
         notifications: &state.notifications,
         atp_service: &state.atp_service,
-        ap_client: &state.ap_client,
+        queue: &state.job_queue,
         stream_hub: &state.stream_hub,
         local_domain: state.local_domain.as_str(),
-        ap_private_key_pem: &ap_private_key_pem,
     };
     approve_pending_follow(&cfg, &follower, &target)
         .await
@@ -150,16 +148,14 @@ pub async fn reject_follow_request(
 ) -> Result<Json<()>, ApiError> {
     let (follower, target) = load_pending_pair(&state, &user, follower_actor_id).await?;
 
-    let ap_private_key_pem = state.secrets.ap_private_key_pem.clone().unwrap_or_default();
     let cfg = ApprovalConfig {
         db: &state.db,
         follows: &state.follows,
         notifications: &state.notifications,
         atp_service: &state.atp_service,
-        ap_client: &state.ap_client,
+        queue: &state.job_queue,
         stream_hub: &state.stream_hub,
         local_domain: state.local_domain.as_str(),
-        ap_private_key_pem: &ap_private_key_pem,
     };
     reject_pending_follow(&cfg, &follower, &target)
         .await

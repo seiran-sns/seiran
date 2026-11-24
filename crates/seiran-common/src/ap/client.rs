@@ -20,7 +20,9 @@ const KEY_CACHE_TTL: Duration = Duration::from_secs(3600);
 /// AP 通信エラー
 #[derive(Debug, thiserror::Error)]
 pub enum ApError {
-    #[error("HTTP エラー: {0}")]
+    /// reqwest のエラーは Display だけだと「error sending request」止まりで、タイムアウトか
+    /// 接続拒否かがログに残らないため、source chain まで連ねて出す。
+    #[error("HTTP エラー: {}", error_with_sources(.0))]
     Http(#[from] reqwest::Error),
     #[error("JSON パースエラー: {0}")]
     Json(#[from] serde_json::Error),
@@ -32,6 +34,22 @@ pub enum ApError {
     Gone(String),
     #[error("{0}")]
     Other(String),
+}
+
+/// エラーとその source chain を `: ` で連ねた文字列にする。
+fn error_with_sources(e: &dyn std::error::Error) -> String {
+    let mut out = e.to_string();
+    let mut source = e.source();
+    while let Some(s) = source {
+        let msg = s.to_string();
+        // hyper 等は下位エラーの文言を自分の Display にも含めることがあるので、重複は省く。
+        if !out.contains(&msg) {
+            out.push_str(": ");
+            out.push_str(&msg);
+        }
+        source = s.source();
+    }
+    out
 }
 
 /// 後方互換性のため `Result<_, String>` コンテキストで `?` が使えるようにする
@@ -679,10 +697,13 @@ impl ApClient {
         if !res.status().is_success() {
             let status = res.status();
             let body_text = res.text().await.unwrap_or_default();
-            return Err(ApError::Other(format!(
-                "POST レスポンスエラー {}: {}",
-                status, body_text
-            )));
+            let detail = format!("POST レスポンスエラー {}: {}", status, body_text);
+            // 410 は宛先アカウントが消えたことの明示なので、送り直しても届かない
+            // （ジョブのリトライを打ち切るため `Gone` にする）。
+            if status == reqwest::StatusCode::GONE {
+                return Err(ApError::Gone(detail));
+            }
+            return Err(ApError::Other(detail));
         }
 
         Ok(())
@@ -802,6 +823,36 @@ fn build_signing_string(
 mod tests {
     use super::*;
     use crate::traits::JobError;
+
+    #[derive(Debug)]
+    struct Layer(&'static str, Option<Box<Layer>>);
+    impl std::fmt::Display for Layer {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(self.0)
+        }
+    }
+    impl std::error::Error for Layer {
+        fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+            self.1.as_deref().map(|l| l as _)
+        }
+    }
+
+    #[test]
+    fn error_with_sources_joins_chain_and_skips_repeated_text() {
+        let e = Layer(
+            "error sending request",
+            Some(Box::new(Layer(
+                "client error (Connect)",
+                Some(Box::new(Layer("operation timed out", None))),
+            ))),
+        );
+        assert_eq!(
+            error_with_sources(&e),
+            "error sending request: client error (Connect): operation timed out"
+        );
+        let repeated = Layer("timed out", Some(Box::new(Layer("timed out", None))));
+        assert_eq!(error_with_sources(&repeated), "timed out");
+    }
 
     // ─── ApError → JobError（リトライ判断）─────────────────────────────────
 

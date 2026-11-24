@@ -188,7 +188,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 | Job | 用途 | 優先度 |
 |---|---|---|
 | `ActorHistorySync` | フォロー時の過去ログ取得（Bsky 300件、AP 30件） | 低 |
-| `ApDelivery{actor_id, kind}` | AP 配送。`kind` は `PostToFollowers`/`DirectMessage`/`Announce`/`UndoAnnounce`/`DeleteNote`/`Reaction`/`UndoReaction`/`UpdateActor`/`DeleteActor` | 高 |
+| `ApDelivery{actor_id, kind}` | AP 配送。`kind` は `PostToFollowers`/`DirectMessage`/`Announce`/`UndoAnnounce`/`DeleteNote`/`Reaction`/`UndoReaction`/`UpdateActor`/`DeleteActor`/`FollowResponse`（受信 Follow への Accept/Reject。他の配送より長く、合計おおむね3日リトライする） | 高 |
 | `InboundActivityProcess` | 受信アクティビティの解析・保存（inbox は署名検証だけして 202 を返す） | 中 |
 | `ActorMetadataResolve` | 相互申告マージの相手を取りに行く（`docs/protocols.md` 11節） | 低 |
 | `AtpRepositoryPublish` | 使われていない（enqueue する箇所が無い） | — |

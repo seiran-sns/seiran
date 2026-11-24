@@ -144,6 +144,13 @@ pub enum ApDeliveryKind {
     SeiranPostUpdate { post_id: i64 },
     /// Delete(Actor)（退会）を配送する。
     DeleteActor,
+    /// 受信 Follow への Accept / Reject を相手の inbox へ送る（`ap::enqueue_follow_response`）。
+    /// アクティビティは積む時点で組み立てて持たせ、送り直しの間も同じ id で届くようにする。
+    /// 他の配送より長く（おおむね3日）送り直す（`queue::worker::retry_config_for`）。
+    FollowResponse {
+        inbox: String,
+        activity: serde_json::Value,
+    },
 }
 
 /// リアクション切替時に取り消す旧リアクションの情報。

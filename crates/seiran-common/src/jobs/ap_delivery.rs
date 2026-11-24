@@ -10,8 +10,8 @@ use crate::ap::deliver::ApSender;
 use crate::ap::{
     deliver_ap_announce, deliver_ap_poll_vote, deliver_ap_reaction, deliver_ap_undo_reaction,
     deliver_delete_actor, deliver_delete_note, deliver_direct_message_to_ap,
-    deliver_post_to_ap_followers, deliver_seiranpost_update, deliver_undo_announce,
-    deliver_update_actor,
+    deliver_follow_response, deliver_post_to_ap_followers, deliver_seiranpost_update,
+    deliver_undo_announce, deliver_update_actor,
 };
 use crate::queue::worker::JobContext;
 use crate::traits::{ApDeliveryKind, JobError};
@@ -147,5 +147,10 @@ pub async fn handle(
         ApDeliveryKind::SeiranPostUpdate { post_id } => deliver_seiranpost_update(&sender, post_id)
             .await
             .map_err(JobError::from),
+        ApDeliveryKind::FollowResponse { inbox, activity } => {
+            deliver_follow_response(&sender, &inbox, &activity)
+                .await
+                .map_err(JobError::from)
+        }
     }
 }

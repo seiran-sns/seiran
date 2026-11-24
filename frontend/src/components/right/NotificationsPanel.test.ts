@@ -76,6 +76,32 @@ describe("describeNotification（AP Move受信時の独自拡張通知）", () =
   });
 });
 
+describe("describeNotification（通知元ユーザーのハンドル併記）", () => {
+  it("Fedi ユーザーは @username@host を併記する", () => {
+    const n = makeReactionNotification({
+      type: "follow",
+      user: { id: "1", username: "alice", host: "fedi.example", name: "Alice" },
+    });
+    expect(describeNotification(n).handleSuffix).toBe("（@alice@fedi.example）");
+  });
+
+  it("Bsky ユーザー（host が空文字）はハンドルを @handle で併記する", () => {
+    const n = makeReactionNotification({
+      type: "follow",
+      user: { id: "1", username: "alice.bsky.social", host: "", name: "Alice" },
+    });
+    expect(describeNotification(n).handleSuffix).toBe("（@alice.bsky.social）");
+  });
+
+  it("ローカルユーザー（host が null）は併記しない", () => {
+    const n = makeReactionNotification({
+      type: "follow",
+      user: { id: "1", username: "alice", host: null, name: "Alice" },
+    });
+    expect(describeNotification(n).handleSuffix).toBe("");
+  });
+});
+
 describe("resolveTargetNoteId（リポスト通知のダイジェスト対象は元投稿にする）", () => {
   it("renote通知（Misskey本家仕様のリポスト種別名）はリポストラッパー自身ではなく note.renote.id を返す", () => {
     const n = makeReactionNotification({

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
-import { api, getErrorMessage, NotificationItem } from "../../api/client";
+import { api, getErrorMessage, NotificationItem, NotificationUser } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
@@ -78,6 +78,14 @@ export function resolveClickTargetNoteId(n: NotificationItem): string | undefine
   return n.note?.id;
 }
 
+/** リモートユーザーのハンドル（ローカルユーザーは空文字）。Bsky ユーザーは `host` が
+ * 空文字で `username` がハンドルそのもの（`alice.bsky.social`）なので `@` だけを付ける
+ * （ローカルの `host` は null）。 */
+export function remoteHandle(u: NotificationUser | undefined): string {
+  if (!u?.username || u.host == null) return "";
+  return u.host ? `@${u.username}@${u.host}` : `@${u.username}`;
+}
+
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `DisplayName` を通す前提でプレーンテキストのまま返す。 */
 export function describeNotification(n: NotificationItem): {
@@ -90,13 +98,10 @@ export function describeNotification(n: NotificationItem): {
   newHandle?: string;
 } {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
-  const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
+  const handle = remoteHandle(n.user);
   const handleSuffix = handle ? `（${handle}）` : "";
   const whoEmojis = n.user?.emojis;
-  const newHandle =
-    n.relatedUser?.username && n.relatedUser?.host
-      ? `@${n.relatedUser.username}@${n.relatedUser.host}`
-      : n.relatedUser?.name || n.relatedUser?.username;
+  const newHandle = remoteHandle(n.relatedUser) || n.relatedUser?.name || n.relatedUser?.username;
   switch (n.type) {
     case "reaction": {
       // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
