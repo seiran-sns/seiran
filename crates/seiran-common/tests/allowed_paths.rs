@@ -195,6 +195,12 @@ fn allowlist_covers_every_route() {
         "/twemoji/1f004.svg",
         "/twemoji/1f3f3-fe0f-200d-1f308.svg",
         "/tags/日本語",
+        // プロフィール（`/:acct`）の acct の書き方
+        "/@alice",
+        "/@alice@example.com",
+        "/@alice.bsky.social",
+        "/@did:plc:ewvi7nxzyoun6zhxrhs64oiz",
+        "/@did:web:example.com",
         "/manifest.json",
         "/robots.txt",
         "/url",
