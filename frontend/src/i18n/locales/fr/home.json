@@ -71,6 +71,8 @@
     "pollBackToOptions": "Retour aux options",
     "pollShowResults": "Afficher les résultats",
     "pollClosed": "Sondage terminé",
+    "likeButton": "J'aime",
+    "unlikeButton": "Je n'aime plus",
     "reportButton": "Rapport",
     "reportSubject": "Message de @{{username}}",
     "originalLinkTitle": "Ce message est un duplicata délivré via un pont/fédération. Accédez au message d'origine.",

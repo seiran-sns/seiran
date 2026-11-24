@@ -205,9 +205,7 @@ export default function NoteCardActions({
         }
       : {
           key: "reaction",
-          label: t(heartActive ? "home:quickReaction.removeTitle" : "home:quickReaction.reactTitle", {
-            emoji: QUICK_REACTION_HEART,
-          }),
+          label: `${QUICK_REACTION_HEART} ${t(heartActive ? "home:noteCard.unlikeButton" : "home:noteCard.likeButton")}`,
           onClick: () =>
             onToggleReaction(heartActive && myReaction ? myReaction.emoji : QUICK_REACTION_HEART),
           disabled: reactionDisabled,
