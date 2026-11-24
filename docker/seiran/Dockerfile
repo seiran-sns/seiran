@@ -57,6 +57,9 @@ WORKDIR /app
 COPY --from=server /seiran-server /usr/local/bin/seiran-server
 COPY --from=frontend /src/frontend/dist /usr/share/seiran/frontend
 COPY docker/seiran/entrypoint.sh /usr/local/bin/seiran-entrypoint
+# 前段（Cloudflare Tunnel 等）に登録するパスの許可リスト。運用側のスクリプトが版を上げる前に
+# イメージから取り出し、前段の設定と突き合わせる（docs/architecture.md 3.1節）。
+COPY docker/seiran/allowed-paths.txt /usr/share/seiran/allowed-paths.txt
 RUN chmod +x /usr/local/bin/seiran-entrypoint \
     && mkdir -p /app/config \
     && chown -R seiran:seiran /app

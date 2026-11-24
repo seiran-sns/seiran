@@ -1,0 +1,38 @@
+# seiran が外部に公開する URL パスの許可リスト。
+#
+# 前段（Cloudflare Tunnel の ingress 等）でこのリストに当たるパスだけを seiran へ通し、
+# それ以外（脆弱性スキャン等）を手前で 404 にするためのもの。公開イメージでは
+# /usr/share/seiran/allowed-paths.txt に置く（docs/architecture.md 3.3節）。
+#
+# 書式:
+# - `[apex]` はインスタンスのドメイン（LOCAL_DOMAIN）、`[subdomains]` はそのサブドメイン
+#   （`*.LOCAL_DOMAIN`。ATP ハンドル `{username}.{domain}` の検証用）に向けたパス。
+# - 1行に1つの正規表現。前段では1行を1つのルールとして登録する。
+# - 照合先はパーセントデコード済みのパス（クエリ文字列を含まない）。部分一致で照合される
+#   ので、各行を `^` で始める。
+# - 文法は RE2（Go の regexp。cloudflared が使う）と PCRE の共通部分に限る（後方参照・
+#   先読み等は使わない）。
+#
+# バックエンドと SPA の全ルートがどれかの行に当たることを
+# crates/seiran-common/tests/allowed_paths.rs が検査する。
+
+[apex]
+# トップページ
+^/$
+# 自前 API・Misskey/Mastodon 互換 API・AT Protocol XRPC
+^/(api|xrpc)/
+# WebFinger・NodeInfo・ATP の DID 解決
+^/\.well-known/(webfinger|nodeinfo|atproto-did|did\.json)$
+^/nodeinfo/2\.[01]$
+# ActivityPub（アクター・inbox・ノート・Announce）とプロフィールの OGP
+^/(inbox|users/[A-Za-z0-9_-]+(/(inbox|outbox|lists(/[^/]+)?|collections/featured))?|(notes|announces)/[0-9]+|@[^/]+)$
+# 単独のバックエンドのパス。manifest.json・robots.txt・url・emojis・avatar・emoji は
+# 他のサーバー・Misskey 系クライアントが Misskey と同じ URL として取りに来るもの
+^/(health|favicon\.ico|manifest\.(webmanifest|json)|robots\.txt|url|emojis/[^/]+|avatar/@[^/]+|emoji/[^/]+|streaming|proxy(/.*)?|(miauth|auth)/[^/]+|oauth/(authorize|token|revoke))$
+# フロントエンドのビルド成果物
+^/(assets/[A-Za-z0-9_][A-Za-z0-9_.-]*\.(js|css|woff2?|png|svg|webp)|twemoji/[0-9a-f-]+\.svg)$
+# SPA のページ（直接開く・再読み込みするとバックエンドが index.html を返す）
+^/(search|notifications|about|profile|messages(/(new|[0-9]+))?|login|register(/migrate)?|forgot-password|verify-email(-change)?|totp-disable|reset-password|oauth-connect|admin(/[a-z-]+)?|settings(/[a-z-]+)?|lists/[0-9]+|(tags|connect|misskey-connect)/[^/]+)$
+
+[subdomains]
+^/\.well-known/atproto-did$
