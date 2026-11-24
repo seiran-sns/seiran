@@ -1,4 +1,5 @@
 use super::*;
+use crate::ap::{enqueue_follow_response, FollowResponse, FollowResponseKind};
 use crate::repository::NewNotification;
 
 // Follow アクティビティを処理し Accept を送信する
@@ -87,12 +88,11 @@ pub(super) async fn handle_follow(
                 local_username
             );
             return respond_to_follow(
-                "Reject",
+                FollowResponseKind::Reject,
                 &activity,
-                local_username,
+                &local_actor,
                 &remote.inbox,
                 inbox,
-                ap_client,
             )
             .await;
         }
@@ -162,62 +162,44 @@ pub(super) async fn handle_follow(
         tracing::error!("[Follow] notifications INSERT 失敗: {}", e);
     }
 
-    // Accept アクティビティを構築して送信
     respond_to_follow(
-        "Accept",
+        FollowResponseKind::Accept,
         &activity,
-        local_username,
+        &local_actor,
         &remote.inbox,
         inbox,
-        ap_client,
     )
     .await?;
 
     tracing::info!(
-        "[Follow] {} → {} フォロー完了・Accept 送信済み",
+        "[Follow] {} → {} フォロー完了・Accept 送信を予約",
         follower_uri,
         local_username
     );
     Ok(())
 }
 
-/// 受信した Follow に Accept / Reject を返す。
+/// 受信した Follow への Accept / Reject の送信をジョブキューに積む。送信の失敗で
+/// Follow の処理（関係の確定・通知）をやり直さないよう、ここでは送らない。
 async fn respond_to_follow(
-    kind: &str,
+    kind: FollowResponseKind,
     activity: &serde_json::Value,
-    local_username: &str,
+    local_actor: &crate::repository::Actor,
     remote_inbox: &str,
     inbox: &InboxContext,
-    ap_client: &ApClient,
 ) -> Result<(), String> {
-    let local_actor_uri = format!("https://{}/users/{}", inbox.local_domain, local_username);
-    let response_id = format!(
-        "https://{}/{}s/{}",
-        inbox.local_domain,
-        kind.to_ascii_lowercase(),
-        generate_snowflake_id(chrono::Utc::now())
-    );
-    let actor_key_id = format!("{}#main-key", local_actor_uri);
-
-    let response = serde_json::json!({
-        "@context": "https://www.w3.org/ns/activitystreams",
-        "type": kind,
-        "id": response_id,
-        "actor": local_actor_uri,
-        "object": activity
-    });
-    let body = serde_json::to_string(&response)
-        .map_err(|e| format!("{} シリアライズ失敗: {}", kind, e))?;
-
-    ap_client
-        .sign_and_post(
+    enqueue_follow_response(
+        inbox.queue.as_ref(),
+        &FollowResponse {
+            kind,
+            local_domain: inbox.local_domain.as_str(),
+            local_actor_id: local_actor.id,
+            local_username: &local_actor.username,
+            follow_activity: activity,
             remote_inbox,
-            &body,
-            &actor_key_id,
-            &inbox.ap_private_key_pem,
-        )
-        .await?;
-    Ok(())
+        },
+    )
+    .await
 }
 
 // Accept(Follow) を受け取り follows.status を accepted に更新する

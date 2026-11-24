@@ -14,22 +14,23 @@ use std::sync::Arc;
 use serde_json::json;
 use sqlx::PgPool;
 
-use crate::ap::ApClient;
+use crate::ap::{enqueue_follow_response, FollowResponse, FollowResponseKind};
 use crate::atp::service::AtpCommitService;
 use crate::generate_snowflake_id;
 use crate::jetstream_control::touch_jetstream_wanted_dids;
 use crate::repository::{Actor, FollowRepository, NotificationKind, NotificationRepository};
 use crate::streaming::StreamHub;
+use crate::traits::JobQueue;
 
 pub struct ApprovalConfig<'a> {
     pub db: &'a PgPool,
     pub follows: &'a Arc<dyn FollowRepository>,
     pub notifications: &'a Arc<dyn NotificationRepository>,
     pub atp_service: &'a Arc<AtpCommitService>,
-    pub ap_client: &'a Arc<ApClient>,
+    /// Fedi フォロワーへの Accept / Reject の送信を積む（`ap::enqueue_follow_response`）。
+    pub queue: &'a Arc<dyn JobQueue>,
     pub stream_hub: &'a Arc<StreamHub>,
     pub local_domain: &'a str,
-    pub ap_private_key_pem: &'a str,
 }
 
 /// 承認待ちフォローリクエストを承認する。`follower` がローカルアクターなら、承認まで
@@ -91,42 +92,7 @@ pub async fn approve_pending_follow(
             .map_err(|e| format!("follows UPDATE 失敗: {}", e))?;
 
         if follower.actor_type != "bsky" {
-            if let (Some(inbox), Some(follower_ap_uri)) =
-                (follower.ap_inbox_url.as_deref(), follower.ap_uri.as_deref())
-            {
-                let target_uri = format!("https://{}/users/{}", cfg.local_domain, target.username);
-                let actor_key_id = format!("{}#main-key", target_uri);
-                let object = cfg
-                    .follows
-                    .find_pending_follow_activity(follower.id, target.id)
-                    .await
-                    .ok()
-                    .flatten()
-                    .unwrap_or_else(|| {
-                        json!({ "type": "Follow", "actor": follower_ap_uri, "object": target_uri })
-                    });
-                let accept_id = format!(
-                    "https://{}/accepts/{}",
-                    cfg.local_domain,
-                    generate_snowflake_id(chrono::Utc::now())
-                );
-                let accept = json!({
-                    "@context": "https://www.w3.org/ns/activitystreams",
-                    "type": "Accept",
-                    "id": accept_id,
-                    "actor": target_uri,
-                    "object": object,
-                });
-                if let Ok(body) = serde_json::to_string(&accept) {
-                    if let Err(e) = cfg
-                        .ap_client
-                        .sign_and_post(inbox, &body, &actor_key_id, cfg.ap_private_key_pem)
-                        .await
-                    {
-                        tracing::error!("[follow_approval] AP Accept 送信失敗: {}", e);
-                    }
-                }
-            }
+            send_follow_response(cfg, FollowResponseKind::Accept, follower, target).await;
         }
     }
     Ok(())
@@ -141,42 +107,7 @@ pub async fn reject_pending_follow(
     target: &Actor,
 ) -> Result<(), String> {
     if follower.actor_type != "local" && follower.actor_type != "bsky" {
-        if let (Some(inbox), Some(follower_ap_uri)) =
-            (follower.ap_inbox_url.as_deref(), follower.ap_uri.as_deref())
-        {
-            let target_uri = format!("https://{}/users/{}", cfg.local_domain, target.username);
-            let actor_key_id = format!("{}#main-key", target_uri);
-            let object = cfg
-                .follows
-                .find_pending_follow_activity(follower.id, target.id)
-                .await
-                .ok()
-                .flatten()
-                .unwrap_or_else(
-                    || json!({ "type": "Follow", "actor": follower_ap_uri, "object": target_uri }),
-                );
-            let reject_id = format!(
-                "https://{}/rejects/{}",
-                cfg.local_domain,
-                generate_snowflake_id(chrono::Utc::now())
-            );
-            let reject = json!({
-                "@context": "https://www.w3.org/ns/activitystreams",
-                "type": "Reject",
-                "id": reject_id,
-                "actor": target_uri,
-                "object": object,
-            });
-            if let Ok(body) = serde_json::to_string(&reject) {
-                if let Err(e) = cfg
-                    .ap_client
-                    .sign_and_post(inbox, &body, &actor_key_id, cfg.ap_private_key_pem)
-                    .await
-                {
-                    tracing::error!("[follow_approval] AP Reject 送信失敗: {}", e);
-                }
-            }
-        }
+        send_follow_response(cfg, FollowResponseKind::Reject, follower, target).await;
     }
 
     cfg.follows
@@ -184,4 +115,46 @@ pub async fn reject_pending_follow(
         .await
         .map_err(|e| format!("follows DELETE 失敗: {}", e))?;
     Ok(())
+}
+
+/// 承認待ちだった Fedi フォロワーへ Accept / Reject の送信を積む。object には受信時に
+/// 保存した Follow アクティビティをそのまま使う（id を含めて返さないと相手が自分の Follow
+/// への応答と認識できない実装があるため）。保存が無ければ最小限の Follow を組み立てる。
+/// 積めなくても承認/拒否自体は成立させる（DB 上の関係は既に確定済みのため）。
+async fn send_follow_response(
+    cfg: &ApprovalConfig<'_>,
+    kind: FollowResponseKind,
+    follower: &Actor,
+    target: &Actor,
+) {
+    let (Some(inbox), Some(follower_ap_uri)) =
+        (follower.ap_inbox_url.as_deref(), follower.ap_uri.as_deref())
+    else {
+        return;
+    };
+    let target_uri = format!("https://{}/users/{}", cfg.local_domain, target.username);
+    let object = cfg
+        .follows
+        .find_pending_follow_activity(follower.id, target.id)
+        .await
+        .ok()
+        .flatten()
+        .unwrap_or_else(
+            || json!({ "type": "Follow", "actor": follower_ap_uri, "object": target_uri }),
+        );
+    if let Err(e) = enqueue_follow_response(
+        cfg.queue.as_ref(),
+        &FollowResponse {
+            kind,
+            local_domain: cfg.local_domain,
+            local_actor_id: target.id,
+            local_username: &target.username,
+            follow_activity: &object,
+            remote_inbox: inbox,
+        },
+    )
+    .await
+    {
+        tracing::error!("[follow_approval] {}", e);
+    }
 }

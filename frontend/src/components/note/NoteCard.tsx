@@ -33,6 +33,7 @@ import NoteCardActions from "./NoteCardActions";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
 import UserContextMenu from "./UserContextMenu";
+import UserLinkTag from "./UserLinkTag";
 import UserHoverPopover from "./UserHoverPopover";
 import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useComposer } from "../../contexts/ComposerContext";
@@ -833,11 +834,16 @@ function RepostRail({ note }: { note: Note }) {
   return (
     <div className={styles.rail}>
       <TwemojiEmoji emoji="🔁" />{" "}
-      <UserContextMenu target={repostTarget}>
+      <UserLinkTag
+        target={repostTarget}
+        to={profilePath(note.user.username, note.user.domain)}
+        className={styles.repostUser}
+        title={acct(note)}
+      >
         <strong>
           <DisplayName name={note.user.displayName} fallback={note.user.username} emojis={note.emojis} />
         </strong>
-      </UserContextMenu>{" "}
+      </UserLinkTag>{" "}
       {t("home:noteCard.repostedConnector")}{" "}
       <Link
         to={`/notes/${note.id}`}

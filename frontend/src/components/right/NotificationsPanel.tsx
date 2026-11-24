@@ -2,13 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import i18n from "../../i18n";
-import { api, getErrorMessage, NotificationItem } from "../../api/client";
+import { api, getErrorMessage, NotificationItem, NotificationUser } from "../../api/client";
 import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { useToast } from "../../contexts/ToastContext";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
-import { profilePath } from "../../lib/format";
+import { profilePath, userAcct } from "../../lib/format";
 import { parseReactionContent } from "../../lib/customEmojis";
 import { isSelfUser, toRelationshipTarget } from "../../lib/userRelationship";
 import RemoteImg from "../common/RemoteImg";
@@ -78,6 +78,12 @@ export function resolveClickTargetNoteId(n: NotificationItem): string | undefine
   return n.note?.id;
 }
 
+/** 通知のユーザーの acct（`@user`・`@user@host`）。Bsky ユーザーは `host` が空文字で
+ * `username` がハンドルそのもの（`alice.bsky.social`）なので `@handle` になる。 */
+export function notificationUserAcct(u: NotificationUser | undefined): string | undefined {
+  return u?.username ? userAcct(u.username, u.host) : undefined;
+}
+
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
  * `who`（表示名部分）は呼び出し側で `DisplayName` を通す前提でプレーンテキストのまま返す。 */
 export function describeNotification(n: NotificationItem): {
@@ -86,16 +92,17 @@ export function describeNotification(n: NotificationItem): {
   i18nKey: string;
   who: string;
   whoEmojis?: Record<string, string>;
-  handleSuffix: string;
+  /** 通知元ユーザーの acct。名前のツールチップに出す。 */
+  whoAcct?: string;
   newHandle?: string;
 } {
   const who = n.user?.name || n.user?.username || i18n.t("notifications:notificationsPanel.unknownUser");
-  const handle = n.user?.username && n.user?.host ? `@${n.user.username}@${n.user.host}` : "";
-  const handleSuffix = handle ? `（${handle}）` : "";
+  const whoAcct = notificationUserAcct(n.user);
   const whoEmojis = n.user?.emojis;
+  // 引っ越し先は文中に出す。リモートなら acct、ローカル（host が null）なら名前。
   const newHandle =
-    n.relatedUser?.username && n.relatedUser?.host
-      ? `@${n.relatedUser.username}@${n.relatedUser.host}`
+    n.relatedUser?.host != null
+      ? notificationUserAcct(n.relatedUser)
       : n.relatedUser?.name || n.relatedUser?.username;
   switch (n.type) {
     case "reaction": {
@@ -112,32 +119,32 @@ export function describeNotification(n: NotificationItem): {
         i18nKey: "notifications:notificationsPanel.reactionText",
         who,
         whoEmojis,
-        handleSuffix,
+        whoAcct,
       };
     }
     case "follow":
-      return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", who, whoEmojis, handleSuffix };
+      return { icon: "➕", i18nKey: "notifications:notificationsPanel.followText", who, whoEmojis, whoAcct };
     // バックエンド`to_misskey_notification_type`が内部種別`followRequest`をMisskey本家の
     // `receiveFollowRequest`へ変換して返すため、ここでもその値を見る（`repost`→`renote`と同様）。
     case "receiveFollowRequest":
-      return { icon: "🙋", i18nKey: "notifications:notificationsPanel.followRequestText", who, whoEmojis, handleSuffix };
+      return { icon: "🙋", i18nKey: "notifications:notificationsPanel.followRequestText", who, whoEmojis, whoAcct };
     case "followRequestAccepted":
-      return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", who, whoEmojis, handleSuffix };
+      return { icon: "🤝", i18nKey: "notifications:notificationsPanel.followAcceptedText", who, whoEmojis, whoAcct };
     case "mention":
-      return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", who, whoEmojis, handleSuffix };
+      return { icon: "📣", i18nKey: "notifications:notificationsPanel.mentionText", who, whoEmojis, whoAcct };
     case "reply":
-      return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", who, whoEmojis, handleSuffix };
+      return { icon: "💬", i18nKey: "notifications:notificationsPanel.replyText", who, whoEmojis, whoAcct };
     case "renote":
-      return { icon: "🔁", i18nKey: "notifications:notificationsPanel.repostText", who, whoEmojis, handleSuffix };
+      return { icon: "🔁", i18nKey: "notifications:notificationsPanel.repostText", who, whoEmojis, whoAcct };
     case "quote":
-      return { icon: "❝", i18nKey: "notifications:notificationsPanel.quoteText", who, whoEmojis, handleSuffix };
+      return { icon: "❝", i18nKey: "notifications:notificationsPanel.quoteText", who, whoEmojis, whoAcct };
     case "moveRefollowed":
       return {
         icon: "🚚",
         i18nKey: "notifications:notificationsPanel.moveRefollowedText",
         who,
         whoEmojis,
-        handleSuffix,
+        whoAcct,
         newHandle,
       };
     case "moveAlreadyFollowing":
@@ -146,11 +153,11 @@ export function describeNotification(n: NotificationItem): {
         i18nKey: "notifications:notificationsPanel.moveAlreadyFollowingText",
         who,
         whoEmojis,
-        handleSuffix,
+        whoAcct,
         newHandle,
       };
     default:
-      return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", who, whoEmojis, handleSuffix };
+      return { icon: "🔔", i18nKey: "notifications:notificationsPanel.genericText", who, whoEmojis, whoAcct };
   }
 }
 
@@ -446,7 +453,7 @@ export default function NotificationsPanel({
 
   // 通知1件のカード。重ねるまとまりの中では li ではなく div にする（li は CardStack が持つ）。
   const renderCard = (n: NotificationItem, stacked: boolean) => {
-    const { icon, iconUrl, i18nKey, who, whoEmojis, handleSuffix, newHandle } = describeNotification(n);
+    const { icon, iconUrl, i18nKey, who, whoEmojis, whoAcct, newHandle } = describeNotification(n);
     const noteId = resolveTargetNoteId(n);
     const clickNoteId = resolveClickTargetNoteId(n);
     const userLink = n.user?.username ? (
@@ -454,6 +461,7 @@ export default function NotificationsPanel({
         target={toRelationshipTarget(n.user)}
         to={profilePath(n.user.username, n.user.host ?? undefined)}
         className={styles.userLink}
+        title={whoAcct}
       />
     ) : (
       <span />
@@ -463,6 +471,7 @@ export default function NotificationsPanel({
         target={toRelationshipTarget(n.relatedUser)}
         to={profilePath(n.relatedUser.username, n.relatedUser.host ?? undefined)}
         className={styles.userLink}
+        title={notificationUserAcct(n.relatedUser)}
       />
     ) : (
       <span />
@@ -473,7 +482,7 @@ export default function NotificationsPanel({
       <Trans
         i18n={i18n}
         i18nKey={i18nKey}
-        values={{ handleSuffix, newHandle }}
+        values={{ newHandle }}
         components={{ userLink, emojiName, newUserLink }}
       />
     );

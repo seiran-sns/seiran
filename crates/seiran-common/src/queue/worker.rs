@@ -677,6 +677,13 @@ fn job_name(job: &Job) -> &'static str {
     }
 }
 
+/// 受信 Follow への Accept / Reject（`ApDeliveryKind::FollowResponse`）のリトライ設定。
+const FOLLOW_RESPONSE_RETRY: RetryConfig = RetryConfig {
+    max_attempts: 24,
+    base_delay_ms: 5000,
+    max_delay_ms: 6 * 3_600_000,
+};
+
 /// ジョブ種別ごとのリトライ設定を返します
 fn retry_config_for(job: &Job) -> RetryConfig {
     match job {
@@ -685,6 +692,14 @@ fn retry_config_for(job: &Job) -> RetryConfig {
             base_delay_ms: 1000, // 1s → 2s → 4s
             max_delay_ms: 30_000,
         },
+        // 受信 Follow への Accept / Reject は、届かないと相手側で「申請中」のまま残り、
+        // 相手から送り直されることもないため、相手の一時的な障害が数日続いても届くよう
+        // 合計おおむね3日（5秒から倍々で6時間に達した後は6時間おき、計23回の送り直しで
+        // 約71時間）粘る。
+        Job::ApDelivery {
+            kind: crate::traits::ApDeliveryKind::FollowResponse { .. },
+            ..
+        } => FOLLOW_RESPONSE_RETRY,
         Job::ApDelivery { .. } => RetryConfig {
             max_attempts: 10,
             base_delay_ms: 5000,     // 5s → 10s → ... → max
@@ -925,6 +940,22 @@ fn retry_config_for(job: &Job) -> RetryConfig {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn follow_response_retries_span_about_three_days() {
+        let config = retry_config_for(&Job::ApDelivery {
+            actor_id: 1,
+            kind: crate::traits::ApDeliveryKind::FollowResponse {
+                inbox: "https://remote.example/inbox".into(),
+                activity: serde_json::json!({}),
+            },
+        });
+        let total_ms: u64 = (0..config.max_attempts - 1)
+            .map(|attempt| backoff_delay_ms(&config, attempt))
+            .sum();
+        let hours = total_ms / 3_600_000;
+        assert!((66..=78).contains(&hours), "合計 {} 時間", hours);
+    }
 
     #[test]
     fn backoff_grows_exponentially() {

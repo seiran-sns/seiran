@@ -66,10 +66,9 @@ async fn process_locked(
         follows: &follow_exec.follows,
         notifications: &follow_exec.notifications,
         atp_service: &follow_exec.atp_service,
-        ap_client: &ctx.ap_client,
+        queue: &ctx.queue,
         stream_hub: &follow_exec.stream_hub,
         local_domain: follow_exec.local_domain.as_str(),
-        ap_private_key_pem: &follow_exec.ap_private_key_pem,
     };
 
     for (follower_actor_id, _) in pending {

@@ -86,6 +86,8 @@ pending のまま留まる経路は2つ。どちらも承認待ち通知（`Noti
 - ローカル → ローカル（`follow_exec::follow_local`）: 承認まで ATP フォローもコミットしない。
 - Fedi からの `Follow`: `Accept` を送らず、生アクティビティを `follows.pending_follow_activity` に保存する。
 
+受信 Follow への `Accept`/`Reject`（自動承認・拒否サーバーへの拒絶・承認制の承認/拒否のすべて）は、その場では送らず `ApDelivery` の `FollowResponse` ジョブに積む（`ap::enqueue_follow_response`）。送信の失敗で Follow の処理（関係の確定・通知）をやり直さないため。アクティビティ（id を含む）は積む時点で組み立てる。届かないとこちらは「フォローされている」のに相手側は「申請中」のまま残り、相手からの送り直しも無いので、相手の一時的な障害が数日続いても届くよう、5秒から倍々で6時間まで延ばし、以後6時間おき、合計おおむね3日リトライする。宛先が `410 Gone` を返したら打ち切る（`sign_and_post` が `ApError::Gone` を返し、ジョブは恒久的失敗になる）。
+
 承認・拒否は `seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow}`（単発API `POST /api/follow-requests/:follower_actor_id/{accept,reject}` と、承認制OFF時の一括承認 `Job::FollowRequestsBulkAccept` から呼ぶ）。承認時、フォロワーがローカルならここで ATP フォローをコミットし（`accept_and_set_rkey`）、Fedi なら保存済みアクティビティを `object` に `Accept` を送る（無ければ最小限の Follow を組み立てる）。拒否時は Fedi なら `Reject` を送り、行を削除する。
 
 AT Protocol には非公開アカウントの概念が無いため、Bluesky 側から直接 DID をフォローされるのは防げない。
