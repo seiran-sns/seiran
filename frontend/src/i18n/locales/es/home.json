@@ -224,7 +224,9 @@
     "noResults": "No hay emojis que coincidan",
     "noFrequent": "Aún no hay emojis de uso frecuente",
     "noCustomEmojis": "No hay emojis personalizados registrados",
-    "uncategorized": "Sin categoría"
+    "uncategorized": "Sin categoría",
+    "showAll": "Ver todo",
+    "collapse": "Contraer"
   },
   "quickReaction": {
     "reactTitle": "Reaccionar con {{emoji}}",

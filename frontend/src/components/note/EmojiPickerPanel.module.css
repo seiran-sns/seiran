@@ -63,6 +63,47 @@
   margin-bottom: 4px;
 }
 
+/* グリッドと「全部」/「たたむ」ボタンを横に並べ、ボタンを1行目の行末に置く。 */
+.groupRow {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.groupGrid {
+  flex: 1;
+  min-width: 0;
+}
+
+/* たたんだセクションは1行（セル高36px）で切る。 */
+.gridCollapsed {
+  max-height: 36px;
+  overflow: hidden;
+}
+
+/* 展開した長いセクションをスクロールしても「たたむ」を押せるよう、スクロール領域の上端に留める。 */
+.groupToggle {
+  position: sticky;
+  top: 0;
+  flex-shrink: 0;
+  margin-top: 5px;
+  padding: 2px 10px;
+  border: none;
+  border-radius: 6px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.78rem;
+  line-height: 1.4rem;
+  font-family: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.groupToggle:hover {
+  background: var(--accent-hover);
+}
+
 .grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, 36px);
