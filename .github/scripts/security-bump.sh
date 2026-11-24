@@ -10,10 +10,10 @@
 # Usage: security-bump.sh <修正のコミット>
 # 前提: main をチェックアウト済み（fetch-depth: 0）、git の author 設定と push 権限があること。
 set -euo pipefail
+# shellcheck source=.github/scripts/revision-bump.sh
+source "$(dirname "$0")/revision-bump.sh"
 
 fixed="$1"
-
-log() { echo "$*"; echo "$*" >> "${GITHUB_STEP_SUMMARY:-/dev/null}"; }
 
 # フロントの package-lock.json から、本番依存（"dev": true でないもの）の一覧を作る
 runtime_npm_deps() {
@@ -32,8 +32,12 @@ affects_image() {
     [ "$(runtime_npm_deps "$fixed^")" != "$(runtime_npm_deps "$fixed")" ]
 }
 
-workspace_value() {
-    sed -n '/^\[workspace.package\]/,/^\[/{s/^'"$1"' *= *"\(.*\)"/\1/p}' Cargo.toml
+# リリース済みの版（$1、タグのコミット $2）がまだ修正を含んでいなければ上げる
+not_yet_released() {
+    if git merge-base --is-ancestor "$fixed" "$2"; then
+        log "リリース済みの $1 が既に $fixed を含んでいます"
+        return 1
+    fi
 }
 
 if ! affects_image; then
@@ -41,37 +45,8 @@ if ! affects_image; then
     exit 0
 fi
 
-for attempt in 1 2 3; do
-    git fetch -q --tags --force origin main
-    git checkout -q -B main origin/main
-
-    base="$(workspace_value version)"
-    suffix="$(workspace_value version_suffix)"
-    tag="v$base$suffix"
-    if ! tagged="$(git rev-parse -q --verify "refs/tags/$tag^{commit}")"; then
-        log "main の版 $base$suffix はまだリリースされていないので、その版のリリースに修正が含まれます"
-        exit 0
-    fi
-    if git merge-base --is-ancestor "$fixed" "$tagged"; then
-        log "リリース済みの $base$suffix が既に $fixed を含んでいます"
-        exit 0
-    fi
-
-    next="${base%.*}.$(( ${base##*.} + 1 ))"
-    sed -i '/^\[workspace.package\]/,/^\[/s/^version *= *".*"/version = "'"$next"'"/' Cargo.toml
-    # Cargo.lock のワークスペースの crate の版だけを揃える
-    cargo update --workspace
-    (cd frontend && npm version --no-git-tag-version --allow-same-version "$next" > /dev/null)
-
-    subject="$(git log -1 --format=%s "$fixed")"
-    git commit -q -am "chore: バージョンを${next}に上げる（依存の脆弱性修正のリリース）
+subject="$(git log -1 --format=%s "$fixed")"
+log "修正: $subject（$fixed）"
+bump_revision not_yet_released "chore: バージョンを{version}に上げる（依存の脆弱性修正のリリース）
 
 修正: ${subject}（${fixed}）"
-    if git push -q origin HEAD:main; then
-        log "版を $next に上げて push しました（修正: $subject）"
-        exit 0
-    fi
-    log "push が拒否されました（main が進んだ）。やり直します（$attempt 回目）"
-done
-log "main への push に3回失敗しました"
-exit 1

@@ -249,15 +249,29 @@ jobs:
 
   # ─── 公開イメージ: 検査と並行してビルドし、全部通ったら push ─────────────
   # main への push（と手動実行）のときだけ。同じ版のタグが両方のレジストリに既にあれば
-  # ビルドしない。image-build は検査の結果を待たずにビルドしてキャッシュ（gha）に置くだけで、
-  # push は image-publish が全ジョブ成功後に同じビルドをキャッシュから再現して行う
-  # （キャッシュが消えていても作り直すだけで、検査を通っていないイメージが出ることはない）。
+  # ビルドしない。linux/amd64 と linux/arm64 を、それぞれのアーキテクチャのランナーでネイティブに
+  # ビルドする（QEMU のエミュレーションでは Rust のリリースビルドが何倍も遅くなるため）。
+  #
+  #   image-build    検査の結果を待たずにアーキテクチャごとにビルドし、キャッシュ（gha）に置く。
+  #                  ビルドしたイメージの OS パッケージを Trivy で検査し、修正版のある脆弱性が
+  #                  あれば実行環境の段（runtime）だけキャッシュを使わずに1度だけ作り直す
+  #   image-push     全ジョブ成功後に、同じビルドをキャッシュから再現して digest だけで push する
+  #   image-publish  2つのアーキテクチャのイメージを1つにまとめて版のタグを付け、git タグを付ける
+  #
+  # キャッシュが消えていても作り直すだけで、検査を通っていないイメージが出ることはない。
   # 必要なシークレット: DOCKERHUB_USERNAME、DOCKERHUB_TOKEN（seiranorg へ push できるトークン）。
   # GHCR は GITHUB_TOKEN で push する。
   image-build:
-    name: Image build
+    name: Image build (${{ matrix.arch }})
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
     outputs:
       build: ${{ steps.targets.outputs.build }}
     steps:
@@ -277,19 +291,46 @@ jobs:
         run: .github/scripts/image-targets.sh
       - uses: docker/setup-buildx-action@v4
         if: steps.targets.outputs.build == 'true'
-      - name: Build (cache only)
+      # Trivy で検査するためにランナーの docker に載せる
+      - name: Build
         if: steps.targets.outputs.build == 'true'
         uses: docker/build-push-action@v7
         with:
           context: .
           file: docker/seiran/Dockerfile
-          platforms: linux/amd64
+          platforms: linux/${{ matrix.arch }}
+          load: true
+          tags: seiran-scan:${{ matrix.arch }}
+          cache-from: type=gha,scope=release-image-${{ matrix.arch }}
+          cache-to: type=gha,scope=release-image-${{ matrix.arch }},mode=max
+      - uses: ./.github/actions/setup-trivy
+        if: steps.targets.outputs.build == 'true'
+      # 検査できなかったとき（データベースの取得失敗等）は作り直さずに進める。リリースは止めない
+      # （止めても、公開中の古いイメージのほうが新しくなるわけではない）。
+      - name: Scan OS packages
+        id: scan
+        if: steps.targets.outputs.build == 'true'
+        run: .github/scripts/image-vulns.sh "seiran-scan:${{ matrix.arch }}" "$RUNNER_TEMP/vulns.tsv" || true
+      # 修正版のある脆弱性が残っているのは、apt の層がキャッシュから再利用され、その後に出た
+      # Debian のセキュリティ更新を取り込んでいないため。実行環境の段だけキャッシュを外し、
+      # ベースイメージも取り直して作り直す。結果はキャッシュへ書き戻し、image-push がそこから
+      # 再現する。作り直した後は検査しない（それでも残るものは Debian 側の修正待ちで、
+      # 何度作り直しても変わらない）。
+      - name: Rebuild the runtime stage without cache
+        if: steps.scan.outputs.found == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/seiran/Dockerfile
+          platforms: linux/${{ matrix.arch }}
           outputs: type=cacheonly
-          cache-from: type=gha,scope=release-image
-          cache-to: type=gha,scope=release-image,mode=max
+          pull: true
+          no-cache-filters: runtime
+          cache-from: type=gha,scope=release-image-${{ matrix.arch }}
+          cache-to: type=gha,scope=release-image-${{ matrix.arch }},mode=max
 
-  image-publish:
-    name: Image publish
+  image-push:
+    name: Image push (${{ matrix.arch }})
     needs: [changes, gitleaks, rust, frontend, e2e, image-build]
     # 検査ジョブは変更範囲によってスキップされる。既定では needs のどれかが skipped だと
     # このジョブもスキップされてしまうので、失敗・キャンセルが無いことを条件にする。
@@ -298,8 +339,77 @@ jobs:
       needs.image-build.outputs.build == 'true' &&
       !contains(needs.*.result, 'failure') &&
       !contains(needs.*.result, 'cancelled')
+    strategy:
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: write # GHCR への push
+    steps:
+      - uses: actions/checkout@v7
+      - uses: docker/login-action@v4
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check existing tags
+        id: targets
+        run: .github/scripts/image-targets.sh
+      - uses: docker/setup-buildx-action@v4
+        if: steps.targets.outputs.build == 'true'
+      # タグは付けず digest だけで両方のレジストリへ push する（タグは image-publish が
+      # 2つのアーキテクチャをまとめてから付ける）。タグの無い digest は、どの版も指さない。
+      - name: Push by digest
+        id: push
+        if: steps.targets.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: docker/seiran/Dockerfile
+          platforms: linux/${{ matrix.arch }}
+          tags: |
+            docker.io/seiranorg/seiran
+            ghcr.io/seiran-sns/seiran
+          outputs: type=image,push-by-digest=true,name-canonical=true,push=true
+          labels: |
+            org.opencontainers.image.version=${{ steps.targets.outputs.version }}
+            org.opencontainers.image.revision=${{ steps.targets.outputs.revision }}
+            org.opencontainers.image.source=https://github.com/seiran-sns/seiran
+            org.opencontainers.image.licenses=AGPL-3.0
+          cache-from: type=gha,scope=release-image-${{ matrix.arch }}
+      - name: Save digest
+        if: steps.targets.outputs.build == 'true'
+        env:
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/digest"
+          echo "$DIGEST" > "$RUNNER_TEMP/digest/${{ matrix.arch }}"
+      - uses: actions/upload-artifact@v7
+        if: steps.targets.outputs.build == 'true'
+        with:
+          name: image-digest-${{ matrix.arch }}
+          path: ${{ runner.temp }}/digest/${{ matrix.arch }}
+          retention-days: 1
+          overwrite: true
+
+  image-publish:
+    name: Image publish
+    needs: image-push
+    if: >-
+      always() &&
+      needs.image-push.result == 'success'
     runs-on: ubuntu-latest
-    # 同じ版を2つのコミットが同時に push しないよう直列にする（後発は下で既存と判定される）
+    # 同じ版を2つのコミットが同時に出さないよう直列にする（後発は下で既存と判定される）
     concurrency:
       group: image-publish
       cancel-in-progress: false
@@ -321,27 +431,26 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      # image-build の後に別のコミットが同じ版を push していることがあるので、もう一度確かめる
+      # image-push の後に別のコミットが同じ版を出していることがあるので、もう一度確かめる
       - name: Check existing tags
         id: targets
         run: .github/scripts/image-targets.sh
       - uses: docker/setup-buildx-action@v4
         if: steps.targets.outputs.build == 'true'
-      - name: Push
+      - uses: actions/download-artifact@v8
         if: steps.targets.outputs.build == 'true'
-        uses: docker/build-push-action@v7
         with:
-          context: .
-          file: docker/seiran/Dockerfile
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.targets.outputs.tags }}
-          labels: |
-            org.opencontainers.image.version=${{ steps.targets.outputs.version }}
-            org.opencontainers.image.revision=${{ steps.targets.outputs.revision }}
-            org.opencontainers.image.source=https://github.com/seiran-sns/seiran
-            org.opencontainers.image.licenses=AGPL-3.0
-          cache-from: type=gha,scope=release-image
+          pattern: image-digest-*
+          path: ${{ runner.temp }}/digest
+          merge-multiple: true
+      - name: Tag the multi-platform image
+        if: steps.targets.outputs.build == 'true'
+        env:
+          TAGS: ${{ steps.targets.outputs.tags }}
+          ARCHES: amd64 arm64
+          VERSION: ${{ steps.targets.outputs.version }}
+          REVISION: ${{ steps.targets.outputs.revision }}
+        run: .github/scripts/image-merge.sh "$RUNNER_TEMP/digest"
       - name: Push git tag
         if: steps.targets.outputs.build == 'true'
         env:
