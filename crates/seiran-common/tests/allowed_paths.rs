@@ -246,6 +246,13 @@ fn allowlist_rejects_scanner_paths() {
         "/users/alice/../../etc/passwd",
         "/phpinfo.php",
         "/.well-known/security.txt",
+        "/api/.env",
+        "/api/v1/.env",
+        "/api/v2/.env",
+        "/api/v3/site",
+        "/api/wp-login.php",
+        "/xrpc/.env",
+        "/xrpc/../../etc/passwd",
     ] {
         assert!(
             !matches(&all, path),
