@@ -134,6 +134,7 @@
     "followImportTitle": "Folge-Import",
     "description": "Geben Sie pro Zeile eine Konto-ID ein, um Ihre Folgen zu importieren. Sie können auch eine Textdatei per Drag & Drop laden.",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "CSV-Datei laden",
     "importButton": "Import starten",
     "importing": "Wird gestartet…",
     "cancelButton": "Abbrechen",

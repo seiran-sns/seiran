@@ -52,9 +52,34 @@
   background: color-mix(in srgb, var(--accent) 8%, var(--bg));
 }
 
-.importButton {
-  align-self: flex-start;
+.hiddenFileInput {
+  display: none;
+}
+
+.buttonRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 12px;
+}
+
+.fileButton {
+  padding: 8px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.fileButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.importButton {
   padding: 8px 20px;
   border: none;
   border-radius: 8px;

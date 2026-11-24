@@ -134,6 +134,7 @@
     "followImportTitle": "Importar seguidos",
     "description": "Introduce un ID de cuenta por línea para importar tus seguidos. También puedes arrastrar y soltar un archivo de texto para cargarlo.",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "Cargar archivo CSV",
     "importButton": "Iniciar importación",
     "importing": "Iniciando…",
     "cancelButton": "Cancelar",
