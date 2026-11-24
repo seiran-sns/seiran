@@ -76,29 +76,29 @@ describe("describeNotification（AP Move受信時の独自拡張通知）", () =
   });
 });
 
-describe("describeNotification（通知元ユーザーのハンドル併記）", () => {
-  it("Fedi ユーザーは @username@host を併記する", () => {
+describe("describeNotification（通知元ユーザーの acct）", () => {
+  it("Fedi ユーザーは @username@host", () => {
     const n = makeReactionNotification({
       type: "follow",
       user: { id: "1", username: "alice", host: "fedi.example", name: "Alice" },
     });
-    expect(describeNotification(n).handleSuffix).toBe("（@alice@fedi.example）");
+    expect(describeNotification(n).whoAcct).toBe("@alice@fedi.example");
   });
 
-  it("Bsky ユーザー（host が空文字）はハンドルを @handle で併記する", () => {
+  it("Bsky ユーザー（host が空文字）は @handle", () => {
     const n = makeReactionNotification({
       type: "follow",
       user: { id: "1", username: "alice.bsky.social", host: "", name: "Alice" },
     });
-    expect(describeNotification(n).handleSuffix).toBe("（@alice.bsky.social）");
+    expect(describeNotification(n).whoAcct).toBe("@alice.bsky.social");
   });
 
-  it("ローカルユーザー（host が null）は併記しない", () => {
+  it("ローカルユーザー（host が null）は @username", () => {
     const n = makeReactionNotification({
       type: "follow",
       user: { id: "1", username: "alice", host: null, name: "Alice" },
     });
-    expect(describeNotification(n).handleSuffix).toBe("");
+    expect(describeNotification(n).whoAcct).toBe("@alice");
   });
 });
 

@@ -32,11 +32,15 @@ export function formatCount(n: number): string {
   return `${intPart}${suffix}`;
 }
 
-/** ノート投稿者の acct 文字列（`@user` または `@user@domain`）。ローカルユーザーは domain を省略。 */
+/** ユーザーの acct 文字列（`@user` または `@user@domain`）。ローカルユーザーと、ハンドル自体が
+ * ドメイン形式の Bsky ユーザー（domain が空）は domain を省略する。 */
+export function userAcct(username: string, domain?: string | null): string {
+  return domain && domain !== window.location.hostname ? `@${username}@${domain}` : `@${username}`;
+}
+
+/** ノート投稿者の acct 文字列（`userAcct`）。 */
 export function acct(note: Note): string {
-  return note.user.domain && note.user.domain !== window.location.hostname
-    ? `@${note.user.username}@${note.user.domain}`
-    : `@${note.user.username}`;
+  return userAcct(note.user.username, note.user.domain);
 }
 
 /** プロフィール遷移用のクエリ文字列を組み立てる（ローカルは domain を省略）。 */

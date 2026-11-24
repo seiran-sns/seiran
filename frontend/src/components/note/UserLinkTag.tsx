@@ -11,6 +11,8 @@ interface UserLinkTagProps {
   target: UserRelationshipTarget;
   to: string;
   className?: string;
+  /** マウスオーバーで出すツールチップ（ユーザーの acct 等）。 */
+  title?: string;
   children?: ReactNode;
 }
 
@@ -22,14 +24,14 @@ interface UserLinkTagProps {
  * そのまま`Link`の中へ描画する形で組む。ホバー時のフォロースイッチ・右クリックの
  * 対ユーザー操作メニューは`NoteCard`/`UserContextMenu`と同じフックを共有する。
  */
-export default function UserLinkTag({ target, to, className, children }: UserLinkTagProps) {
+export default function UserLinkTag({ target, to, className, title, children }: UserLinkTagProps) {
   const state = useUserContextMenuPopover(target);
   const { currentUser, isSelf, handleContextMenu } = state;
   const hover = useFollowHoverSwitch(target, isSelf);
 
   if (!currentUser || isSelf) {
     return (
-      <Link to={to} className={className} onClick={(e) => e.stopPropagation()}>
+      <Link to={to} className={className} title={title} onClick={(e) => e.stopPropagation()}>
         {children}
       </Link>
     );
@@ -52,6 +54,7 @@ export default function UserLinkTag({ target, to, className, children }: UserLin
       <Link
         to={to}
         className={className}
+        title={title}
         onClick={(e) => e.stopPropagation()}
         onContextMenu={handleContextMenu}
       >

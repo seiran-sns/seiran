@@ -81,6 +81,15 @@
   visibility: hidden;
 }
 
+.repostUser {
+  color: inherit;
+  text-decoration: none;
+}
+
+.repostUser:hover {
+  text-decoration: underline;
+}
+
 .repostTime {
   color: var(--accent);
   text-decoration: none;
