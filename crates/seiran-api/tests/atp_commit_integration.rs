@@ -140,3 +140,113 @@ async fn concurrent_commits_to_one_actor_form_a_single_chain() {
     .unwrap();
     assert_eq!(last_since, prev.map(|(_, rev)| rev));
 }
+
+/// DID 転入で取り込むレコード（`import_record`）は firehose に流さずリポジトリだけを進め、
+/// 取り込み後の`broadcast_account_activation`が`#account`→`#identity`→`#sync`を流す。
+/// `#sync`はリポジトリの最新の commit ブロックだけを含む CAR を持つ。
+#[tokio::test]
+#[ignore]
+async fn imported_records_are_announced_by_one_sync_event() {
+    use ipld_core::ipld::Ipld;
+
+    let pool = support::test_db_pool().await;
+    let actor_id = create_atp_actor(&pool).await;
+    let service = commit_service(&pool);
+
+    for i in 0..3 {
+        let value = serde_json::json!({
+            "$type": "app.bsky.feed.like",
+            "subject": {
+                "uri": format!("at://did:plc:other/app.bsky.feed.post/{i}"),
+                "cid": "bafyreie5737gdxlw5i64vzichcalba3z2v5n6icifvx5xytvske7mr3hpm",
+            },
+            "createdAt": "2026-10-11T00:00:00.000Z",
+        });
+        service
+            .import_record(
+                actor_id,
+                "app.bsky.feed.like".to_string(),
+                format!("imported{i}"),
+                &value,
+                None,
+                chrono::Utc::now(),
+            )
+            .await
+            .expect("取り込みのコミットに失敗");
+    }
+
+    let events_before: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM atp_repo_events WHERE actor_id = $1")
+            .bind(actor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert_eq!(
+        events_before, 0,
+        "取り込んだレコードが firehose に流れている"
+    );
+    let records: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM atp_records WHERE actor_id = $1 AND collection = 'app.bsky.feed.like'",
+    )
+    .bind(actor_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert_eq!(records, 3);
+
+    service
+        .broadcast_account_activation(actor_id, "atpc.example.test", chrono::Utc::now())
+        .await
+        .expect("有効化の送出に失敗");
+
+    let (head_cid, head_rev): (String, String) =
+        sqlx::query_as("SELECT at_repo_cid, at_repo_rev FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    let events = sqlx::query(
+        "SELECT event_type, frame_bytes FROM atp_repo_events WHERE actor_id = $1 ORDER BY id",
+    )
+    .bind(actor_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap();
+    let types: Vec<String> = events.iter().map(|e| e.get("event_type")).collect();
+    assert_eq!(types, ["account", "identity", "sync"]);
+
+    // フレームはヘッダーと本体の2つの DAG-CBOR 値が連続したもの。
+    let decode_frame = |row: &sqlx::postgres::PgRow| -> (Ipld, Ipld) {
+        let compressed: Vec<u8> = row.get("frame_bytes");
+        let frame = zstd::decode_all(&compressed[..]).unwrap();
+        // ヘッダーの長さはフレームに書かれていないので、DAG-CBOR として読める最短の先頭を探す。
+        let header_len = (1..frame.len())
+            .find(|&n| serde_ipld_dagcbor::from_slice::<Ipld>(&frame[..n]).is_ok())
+            .expect("ヘッダーが読めない");
+        let header: Ipld = serde_ipld_dagcbor::from_slice(&frame[..header_len]).unwrap();
+        let body: Ipld = serde_ipld_dagcbor::from_slice(&frame[header_len..]).unwrap();
+        (header, body)
+    };
+    let field = |ipld: &Ipld, key: &str| -> Ipld {
+        let Ipld::Map(m) = ipld else {
+            panic!("Map ではない")
+        };
+        m.get(key).cloned().unwrap_or(Ipld::Null)
+    };
+
+    let (header, body) = decode_frame(&events[0]);
+    assert_eq!(field(&header, "t"), Ipld::String("#account".into()));
+    assert_eq!(field(&body, "active"), Ipld::Bool(true));
+
+    let (header, body) = decode_frame(&events[2]);
+    assert_eq!(field(&header, "t"), Ipld::String("#sync".into()));
+    assert_eq!(field(&body, "rev"), Ipld::String(head_rev));
+    let Ipld::Bytes(car) = field(&body, "blocks") else {
+        panic!("blocks が bytes ではない")
+    };
+    let car = seiran_common::atp::car::decode_car(&car).unwrap();
+    let head = seiran_common::atp::cid_from_str(&head_cid).unwrap();
+    assert_eq!(car.roots, vec![head]);
+    assert_eq!(car.blocks.len(), 1);
+    assert_eq!(car.blocks[0].0, head);
+}

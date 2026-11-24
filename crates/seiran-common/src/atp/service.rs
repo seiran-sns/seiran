@@ -8,13 +8,14 @@ use crate::event_bus::EventBus;
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
-    build_account_frame, build_commit_frame, build_identity_frame, build_mst, cid_from_sha256_hex,
-    cid_from_str, cid_to_string, collect_blob_cids, create_commit, encode_bsky_actor_profile,
-    encode_bsky_feed_like, encode_bsky_feed_post, encode_bsky_feed_repost, encode_bsky_graph_block,
-    encode_bsky_graph_follow, encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car,
-    encode_chat_actor_declaration, encode_content_visibility_declaration, encode_generic_record,
-    encode_seiran_actor_declaration, generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet,
-    BskyPostReply, Cid, CommitEvtOp, FeedPostRecord, RepoError, NSFW_SELF_LABEL,
+    build_account_frame, build_commit_frame, build_identity_frame, build_mst, build_sync_frame,
+    cid_from_sha256_hex, cid_from_str, cid_to_string, collect_blob_cids, create_commit,
+    encode_bsky_actor_profile, encode_bsky_feed_like, encode_bsky_feed_post,
+    encode_bsky_feed_repost, encode_bsky_graph_block, encode_bsky_graph_follow,
+    encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car, encode_chat_actor_declaration,
+    encode_content_visibility_declaration, encode_generic_record, encode_seiran_actor_declaration,
+    generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet, BskyPostReply, Cid, CommitEvtOp,
+    FeedPostRecord, RepoError, NSFW_SELF_LABEL,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +68,26 @@ pub struct CommitRecord {
     pub blob_cids: Vec<Cid>,
 }
 
+impl CommitRecord {
+    /// レコード値の JSON をそのまま DAG-CBOR にしたレコード（参照する blob も値から拾う）。
+    fn from_json(
+        collection: String,
+        rkey: String,
+        value: &serde_json::Value,
+        action: &'static str,
+    ) -> Result<Self, AtpCommitError> {
+        let (cbor, cid) = encode_generic_record(value)?;
+        Ok(Self {
+            collection,
+            rkey,
+            cbor,
+            cid,
+            action,
+            blob_cids: collect_blob_cids(value),
+        })
+    }
+}
+
 /// コミットで MST に加える変更。
 enum RepoWrite {
     Put(CommitRecord),
@@ -96,8 +117,20 @@ const MAX_SERIALIZATION_RETRIES: u32 = 10;
 pub struct CommitResult {
     pub commit_cid: Cid,
     pub rev: String,
+    /// firehose の seq。firehose に流さないコミット（`Announce::Silent`）では 0。
     pub seq: i64,
     pub at_did: String,
+}
+
+/// コミットを firehose（`atp_repo_events`）へ流すか。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Announce {
+    Firehose,
+    /// リポジトリだけを更新し、`#commit` を出さない。DID 転入で取り込むレコードに使う。
+    /// 取り込むレコードは転入元で既に Relay/AppView に載っているので、1件ずつ作り直しとして
+    /// 流すと、大量のいいね・フォローを短時間に作ったのと同じに見える。取り込み後の状態は
+    /// `broadcast_account_activation` の `#sync` でまとめて知らせる。
+    Silent,
 }
 
 /// `atp_blocks` へ新規ブロックを一括INSERTする。コミットのたびに数個〜数十個の
@@ -400,8 +433,14 @@ impl AtpCommitService {
         now: DateTime<Utc>,
         post_id: Option<i64>,
     ) -> Result<CommitResult, AtpCommitError> {
-        self.apply_write(actor_id, &RepoWrite::Put(record), now, post_id)
-            .await
+        self.apply_write(
+            actor_id,
+            &RepoWrite::Put(record),
+            now,
+            post_id,
+            Announce::Firehose,
+        )
+        .await
     }
 
     /// 共通コミットパイプライン。リポジトリの先頭（`actors.at_repo_*`）とレコード一覧の
@@ -414,10 +453,14 @@ impl AtpCommitService {
         write: &RepoWrite,
         now: DateTime<Utc>,
         post_id: Option<i64>,
+        announce: Announce,
     ) -> Result<CommitResult, AtpCommitError> {
         let mut attempt = 1;
         loop {
-            match self.try_apply_write(actor_id, write, now, post_id).await {
+            match self
+                .try_apply_write(actor_id, write, now, post_id, announce)
+                .await
+            {
                 Ok((result, frame)) => {
                     if let Some(frame) = frame {
                         self.publish_event(AtpCommitEvent {
@@ -448,13 +491,15 @@ impl AtpCommitService {
 
     /// MST 構築 → commit 署名 → CAR 生成 → atp_blocks 保存 → actors 更新
     /// → atp_records 反映 → atp_repo_events 記録までを1トランザクションで行い、
-    /// コミット結果と subscribeRepos へ流すフレームを返す。
+    /// コミット結果と subscribeRepos へ流すフレームを返す（`Announce::Silent` では
+    /// atp_repo_events に記録せず、フレームも返さない）。
     async fn try_apply_write(
         &self,
         actor_id: i64,
         write: &RepoWrite,
         now: DateTime<Utc>,
         post_id: Option<i64>,
+        announce: Announce,
     ) -> Result<(CommitResult, Option<Vec<u8>>), AtpCommitError> {
         let mut tx = self.pool.begin().await?;
         sqlx::query("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
@@ -608,6 +653,19 @@ impl AtpCommitService {
             }
         };
 
+        if announce == Announce::Silent {
+            tx.commit().await?;
+            return Ok((
+                CommitResult {
+                    commit_cid,
+                    rev: new_rev,
+                    seq: 0,
+                    at_did,
+                },
+                None,
+            ));
+        }
+
         // ⑩ atp_repo_events INSERT → seq 取得
         let event_row = sqlx::query(
             "INSERT INTO atp_repo_events
@@ -684,16 +742,8 @@ impl AtpCommitService {
         action: &'static str,
         now: DateTime<Utc>,
     ) -> Result<(CommitResult, Cid), AtpCommitError> {
-        let (cbor, cid) = encode_generic_record(value)?;
-        let blob_cids = collect_blob_cids(value);
-        let record = CommitRecord {
-            collection,
-            rkey,
-            cbor,
-            cid,
-            action,
-            blob_cids,
-        };
+        let record = CommitRecord::from_json(collection, rkey, value, action)?;
+        let cid = record.cid;
         let result = self
             .commit_record_inner(actor_id, record, now, None)
             .await?;
@@ -715,21 +765,37 @@ impl AtpCommitService {
         action: &'static str,
         now: DateTime<Utc>,
     ) -> Result<(CommitResult, Cid), AtpCommitError> {
-        let (cbor, cid) = encode_generic_record(value)?;
-        let blob_cids = collect_blob_cids(value);
-        let record = CommitRecord {
-            collection: "app.bsky.feed.post".to_string(),
-            rkey,
-            cbor,
-            cid,
-            action,
-            blob_cids,
-        };
+        let record =
+            CommitRecord::from_json("app.bsky.feed.post".to_string(), rkey, value, action)?;
+        let cid = record.cid;
         let result = self
             .commit_record_inner(actor_id, record, now, Some(post_id))
             .await?;
         self.spawn_request_crawl();
         Ok((result, cid))
+    }
+
+    /// DID 転入で取り込むレコードを、firehose に流さずにリポジトリへ入れる（`Announce::Silent`）。
+    /// `post_id` を渡すと `commit_post_record` と同じく `posts` の ATP 列も更新する。
+    /// 取り込み後の状態は `broadcast_account_activation` で知らせる。
+    pub async fn import_record(
+        &self,
+        actor_id: i64,
+        collection: String,
+        rkey: String,
+        value: &serde_json::Value,
+        post_id: Option<i64>,
+        now: DateTime<Utc>,
+    ) -> Result<CommitResult, AtpCommitError> {
+        let record = CommitRecord::from_json(collection, rkey, value, "create")?;
+        self.apply_write(
+            actor_id,
+            &RepoWrite::Put(record),
+            now,
+            post_id,
+            Announce::Silent,
+        )
+        .await
     }
 
     /// ポスト作成コミット（posts テーブル更新を追加）。通常投稿・引用投稿（`embed` に
@@ -1138,7 +1204,8 @@ impl AtpCommitService {
             collection: collection.to_string(),
             rkey: rkey.to_string(),
         };
-        self.apply_write(actor_id, &write, now, None).await?;
+        self.apply_write(actor_id, &write, now, None, Announce::Firehose)
+            .await?;
 
         tracing::info!(
             "[atp] {} delete commit 完了: actor_id={}, rkey={}",
@@ -1459,6 +1526,87 @@ impl AtpCommitService {
             did,
             active,
             seq
+        );
+        Ok(())
+    }
+
+    /// DID 転入でリポジトリを取り込み終えたアカウントを、Relay/AppView に有効なアカウントとして
+    /// 知らせる。公式 PDS の `activateAccount` と同じく `#account`（active）→`#identity`→`#sync`
+    /// を1トランザクションで記録してから流す。取り込んだレコードは `#commit` で流していない
+    /// （`Announce::Silent`）ので、`#sync` がリポジトリの最新の commit を伝え、Relay はこれを
+    /// 起点に以後の `#commit` を検証する。
+    pub async fn broadcast_account_activation(
+        &self,
+        actor_id: i64,
+        handle: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let time_str = now.to_rfc3339_opts(chrono::SecondsFormat::Millis, true);
+        let mut tx = self.pool.begin().await?;
+
+        let row = sqlx::query(
+            "SELECT a.at_did, a.at_repo_cid, a.at_repo_rev, b.bytes AS commit_bytes
+             FROM actors a
+             LEFT JOIN atp_blocks b ON b.actor_id = a.id AND b.cid = a.at_repo_cid
+             WHERE a.id = $1",
+        )
+        .bind(actor_id)
+        .fetch_one(&mut *tx)
+        .await?;
+        let did: String = row
+            .try_get::<Option<String>, _>("at_did")?
+            .ok_or(AtpCommitError::ActorConfig("at_did が未設定"))?;
+        let commit_cid_str: String = row
+            .try_get::<Option<String>, _>("at_repo_cid")?
+            .ok_or(AtpCommitError::ActorConfig("at_repo_cid が未設定"))?;
+        let rev: String = row
+            .try_get::<Option<String>, _>("at_repo_rev")?
+            .ok_or(AtpCommitError::ActorConfig("at_repo_rev が未設定"))?;
+        let commit_bytes: Vec<u8> = row.try_get::<Option<Vec<u8>>, _>("commit_bytes")?.ok_or(
+            AtpCommitError::ActorConfig("commit ブロックが atp_blocks に無い"),
+        )?;
+        let commit_cid = cid_from_str(&commit_cid_str)?;
+        let sync_car = encode_car(&commit_cid, &[(commit_cid, commit_bytes)])?;
+
+        let mut frames: Vec<(i64, Vec<u8>)> = Vec::with_capacity(3);
+        for event_type in ["account", "identity", "sync"] {
+            let seq: i64 = sqlx::query_scalar(
+                "INSERT INTO atp_repo_events (event_type, actor_id, did, handle, commit_cid, rev)
+                 VALUES ($1, $2, $3, $4, $5, $6)
+                 RETURNING id",
+            )
+            .bind(event_type)
+            .bind(actor_id)
+            .bind(&did)
+            .bind(handle)
+            .bind((event_type == "sync").then_some(commit_cid_str.as_str()))
+            .bind((event_type == "sync").then_some(rev.as_str()))
+            .fetch_one(&mut *tx)
+            .await?;
+            let frame = match event_type {
+                "account" => build_account_frame(seq, &did, handle, &time_str, true, None)?,
+                "identity" => build_identity_frame(seq, &did, handle, &time_str)?,
+                _ => build_sync_frame(seq, &did, &rev, &sync_car, &time_str)?,
+            };
+            let compressed =
+                zstd::encode_all(&frame[..], 3).map_err(|e| RepoError::Cbor(e.to_string()))?;
+            sqlx::query("UPDATE atp_repo_events SET frame_bytes = $1 WHERE id = $2")
+                .bind(&compressed)
+                .bind(seq)
+                .execute(&mut *tx)
+                .await?;
+            frames.push((seq, frame));
+        }
+        tx.commit().await?;
+
+        for (seq, frame_bytes) in frames {
+            self.publish_event(AtpCommitEvent { frame_bytes, seq });
+        }
+        self.spawn_request_crawl();
+        tracing::info!(
+            "[atp] account activation broadcast: did={}, rev={}",
+            did,
+            rev
         );
         Ok(())
     }

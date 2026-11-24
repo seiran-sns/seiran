@@ -1403,6 +1403,37 @@ pub fn build_account_frame(
     Ok(frame)
 }
 
+/// subscribeRepos の #sync フレームを生成する。リポジトリの最新の commit を、それまでの
+/// commit の連なりと無関係に知らせる（`blocks` は commit ブロックだけを含み、ルートが
+/// その commit の CAR）。Relay は以後の `#commit` の `since`/`prevData` をこの commit から
+/// 検証する。
+pub fn build_sync_frame(
+    seq: i64,
+    did: &str,
+    rev: &str,
+    car_bytes: &[u8],
+    time: &str,
+) -> Result<Vec<u8>, RepoError> {
+    let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    header_map.insert("op".to_string(), Ipld::Integer(1));
+    header_map.insert("t".to_string(), Ipld::String("#sync".to_string()));
+    let header_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(header_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut body_map: BTreeMap<String, Ipld> = BTreeMap::new();
+    body_map.insert("blocks".to_string(), Ipld::Bytes(car_bytes.to_vec()));
+    body_map.insert("did".to_string(), Ipld::String(did.to_string()));
+    body_map.insert("rev".to_string(), Ipld::String(rev.to_string()));
+    body_map.insert("seq".to_string(), Ipld::Integer(seq as i128));
+    body_map.insert("time".to_string(), Ipld::String(time.to_string()));
+    let body_cbor = serde_ipld_dagcbor::to_vec(&Ipld::Map(body_map))
+        .map_err(|e| RepoError::Cbor(e.to_string()))?;
+
+    let mut frame = header_cbor;
+    frame.extend_from_slice(&body_cbor);
+    Ok(frame)
+}
+
 /// subscribeRepos の #error フレームを生成する。
 pub fn build_error_frame(name: &str, message: &str) -> Result<Vec<u8>, RepoError> {
     let mut header_map: BTreeMap<String, Ipld> = BTreeMap::new();
