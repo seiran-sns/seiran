@@ -1,4 +1,4 @@
-import { type JSX, RefObject, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, RefObject, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, FrequentReaction, PublicEmoji } from "../../api/client";
 import { useLazyVisible } from "../../hooks/useLazyVisible";
@@ -10,7 +10,7 @@ import {
   parseReactionContent,
 } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
-import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
+import { unicodeEmojiGroups } from "../../lib/emojiData";
 import { currentUtcOffsetMinutes } from "../../lib/reactionTimeSlot";
 import { emojiAspectSpan } from "../../lib/emojiAspect";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -35,6 +35,8 @@ interface PickerItem {
 }
 
 interface PickerGroup {
+  /** カスタムとUnicodeで同名のカテゴリがありうるため、種別を前置した識別子。 */
+  key: string;
   name: string;
   items: PickerItem[];
 }
@@ -47,6 +49,9 @@ interface EmojiPickerPanelProps {
 }
 
 const SEARCH_RESULT_LIMIT = 100;
+
+/** 検索結果がこの件数以上なら、タブと同じカテゴリ別のたためるセクションに分けて出す。 */
+const SEARCH_GROUPING_THRESHOLD = 30;
 
 /**
  * カスタム絵文字が数千件規模になりうる一覧・検索結果で一度に描画する button DOM の初期件数、
@@ -99,51 +104,151 @@ function PagedGrid({ items, rootRef, renderItem }: PagedGridProps) {
   );
 }
 
-interface PagedGroupedGridProps {
+/**
+ * 1行に並びうる件数の上限より多い件数。たたんだセクションはこれだけ描画して1行分の高さで切る
+ * （全件を描画したまま隠すと、数千件のカスタム絵文字で描画が固まる）。1カラム36pxなので、
+ * ピッカーがこの幅（1,440px）を超えない限り1行目が欠けない。
+ */
+const COLLAPSED_ITEM_LIMIT = 40;
+
+interface CollapsibleGroupProps {
+  group: PickerGroup;
+  rootRef: RefObject<Element | null>;
+  renderItem: (item: PickerItem) => JSX.Element;
+}
+
+/**
+ * カテゴリ1つ分のセクション。初めは1行分だけ見せ、収まらなければ行末に「全部」ボタンを出す。
+ * 押すと全件（`PagedGrid` で段階的に）を出し、ボタンは「たたむ」に変わる。
+ */
+function CollapsibleGroup({ group, rootRef, renderItem }: CollapsibleGroupProps) {
+  const { t } = useTranslation();
+  const [expanded, setExpanded] = useState(false);
+  const [overflow, setOverflow] = useState(group.items.length > COLLAPSED_ITEM_LIMIT);
+  const groupRef = useRef<HTMLDivElement>(null);
+  const gridRef = useRef<HTMLDivElement>(null);
+
+  // たたんだグリッドは高さ1行で切っているので、中身がそれより高ければ収まっていない。
+  // 1行に入る件数はピッカーの幅とセル幅（カスタム絵文字は1〜4カラム）で決まるため実測する。
+  useLayoutEffect(() => {
+    if (expanded) return;
+    const el = gridRef.current;
+    if (!el) return;
+    const measure = () =>
+      setOverflow(group.items.length > COLLAPSED_ITEM_LIMIT || el.scrollHeight > el.clientHeight + 1);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [expanded, group.items]);
+
+  function collapse() {
+    setExpanded(false);
+    // 長いセクションの下の方でたたむと、見ていた位置ごと中身が消えて後ろのセクションに飛ぶため、
+    // たたんだセクションを見える所に戻す。
+    requestAnimationFrame(() => groupRef.current?.scrollIntoView({ block: "nearest" }));
+  }
+
+  return (
+    <div ref={groupRef} className={styles.group}>
+      <div className={styles.groupTitle}>{group.name}</div>
+      <div className={styles.groupRow}>
+        <div className={styles.groupGrid}>
+          {expanded ? (
+            <PagedGrid items={group.items} rootRef={rootRef} renderItem={renderItem} />
+          ) : (
+            <div ref={gridRef} className={`${styles.grid} ${styles.gridCollapsed}`}>
+              {group.items.slice(0, COLLAPSED_ITEM_LIMIT).map(renderItem)}
+            </div>
+          )}
+        </div>
+        {(expanded || overflow) && (
+          <button
+            type="button"
+            className={styles.groupToggle}
+            aria-expanded={expanded}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (expanded) collapse();
+              else setExpanded(true);
+            }}
+          >
+            {expanded ? t("home:reactionPicker.collapse") : t("home:reactionPicker.showAll")}
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+interface PagedGroupListProps {
   groups: PickerGroup[];
   rootRef: RefObject<Element | null>;
   renderItem: (item: PickerItem) => JSX.Element;
 }
 
 /**
- * `groups` をカテゴリごとのセクションに分けつつ、全体の表示件数は `GRID_PAGE_SIZE` 件ずつ
- * 段階的に増やす（`PagedGrid` のグループ対応版）。件数の多いカスタム絵文字一覧を一度に
- * 描画すると固まるため、グループ境界をまたいで同じページング予算を消費させる。
+ * `groups` をたためるセクションとして並べる。カテゴリが多いと、たたんだ1行分ずつでも全セクションを
+ * 一度に描画すると固まるため、たたんだ状態で描く件数の合計が `GRID_PAGE_SIZE` に達するまでの
+ * セクションを描き、末尾のセンチネルが見えるたびに同じ件数分のセクションを足す。
  */
-function PagedGroupedGrid({ groups, rootRef, renderItem }: PagedGroupedGridProps) {
-  const totalItems = useMemo(() => groups.reduce((n, g) => n + g.items.length, 0), [groups]);
-  const [visibleCount, setVisibleCount] = useState(GRID_PAGE_SIZE);
+function PagedGroupList({ groups, rootRef, renderItem }: PagedGroupListProps) {
+  const nonEmpty = useMemo(() => groups.filter((g) => g.items.length > 0), [groups]);
+  const [budget, setBudget] = useState(GRID_PAGE_SIZE);
   useEffect(() => {
-    setVisibleCount(GRID_PAGE_SIZE);
+    setBudget(GRID_PAGE_SIZE);
   }, [groups]);
 
-  let remaining = visibleCount;
-  const sections: JSX.Element[] = [];
-  for (const group of groups) {
-    if (remaining <= 0) break;
-    if (group.items.length === 0) continue;
-    const shown = group.items.slice(0, remaining);
-    remaining -= shown.length;
-    sections.push(
-      <div key={group.name} className={styles.group}>
-        <div className={styles.groupTitle}>{group.name}</div>
-        <div className={styles.grid}>{shown.map(renderItem)}</div>
-      </div>
-    );
+  let shownGroups = 0;
+  let spent = 0;
+  while (shownGroups < nonEmpty.length && spent < budget) {
+    spent += Math.min(nonEmpty[shownGroups].items.length, COLLAPSED_ITEM_LIMIT);
+    shownGroups++;
   }
 
   return (
     <>
-      {sections}
-      {visibleCount < totalItems && (
-        <LoadMoreSentinel
-          rootRef={rootRef}
-          onVisible={() => setVisibleCount((c) => Math.min(c + GRID_PAGE_SIZE, totalItems))}
-        />
+      {nonEmpty.slice(0, shownGroups).map((group) => (
+        <CollapsibleGroup key={group.key} group={group} rootRef={rootRef} renderItem={renderItem} />
+      ))}
+      {shownGroups < nonEmpty.length && (
+        <LoadMoreSentinel rootRef={rootRef} onVisible={() => setBudget((b) => b + GRID_PAGE_SIZE)} />
       )}
     </>
   );
 }
+
+/**
+ * カスタム絵文字をカテゴリ別のセクションに分ける。カテゴリ名の昇順で、未設定は末尾の
+ * `uncategorizedLabel` セクションにまとめる。
+ */
+function groupCustomItems(items: PickerItem[], uncategorizedLabel: string, locale: string): PickerGroup[] {
+  const byCategory = new Map<string, PickerItem[]>();
+  const uncategorized: PickerItem[] = [];
+  for (const item of items) {
+    const category = item.category?.trim();
+    if (!category) {
+      uncategorized.push(item);
+      continue;
+    }
+    const bucket = byCategory.get(category);
+    if (bucket) bucket.push(item);
+    else byCategory.set(category, [item]);
+  }
+  const groups: PickerGroup[] = [...byCategory.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, locale))
+    .map(([name, groupItems]) => ({ key: `c:${name}`, name, items: groupItems }));
+  if (uncategorized.length > 0) {
+    groups.push({ key: "c:", name: uncategorizedLabel, items: uncategorized });
+  }
+  return groups;
+}
+
+const unicodeGroups: PickerGroup[] = unicodeEmojiGroups.map((group) => ({
+  key: `u:${group.name}`,
+  name: group.name,
+  items: group.emojis.map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name })),
+}));
 
 /** カスタム絵文字＋Unicode絵文字を検索・タブ切り替えで選べるピッカー本体（Modal 内に描画する）。 */
 export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiPickerPanelProps) {
@@ -210,27 +315,10 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
     [customEmojis]
   );
 
-  const customGroups: PickerGroup[] = useMemo(() => {
-    const byCategory = new Map<string, PickerItem[]>();
-    const uncategorized: PickerItem[] = [];
-    for (const item of customItems) {
-      const category = item.category?.trim();
-      if (!category) {
-        uncategorized.push(item);
-        continue;
-      }
-      const bucket = byCategory.get(category);
-      if (bucket) bucket.push(item);
-      else byCategory.set(category, [item]);
-    }
-    const groups = [...byCategory.entries()]
-      .sort(([a], [b]) => a.localeCompare(b, i18n.language))
-      .map(([name, items]) => ({ name, items }));
-    if (uncategorized.length > 0) {
-      groups.push({ name: t("home:reactionPicker.uncategorized"), items: uncategorized });
-    }
-    return groups;
-  }, [customItems, i18n.language, t]);
+  const customGroups: PickerGroup[] = useMemo(
+    () => groupCustomItems(customItems, t("home:reactionPicker.uncategorized"), i18n.language),
+    [customItems, i18n.language, t]
+  );
 
   const frequentItems: PickerItem[] = useMemo(() => {
     // `f.content` はDBの生content（`:shortcode@.:` 等ホスト付きになりうる）なので、shortcode
@@ -249,21 +337,36 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
       });
   }, [frequent, customItems, unicodeOnly]);
 
-  const searchResults: PickerItem[] | null = useMemo(() => {
+  const searchResults: { items: PickerItem[]; groups: PickerGroup[] | null } | null = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return null;
     const customMatches = unicodeOnly ? [] : customItems.filter((i) => i.label.toLowerCase().includes(q));
-    const unicodeMatches: PickerItem[] = allUnicodeEmojis
-      .filter((e) => {
-        if (e.emoji.includes(q)) return true;
-        if (e.name.toLowerCase().includes(q)) return true;
-        const words = annotations.get(e.emoji);
-        return words?.some((w) => w.toLowerCase().includes(q)) ?? false;
-      })
-      .slice(0, SEARCH_RESULT_LIMIT)
-      .map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name }));
-    return [...customMatches, ...unicodeMatches];
-  }, [query, customItems, annotations, unicodeOnly]);
+    // Unicode 側は件数を絞りつつ、どのグループの一致かを保ったまま集める。
+    let unicodeBudget = SEARCH_RESULT_LIMIT;
+    const unicodeMatchGroups: PickerGroup[] = [];
+    for (const group of unicodeGroups) {
+      if (unicodeBudget <= 0) break;
+      const matched = group.items
+        .filter((item) => {
+          if (item.content.includes(q)) return true;
+          if (item.label.toLowerCase().includes(q)) return true;
+          const words = annotations.get(item.content);
+          return words?.some((w) => w.toLowerCase().includes(q)) ?? false;
+        })
+        .slice(0, unicodeBudget);
+      unicodeBudget -= matched.length;
+      if (matched.length > 0) unicodeMatchGroups.push({ ...group, items: matched });
+    }
+    const items = [...customMatches, ...unicodeMatchGroups.flatMap((g) => g.items)];
+    const groups =
+      items.length >= SEARCH_GROUPING_THRESHOLD
+        ? [
+            ...groupCustomItems(customMatches, t("home:reactionPicker.uncategorized"), i18n.language),
+            ...unicodeMatchGroups,
+          ]
+        : null;
+    return { items, groups };
+  }, [query, customItems, annotations, unicodeOnly, t, i18n.language]);
 
   function renderItem(item: PickerItem) {
     const span = item.imageUrl ? emojiAspectSpan(item.width, item.height) : 1;
@@ -330,8 +433,10 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
         {loading ? (
           <p className={styles.message}>{t("common:loading")}</p>
         ) : query.trim() ? (
-          searchResults && searchResults.length > 0 ? (
-            <PagedGrid items={searchResults} rootRef={bodyRef} renderItem={renderItem} />
+          searchResults && searchResults.groups ? (
+            <PagedGroupList groups={searchResults.groups} rootRef={bodyRef} renderItem={renderItem} />
+          ) : searchResults && searchResults.items.length > 0 ? (
+            <PagedGrid items={searchResults.items} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noResults")}</p>
           )
@@ -343,19 +448,12 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
           )
         ) : tab === "custom" ? (
           customItems.length > 0 ? (
-            <PagedGroupedGrid groups={customGroups} rootRef={bodyRef} renderItem={renderItem} />
+            <PagedGroupList groups={customGroups} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noCustomEmojis")}</p>
           )
         ) : (
-          unicodeEmojiGroups.map((group) => (
-            <div key={group.name} className={styles.group}>
-              <div className={styles.groupTitle}>{group.name}</div>
-              <div className={styles.grid}>
-                {group.emojis.map((e) => renderItem({ key: `u:${e.emoji}`, content: e.emoji, label: e.name }))}
-              </div>
-            </div>
-          ))
+          <PagedGroupList groups={unicodeGroups} rootRef={bodyRef} renderItem={renderItem} />
         )}
       </div>
     </div>

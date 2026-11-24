@@ -224,7 +224,9 @@
     "noResults": "Kein passendes Emoji",
     "noFrequent": "Noch kein häufig verwendetes Emoji",
     "noCustomEmojis": "Kein benutzerdefiniertes Emoji registriert",
-    "uncategorized": "Nicht kategorisiert"
+    "uncategorized": "Nicht kategorisiert",
+    "showAll": "Alle",
+    "collapse": "Einklappen"
   },
   "quickReaction": {
     "reactTitle": "Mit {{emoji}} reagieren",
