@@ -10,7 +10,7 @@ import {
   parseReactionContent,
 } from "../../lib/customEmojis";
 import { EmojiAnnotationIndex, loadEmojiAnnotationIndex } from "../../lib/emojiAnnotations";
-import { allUnicodeEmojis, unicodeEmojiGroups } from "../../lib/emojiData";
+import { unicodeEmojiGroups } from "../../lib/emojiData";
 import { currentUtcOffsetMinutes } from "../../lib/reactionTimeSlot";
 import { emojiAspectSpan } from "../../lib/emojiAspect";
 import TwemojiEmoji from "../common/TwemojiEmoji";
@@ -35,6 +35,8 @@ interface PickerItem {
 }
 
 interface PickerGroup {
+  /** カスタムとUnicodeで同名のカテゴリがありうるため、種別を前置した識別子。 */
+  key: string;
   name: string;
   items: PickerItem[];
 }
@@ -47,6 +49,9 @@ interface EmojiPickerPanelProps {
 }
 
 const SEARCH_RESULT_LIMIT = 100;
+
+/** 検索結果がこの件数以上なら、タブと同じカテゴリ別のたためるセクションに分けて出す。 */
+const SEARCH_GROUPING_THRESHOLD = 30;
 
 /**
  * カスタム絵文字が数千件規模になりうる一覧・検索結果で一度に描画する button DOM の初期件数、
@@ -204,7 +209,7 @@ function PagedGroupList({ groups, rootRef, renderItem }: PagedGroupListProps) {
   return (
     <>
       {nonEmpty.slice(0, shownGroups).map((group) => (
-        <CollapsibleGroup key={group.name} group={group} rootRef={rootRef} renderItem={renderItem} />
+        <CollapsibleGroup key={group.key} group={group} rootRef={rootRef} renderItem={renderItem} />
       ))}
       {shownGroups < nonEmpty.length && (
         <LoadMoreSentinel rootRef={rootRef} onVisible={() => setBudget((b) => b + GRID_PAGE_SIZE)} />
@@ -213,7 +218,34 @@ function PagedGroupList({ groups, rootRef, renderItem }: PagedGroupListProps) {
   );
 }
 
+/**
+ * カスタム絵文字をカテゴリ別のセクションに分ける。カテゴリ名の昇順で、未設定は末尾の
+ * `uncategorizedLabel` セクションにまとめる。
+ */
+function groupCustomItems(items: PickerItem[], uncategorizedLabel: string, locale: string): PickerGroup[] {
+  const byCategory = new Map<string, PickerItem[]>();
+  const uncategorized: PickerItem[] = [];
+  for (const item of items) {
+    const category = item.category?.trim();
+    if (!category) {
+      uncategorized.push(item);
+      continue;
+    }
+    const bucket = byCategory.get(category);
+    if (bucket) bucket.push(item);
+    else byCategory.set(category, [item]);
+  }
+  const groups: PickerGroup[] = [...byCategory.entries()]
+    .sort(([a], [b]) => a.localeCompare(b, locale))
+    .map(([name, groupItems]) => ({ key: `c:${name}`, name, items: groupItems }));
+  if (uncategorized.length > 0) {
+    groups.push({ key: "c:", name: uncategorizedLabel, items: uncategorized });
+  }
+  return groups;
+}
+
 const unicodeGroups: PickerGroup[] = unicodeEmojiGroups.map((group) => ({
+  key: `u:${group.name}`,
   name: group.name,
   items: group.emojis.map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name })),
 }));
@@ -283,27 +315,10 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
     [customEmojis]
   );
 
-  const customGroups: PickerGroup[] = useMemo(() => {
-    const byCategory = new Map<string, PickerItem[]>();
-    const uncategorized: PickerItem[] = [];
-    for (const item of customItems) {
-      const category = item.category?.trim();
-      if (!category) {
-        uncategorized.push(item);
-        continue;
-      }
-      const bucket = byCategory.get(category);
-      if (bucket) bucket.push(item);
-      else byCategory.set(category, [item]);
-    }
-    const groups = [...byCategory.entries()]
-      .sort(([a], [b]) => a.localeCompare(b, i18n.language))
-      .map(([name, items]) => ({ name, items }));
-    if (uncategorized.length > 0) {
-      groups.push({ name: t("home:reactionPicker.uncategorized"), items: uncategorized });
-    }
-    return groups;
-  }, [customItems, i18n.language, t]);
+  const customGroups: PickerGroup[] = useMemo(
+    () => groupCustomItems(customItems, t("home:reactionPicker.uncategorized"), i18n.language),
+    [customItems, i18n.language, t]
+  );
 
   const frequentItems: PickerItem[] = useMemo(() => {
     // `f.content` はDBの生content（`:shortcode@.:` 等ホスト付きになりうる）なので、shortcode
@@ -322,21 +337,36 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
       });
   }, [frequent, customItems, unicodeOnly]);
 
-  const searchResults: PickerItem[] | null = useMemo(() => {
+  const searchResults: { items: PickerItem[]; groups: PickerGroup[] | null } | null = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return null;
     const customMatches = unicodeOnly ? [] : customItems.filter((i) => i.label.toLowerCase().includes(q));
-    const unicodeMatches: PickerItem[] = allUnicodeEmojis
-      .filter((e) => {
-        if (e.emoji.includes(q)) return true;
-        if (e.name.toLowerCase().includes(q)) return true;
-        const words = annotations.get(e.emoji);
-        return words?.some((w) => w.toLowerCase().includes(q)) ?? false;
-      })
-      .slice(0, SEARCH_RESULT_LIMIT)
-      .map((e) => ({ key: `u:${e.emoji}`, content: e.emoji, label: e.name }));
-    return [...customMatches, ...unicodeMatches];
-  }, [query, customItems, annotations, unicodeOnly]);
+    // Unicode 側は件数を絞りつつ、どのグループの一致かを保ったまま集める。
+    let unicodeBudget = SEARCH_RESULT_LIMIT;
+    const unicodeMatchGroups: PickerGroup[] = [];
+    for (const group of unicodeGroups) {
+      if (unicodeBudget <= 0) break;
+      const matched = group.items
+        .filter((item) => {
+          if (item.content.includes(q)) return true;
+          if (item.label.toLowerCase().includes(q)) return true;
+          const words = annotations.get(item.content);
+          return words?.some((w) => w.toLowerCase().includes(q)) ?? false;
+        })
+        .slice(0, unicodeBudget);
+      unicodeBudget -= matched.length;
+      if (matched.length > 0) unicodeMatchGroups.push({ ...group, items: matched });
+    }
+    const items = [...customMatches, ...unicodeMatchGroups.flatMap((g) => g.items)];
+    const groups =
+      items.length >= SEARCH_GROUPING_THRESHOLD
+        ? [
+            ...groupCustomItems(customMatches, t("home:reactionPicker.uncategorized"), i18n.language),
+            ...unicodeMatchGroups,
+          ]
+        : null;
+    return { items, groups };
+  }, [query, customItems, annotations, unicodeOnly, t, i18n.language]);
 
   function renderItem(item: PickerItem) {
     const span = item.imageUrl ? emojiAspectSpan(item.width, item.height) : 1;
@@ -403,8 +433,10 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
         {loading ? (
           <p className={styles.message}>{t("common:loading")}</p>
         ) : query.trim() ? (
-          searchResults && searchResults.length > 0 ? (
-            <PagedGrid items={searchResults} rootRef={bodyRef} renderItem={renderItem} />
+          searchResults && searchResults.groups ? (
+            <PagedGroupList groups={searchResults.groups} rootRef={bodyRef} renderItem={renderItem} />
+          ) : searchResults && searchResults.items.length > 0 ? (
+            <PagedGrid items={searchResults.items} rootRef={bodyRef} renderItem={renderItem} />
           ) : (
             <p className={styles.message}>{t("home:reactionPicker.noResults")}</p>
           )
