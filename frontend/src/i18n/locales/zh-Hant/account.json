@@ -134,6 +134,7 @@
     "followImportTitle": "追蹤匯入",
     "description": "請每行輸入一個要匯入的帳戶ID。也可以拖曳文字檔案來載入。",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "讀取 CSV 檔案",
     "importButton": "開始匯入",
     "importing": "啟動中…",
     "cancelButton": "取消",

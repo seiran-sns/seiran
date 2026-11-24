@@ -134,6 +134,7 @@
     "followImportTitle": "关注导入",
     "description": "每行输入一个要导入的账户ID。也可以拖放文本文件来加载。",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "读取 CSV 文件",
     "importButton": "开始导入",
     "importing": "启动中…",
     "cancelButton": "取消",

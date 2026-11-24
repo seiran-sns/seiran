@@ -12,7 +12,7 @@ const POLL_INTERVAL_MS = 1500;
 
 /** 設定画面「🚚 インポート・エクスポート」。改行区切りのID一覧（隠し仕様として各行を
  * カンマ区切りで分割し1列目のみを識別子として読む、Misskeyフォローエクスポート対応）を
- * 貼り付け or .txt ドラッグ&ドロップで読み込み、非同期ジョブとして一括フォローする。 */
+ * 貼り付け・ファイル選択・ドラッグ&ドロップで読み込み、非同期ジョブとして一括フォローする。 */
 export default function FollowImportSettingsPage() {
   const { t } = useTranslation();
 
@@ -28,6 +28,7 @@ export default function FollowImportSettingsPage() {
   const [error, setError] = useState("");
   const [dragActive, setDragActive] = useState(false);
   const pollRef = useRef<number | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   function stopPolling() {
     if (pollRef.current !== null) {
@@ -154,16 +155,39 @@ export default function FollowImportSettingsPage() {
           onDrop={onDrop}
         />
 
-        <button
-          type="button"
-          className={styles.importButton}
-          disabled={isRunning || starting || !text.trim()}
-          onClick={onImport}
-        >
-          {starting
-            ? t("account:importExport.importing")
-            : t("account:importExport.importButton")}
-        </button>
+        {/* ドラッグ&ドロップはタッチ端末で使えないため、ファイル選択ボタンも置く。 */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".csv,.txt,text/csv,text/plain"
+          className={styles.hiddenFileInput}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) readFile(file);
+            // 同じファイルを選び直しても onChange が発火するように空にする。
+            e.target.value = "";
+          }}
+        />
+        <div className={styles.buttonRow}>
+          <button
+            type="button"
+            className={styles.fileButton}
+            disabled={isRunning || starting}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            {t("account:importExport.fileButton")}
+          </button>
+          <button
+            type="button"
+            className={styles.importButton}
+            disabled={isRunning || starting || !text.trim()}
+            onClick={onImport}
+          >
+            {starting
+              ? t("account:importExport.importing")
+              : t("account:importExport.importButton")}
+          </button>
+        </div>
 
         {status && status.status !== "idle" && (
           <div className={styles.progress}>

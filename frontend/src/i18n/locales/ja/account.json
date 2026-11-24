@@ -134,6 +134,7 @@
     "followImportTitle": "フォローインポート",
     "description": "フォローしたいアカウントのIDを1行に1件ずつ入力してインポートしてください。テキストファイルをドラッグ&ドロップして読み込むこともできます。",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "CSVファイルを読み込む",
     "importButton": "インポート開始",
     "importing": "開始中…",
     "cancelButton": "キャンセル",

@@ -134,6 +134,7 @@
     "followImportTitle": "Follow import",
     "description": "Enter one account ID per line to import your follows. You can also drag and drop a text file to load it.",
     "textareaPlaceholder": "@alice\n@bob@mastodon.social\ndid:plc:xxxxxxxx",
+    "fileButton": "Load CSV file",
     "importButton": "Start import",
     "importing": "Starting…",
     "cancelButton": "Cancel",
