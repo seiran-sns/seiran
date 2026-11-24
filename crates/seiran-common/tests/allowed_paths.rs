@@ -197,6 +197,10 @@ fn allowlist_covers_every_route() {
         "/tags/日本語",
         // プロフィール（`/:acct`）の acct の書き方
         "/@alice",
+        "/@relay-agent",
+        "/@a_b.c@mastodon.social",
+        "/@alice@example.com:8443",
+        "/@alice@example.xn--p1ai",
         "/@alice@example.com",
         "/@alice.bsky.social",
         "/@did:plc:ewvi7nxzyoun6zhxrhs64oiz",
@@ -257,6 +261,8 @@ fn allowlist_rejects_scanner_paths() {
         "/api/v2/.env",
         "/api/v3/site",
         "/api/wp-login.php",
+        "/@x/wp-login.php",
+        "/@.env",
         "/xrpc/.env",
         "/xrpc/../../etc/passwd",
     ] {

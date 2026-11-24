@@ -31,8 +31,12 @@
 # WebFinger・NodeInfo・ATP の DID 解決
 ^/\.well-known/(webfinger|nodeinfo|atproto-did|did\.json)$
 ^/nodeinfo/2\.[01]$
-# ActivityPub（アクター・inbox・ノート・Announce）とプロフィールの OGP
-^/(inbox|users/[A-Za-z0-9_-]+(/(inbox|outbox|lists(/[^/]+)?|collections/featured))?|(notes|announces)/[0-9]+|@[^/]+)$
+# ActivityPub（アクター・inbox・ノート・Announce）
+^/(inbox|users/[A-Za-z0-9_-]+(/(inbox|outbox|lists(/[^/]+)?|collections/featured))?|(notes|announces)/[0-9]+)$
+# プロフィール（SPA と OGP）。`@ユーザー名@ドメイン`（リモート）・`@ハンドル`（ATP）・
+# `@ユーザー名`（ローカル）・`@DID`。リモートのユーザー名は他の実装が決めるので `_`・`.` も許す。
+# ドメインは punycode（`xn--`）の TLD とポートを許す
+^/@(([-_.a-zA-Z\d]+@)?([-a-zA-Z\d]+\.)+([a-zA-Z]+|xn--[-a-zA-Z\d]+)(:\d+)?|[-a-zA-Z\d]+|did:(plc:[a-z2-7]+|web:([-a-zA-Z\d]+\.)+[a-zA-Z]+))$
 # 単独のバックエンドのパス。manifest.json・robots.txt・url・emojis・avatar・emoji は
 # 他のサーバー・Misskey 系クライアントが Misskey と同じ URL として取りに来るもの
 ^/(health|favicon\.ico|manifest\.(webmanifest|json)|robots\.txt|url|emojis/[^/]+|avatar/@[^/]+|emoji/[^/]+|streaming|proxy(/.*)?|(miauth|auth)/[^/]+|oauth/(authorize|token|revoke))$
