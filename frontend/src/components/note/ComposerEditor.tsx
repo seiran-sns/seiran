@@ -251,6 +251,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
    * 文字列がDOMごと消えて変換が壊れる。変換中は保留し、compositionendで本文を同期した
    * 後にまとめて反映する。 */
   const deferredDecorations = useRef<(() => void)[]>([]);
+  const imeSentinel = useRef<Text | null>(null);
   function applyDecorationUpdate(update: () => void) {
     if (composing.current) {
       deferredDecorations.current.push(update);
@@ -383,6 +384,39 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     editorRef.current.focus();
     restoreSelection(editorRef.current, initialCaret.current);
   }, [autoFocus]);
+
+  /** メンション等の装飾spanの末尾でIME変換を始めると、ブラウザは未確定文字をspanの中へ
+   * 入れるので、変換中の文字が装飾と同じ見た目になる。キャレットをspanの直後の要素境界や
+   * 空のテキストノードへ動かしてもブラウザがspanの末尾へ戻してしまうため、spanの直後に
+   * ゼロ幅スペースだけのテキストノードを差し込んでその後ろへキャレットを置く。
+   * 差し込んだ文字は`removeImeSentinel`で変換の確定時に取り除く。 */
+  function moveCaretOutOfDecorationForIme() {
+    const editor = editorRef.current;
+    const selection = window.getSelection();
+    const node = selection?.anchorNode;
+    const span = node?.parentElement;
+    if (
+      !editor ||
+      !selection?.isCollapsed ||
+      node?.nodeType !== Node.TEXT_NODE ||
+      !span ||
+      span === editor ||
+      !editor.contains(span) ||
+      selection.anchorOffset !== (node.textContent ?? "").length
+    )
+      return;
+    const sentinel = document.createTextNode("\u200b");
+    span.after(sentinel);
+    selection.collapse(sentinel, 1);
+    imeSentinel.current = sentinel;
+  }
+
+  function removeImeSentinel() {
+    const sentinel = imeSentinel.current;
+    imeSentinel.current = null;
+    if (sentinel?.isConnected && sentinel.data.startsWith("\u200b"))
+      sentinel.deleteData(0, 1);
+  }
 
   function updateFromDom() {
     const editor = editorRef.current;
@@ -548,9 +582,13 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
             : null;
           if (next !== null) setCaret(next);
         }}
-        onCompositionStart={() => (composing.current = true)}
+        onCompositionStart={() => {
+          composing.current = true;
+          moveCaretOutOfDecorationForIme();
+        }}
         onCompositionEnd={() => {
           composing.current = false;
+          removeImeSentinel();
           updateFromDom();
           const deferred = deferredDecorations.current;
           deferredDecorations.current = [];

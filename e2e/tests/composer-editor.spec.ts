@@ -459,6 +459,39 @@ test("IME変換中にメンション存在確認が返っても未確定文字�
   );
 });
 
+test("メンションの直後で始めたIME変換の未確定文字はメンションの装飾を受けず、確定後の本文に余計な文字を残さない", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposerimeafter");
+  const target = await registerUserViaApi(request, "e2ecomposerimeaftertarget");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.click();
+  await editor.pressSequentially(`@${target.username}`);
+  const mention = editor.locator("span", { hasText: `@${target.username}` });
+  await expect(mention).toHaveCSS("color", "rgb(22, 139, 210)");
+
+  // 実際のIMEと同じ経路で未確定文字を入れるため、CDPで変換を起こす。
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.imeSetComposition", { text: "てす", selectionStart: 2, selectionEnd: 2 });
+  await expect(mention).toHaveText(`@${target.username}`);
+  await cdp.send("Input.insertText", { text: "テスト" });
+  await expect(editor).toHaveText(`@${target.username}テスト`);
+
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().includes("/api/notes/create") && res.request().method() === "POST"
+    ),
+    editor.press("Control+Enter"),
+  ]);
+  const note = (await response.json()) as { text: string };
+  expect(note.text).toBe(`@${target.username}テスト`);
+});
+
 test("Enterキー1回につき改行が1個だけ入り揺り戻しが起きない", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2ecomposerenter");
   await seedAuth(page, author.token);
