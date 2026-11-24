@@ -1,0 +1,50 @@
+# seiran が外部に公開する URL パスの許可リスト。
+#
+# 前段（Cloudflare Tunnel の ingress 等）でこのリストに当たるパスだけを seiran へ通し、
+# それ以外（脆弱性スキャン等）を手前で 404 にするためのもの。公開イメージでは
+# /usr/share/seiran/allowed-paths.txt に置く（docs/architecture.md 3.1節）。
+#
+# 書式:
+# - `[apex]` はインスタンスのドメイン（LOCAL_DOMAIN）、`[subdomains]` はそのサブドメイン
+#   （`*.LOCAL_DOMAIN`。ATP ハンドル `{username}.{domain}` の検証用）に向けたパス。
+# - 1行に1つの正規表現。各行が `^` で始まるので、節の全行を `|` で繋げば1本の正規表現になる。
+#   前段には節ごとにその1本を1つのルールとして登録するか、1行ずつルールにする。
+# - 照合先はパーセントデコード済みのパス（クエリ文字列を含まない）。部分一致で照合される
+#   ので、各行を `^` で始める。
+# - 文法は RE2（Go の regexp。cloudflared が使う）と PCRE の共通部分に限る（後方参照・
+#   先読み等は使わない）。
+# - /api/ は次の階層（/api/v1/・/api/v2/ はさらに次の階層）までを列挙し、それより下は
+#   問わない。全ルートを列挙すると、ルートを足すたびに前段の設定を直すまで版を上げられなくなる。
+#
+# バックエンドと SPA の全ルートがどれかの行に当たることを
+# crates/seiran-common/tests/allowed_paths.rs が検査する。
+
+[apex]
+# トップページ
+^/$
+# 自前 API・Misskey 互換 API（/api/ の次の階層を列挙する）
+^/api/(about|account|actors|admin|announcements|ap|app|auth|auth-sessions|avatars|blocks|dm|drive|emojis|endpoints|follow-requests|following|follows|hashtags|headers|i|lists|media|meta|miauth|migration|mutes|notes|notifications|oauth|open|reactions|reports|repost-mutes|setup|site-icon|stats|streaming|users)(/|$)
+# Mastodon 互換 API（/api/v1/・/api/v2/ の次の階層を列挙する）
+^/api/v1/(accounts|announcements|apps|blocks|bookmarks|conversations|custom_emojis|domain_blocks|endorsements|favourites|featured_tags|filters|follow_requests|followed_tags|instance|lists|markers|media|mutes|notifications|polls|preferences|scheduled_statuses|statuses|streaming|suggestions|tags|timelines|trends)(/|$)
+^/api/v2/(filters|instance|media|search|suggestions)(/|$)
+# AT Protocol XRPC。未実装の NSID も AppView へ中継するので、NSID の形で絞る
+^/xrpc/[a-z][a-z0-9-]*(\.[a-z0-9-]+)+\.[a-zA-Z][a-zA-Z0-9]*$
+# WebFinger・NodeInfo・ATP の DID 解決
+^/\.well-known/(webfinger|nodeinfo|atproto-did|did\.json)$
+^/nodeinfo/2\.[01]$
+# ActivityPub（アクター・inbox・ノート・Announce）
+^/(inbox|users/[A-Za-z0-9_-]+(/(inbox|outbox|lists(/[^/]+)?|collections/featured))?|(notes|announces)/[0-9]+)$
+# プロフィール（SPA と OGP）。`@ユーザー名@ドメイン`（リモート）・`@ハンドル`（ATP）・
+# `@ユーザー名`（ローカル）・`@DID`。リモートのユーザー名は他の実装が決めるので `_`・`.` も許す。
+# ドメインは punycode（`xn--`）の TLD とポートを許す
+^/@(([-_.a-zA-Z\d]+@)?([-a-zA-Z\d]+\.)+([a-zA-Z]+|xn--[-a-zA-Z\d]+)(:\d+)?|[-a-zA-Z\d]+|did:(plc:[a-z2-7]+|web:([-a-zA-Z\d]+\.)+[a-zA-Z]+))$
+# 単独のバックエンドのパス。manifest.json・robots.txt・url・emojis・avatar・emoji は
+# 他のサーバー・Misskey 系クライアントが Misskey と同じ URL として取りに来るもの
+^/(health|favicon\.ico|manifest\.(webmanifest|json)|robots\.txt|url|emojis/[^/]+|avatar/@[^/]+|emoji/[^/]+|streaming|proxy(/.*)?|(miauth|auth)/[^/]+|oauth/(authorize|token|revoke))$
+# フロントエンドのビルド成果物
+^/(assets/[A-Za-z0-9_][A-Za-z0-9_.-]*\.(js|css|woff2?|png|svg|webp)|twemoji/[0-9a-f-]+\.svg)$
+# SPA のページ（直接開く・再読み込みするとバックエンドが index.html を返す）
+^/(search|notifications|about|profile|messages(/(new|[0-9]+))?|login|register(/migrate)?|forgot-password|verify-email(-change)?|totp-disable|reset-password|oauth-connect|admin(/[a-z-]+)?|settings(/[a-z-]+)?|lists/[0-9]+|(tags|connect|misskey-connect)/[^/]+)$
+
+[subdomains]
+^/\.well-known/atproto-did$
