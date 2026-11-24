@@ -143,6 +143,17 @@ function restoreSelection(root: HTMLElement, target: number) {
   selection?.addRange(range);
 }
 
+/** 装飾の更新で本文DOMを作り直す前に、フォーカス中ならキャレット位置を控えておく
+ * （作り直した後のuseLayoutEffectで復元する）。 */
+function preserveCaretForRender(
+  editor: HTMLElement | null,
+  pendingCaret: { current: number | null },
+) {
+  if (editor && document.activeElement === editor) {
+    pendingCaret.current = selectionOffset(editor);
+  }
+}
+
 function actorValue(actor: ActorSuggestion) {
   return `@${actor.target}`;
 }
@@ -179,10 +190,18 @@ function escapeHtml(value: string) {
     .replace(/"/g, "&quot;");
 }
 
-/** プレーンテキスト片中のUnicode絵文字を、カスタム絵文字ショートコードと同じ「編集不可の
- * atomicノード（`contenteditable="false"` + `data-value`）」としてtwemoji画像へ変換したHTML
- * にする。`nodeValue`/`restoreSelection`はdata-value属性を持つ要素をそのまま1つの値として
- * 扱うため、既存のcaret計算ロジックを変えずに絵文字を画像化できる。 */
+/** 絵文字1つ分のatomicノード。`nodeValue`/`restoreSelection`はdata-value属性を持つ要素を
+ * そのまま1つの値として扱う。`<span contenteditable="false">`で包まず素の`<img>`にするのは、
+ * 包むと直後にテキストノードが無い位置（行末の絵文字の直後など）でWebKitがキャレットを
+ * 行の右端や左端に描き、Chromium/FirefoxではHomeでキャレットがspanの内側へ入って
+ * 行頭からのBackspaceが効かなくなるため。`<img>`はブラウザが1文字分の置換要素として
+ * 扱うので、キャレット移動・描画・削除をネイティブ動作に任せられる。 */
+function emojiImgHtml(value: string, src: string, className: string): string {
+  return `<img class="${className}" data-value="${escapeHtml(value)}" src="${escapeHtml(src)}" alt="${escapeHtml(value)}" title="${escapeHtml(value)}" draggable="false">`;
+}
+
+/** プレーンテキスト片中のUnicode絵文字を、カスタム絵文字ショートコードと同じatomicノード
+ * （`emojiImgHtml`）としてtwemoji画像へ変換したHTMLにする。 */
 function twemojiHtml(text: string, emojiClassName: string): string {
   const matches = findTwemojiMatches(text);
   if (matches.length === 0) return escapeHtml(text).replace(/\n/g, "<br>");
@@ -193,7 +212,7 @@ function twemojiHtml(text: string, emojiClassName: string): string {
     if (start > cursor) {
       html += escapeHtml(text.slice(cursor, start)).replace(/\n/g, "<br>");
     }
-    html += `<span class="${emojiClassName}" contenteditable="false" data-value="${escapeHtml(m.text)}"><img src="${m.url}" alt="${escapeHtml(m.text)}"></span>`;
+    html += emojiImgHtml(m.text, m.url, emojiClassName);
     cursor = end;
   }
   if (cursor < text.length) {
@@ -219,20 +238,31 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     new Set(),
   );
   const [active, setActive] = useState(-1);
+  /** 候補を出しているトークンの開始位置。候補は文字を書き足したとき（`updateFromDom`で
+   * 本文が伸びたとき）にだけ開き、カーソルが既存のメンション等へ入っただけでは開かない。
+   * 開いた後はカーソルが同じトークンの中にある間だけ開いたままにし、Esc・候補の決定・
+   * トークンから出ることで閉じる。 */
+  const [suggestTokenStart, setSuggestTokenStart] = useState<number | null>(
+    null,
+  );
 
-  function preserveCaretForRender() {
-    const editor = editorRef.current;
-    if (editor && document.activeElement === editor) {
-      pendingCaret.current = selectionOffset(editor);
+  /** 非同期に届いた結果（メンション存在確認・カスタム絵文字一覧）で装飾を更新する。
+   * 更新はdangerouslySetInnerHTMLで本文DOMを作り直すので、IMEの変換中に行うと未確定の
+   * 文字列がDOMごと消えて変換が壊れる。変換中は保留し、compositionendで本文を同期した
+   * 後にまとめて反映する。 */
+  const deferredDecorations = useRef<(() => void)[]>([]);
+  function applyDecorationUpdate(update: () => void) {
+    if (composing.current) {
+      deferredDecorations.current.push(update);
+      return;
     }
+    preserveCaretForRender(editorRef.current, pendingCaret);
+    update();
   }
 
   useEffect(() => {
     fetchCustomEmojis()
-      .then((rows) => {
-        preserveCaretForRender();
-        setEmojis(rows);
-      })
+      .then((rows) => applyDecorationUpdate(() => setEmojis(rows)))
       .catch(() => setEmojis([]));
   }, []);
 
@@ -253,12 +283,18 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
         // 装飾クラスの更新でdangerouslySetInnerHTMLが差し替わっても、入力中の
         // caretを先頭へ飛ばさない。これが無いと逐次入力中の部分IDチェック結果が
         // 返った時点で、その後のID入力とサジェストが壊れる。
-        preserveCaretForRender();
-        setCheckedMentions((current) => new Set([...current, ...unresolved]));
-        setKnownMentions(
-          (current) =>
-            new Set([...current, ...resolved.filter((v): v is string => !!v)]),
-        );
+        applyDecorationUpdate(() => {
+          setCheckedMentions(
+            (current) => new Set([...current, ...unresolved]),
+          );
+          setKnownMentions(
+            (current) =>
+              new Set([
+                ...current,
+                ...resolved.filter((v): v is string => !!v),
+              ]),
+          );
+        });
       })
       .catch(() => {});
     return () => {
@@ -267,11 +303,18 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
   }, [value, checkedMentions]);
 
   const rawToken = value.slice(0, caret).match(TOKEN_RE)?.[0] ?? "";
-  const token =
+  const tokenAtCaret =
     rawToken === ":" &&
     emojis.some((emoji) => value.slice(0, caret).endsWith(`:${emoji.name}:`))
       ? ""
       : rawToken;
+  const tokenStart = caret - tokenAtCaret.length;
+  const suggestOpen = tokenAtCaret !== "" && suggestTokenStart === tokenStart;
+  /** 候補の対象トークン。候補を閉じている間は空にして、アクター検索も止める。 */
+  const token = suggestOpen ? tokenAtCaret : "";
+  useEffect(() => {
+    if (suggestTokenStart !== null && !suggestOpen) setSuggestTokenStart(null);
+  }, [suggestTokenStart, suggestOpen]);
   useEffect(() => {
     if (!token.startsWith("@")) {
       setActors([]);
@@ -332,7 +375,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
   // Bsky配送トグルの切り替えで絵文字展開の有無が変わりDOMが作り直されるため、
   // 直前のcaret位置を保存して上のuseLayoutEffectで復元する。
   useEffect(() => {
-    preserveCaretForRender();
+    preserveCaretForRender(editorRef.current, pendingCaret);
   }, [federateToBsky]);
 
   useEffect(() => {
@@ -351,7 +394,12 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     // 自動的に残す。これはユーザーが入力した改行ではないため空文字列として扱う。
     const isPlaceholderBr =
       editor.childNodes.length === 1 && editor.firstChild?.nodeName === "BR";
-    onChange(isPlaceholderBr ? "" : nodeValue(editor));
+    const next = isPlaceholderBr ? "" : nodeValue(editor);
+    if (next.length > value.length) {
+      const typed = next.slice(0, nextCaret).match(TOKEN_RE)?.[0];
+      setSuggestTokenStart(typed ? nextCaret - typed.length : null);
+    }
+    onChange(next);
   }
 
   function insert(candidate: Candidate) {
@@ -361,6 +409,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     pendingCaret.current = nextCaret;
     setCaret(nextCaret);
     setActive(-1);
+    setSuggestTokenStart(null);
     onChange(next);
     editorRef.current?.focus();
   }
@@ -392,6 +441,13 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
     if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
       event.preventDefault();
       onSubmitShortcut();
+      return;
+    }
+    if (candidates.length && event.key === "Escape") {
+      // 投稿欄を載せたモーダルもwindowでEscを拾って閉じるため、候補を閉じるだけで止める。
+      event.preventDefault();
+      event.stopPropagation();
+      setSuggestTokenStart(null);
       return;
     }
     if (
@@ -427,28 +483,6 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
       onChange(next);
       return;
     }
-    if (event.key === "Backspace" && !window.getSelection()?.isCollapsed)
-      return;
-    if (event.key === "Backspace") {
-      const emoji = emojis.find((item) => {
-        const shortcode = `:${item.name}:`;
-        return (
-          value.slice(0, caret).endsWith(shortcode) ||
-          value.slice(caret).startsWith(shortcode)
-        );
-      });
-      if (emoji) {
-        event.preventDefault();
-        const shortcode = `:${emoji.name}:`;
-        const start = value.slice(0, caret).endsWith(shortcode)
-          ? caret - shortcode.length
-          : caret;
-        const removeAt = start === caret ? start : start + shortcode.length - 1;
-        pendingCaret.current = removeAt;
-        setCaret(removeAt);
-        onChange(value.slice(0, removeAt) + value.slice(removeAt + 1));
-      }
-    }
   }
 
   const emojiByCode = new Map(
@@ -466,10 +500,10 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
           if (federateToBsky) {
             // Bskyはカスタム絵文字を画像展開できないため、画像化せずショートコードの
             // まま警告色で表示する。編集可能なテキストとして扱うため
-            // mentionKnown/mentionUnknown同様contenteditable制御・data-valueは付けない。
+            // mentionKnown/mentionUnknown同様data-valueは付けない。
             return `<span class="${styles.emojiBskyWarn}" title="${escapeHtml(part)}">${escapeHtml(part)}</span>`;
           }
-          return `<span class="${styles.emoji}" contenteditable="false" data-value="${escapeHtml(part)}"><img src="${escapeHtml(emoji.url)}" alt="${escapeHtml(part)}" title="${escapeHtml(part)}"></span>`;
+          return emojiImgHtml(part, emoji.url, styles.emoji);
         }
         if (part.startsWith("@")) {
           const className = knownMentions.has(part)
@@ -518,6 +552,9 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
         onCompositionEnd={() => {
           composing.current = false;
           updateFromDom();
+          const deferred = deferredDecorations.current;
+          deferredDecorations.current = [];
+          deferred.forEach((update) => update());
         }}
         onPaste={(event: ClipboardEvent<HTMLDivElement>) => {
           const item = Array.from(event.clipboardData.items).find((entry) =>

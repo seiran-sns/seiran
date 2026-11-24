@@ -46,9 +46,13 @@
 
 .emoji {
   display: inline-block;
+  width: auto;
+  height: 1.6em;
   max-width: 100%;
   vertical-align: top;
-  user-select: all;
+  object-fit: contain;
+  /* iOS Safari で長押しした際に画像の共有メニューが出て、本文の選択操作を妨げないようにする。 */
+  -webkit-touch-callout: none;
 }
 
 /* Bsky配送オン中、カスタム絵文字ショートコードを画像展開せず警告表示するためのスタイル
@@ -59,14 +63,6 @@
   font-weight: 700;
   color: var(--warn);
   background: rgba(251, 191, 36, 0.25);
-}
-
-.emoji img {
-  display: block;
-  width: auto;
-  height: 1.6em;
-  max-width: 100%;
-  object-fit: contain;
 }
 
 .suggestions {

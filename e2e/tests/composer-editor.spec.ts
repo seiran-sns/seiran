@@ -129,7 +129,7 @@ test("逐次入力中にID装飾が更新されてもFedi/Bsky候補と完全修
   );
 });
 
-test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常テキストへ戻せる", async ({ page, request }) => {
+test("カスタム絵文字候補を画像へ置換し直後のBackspaceで丸ごと消せる", async ({ page, request }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   const author = await registerUserViaApi(request, "e2ecomposeremoji");
@@ -177,7 +177,41 @@ test("カスタム絵文字候補を画像へ置換し境界Backspaceで通常�
   await page.waitForTimeout(100);
   expect(pageErrors).toEqual([]);
   await expect(emoji).toHaveCount(0);
-  await expect(editor).toContainText(":wide_emoji");
+  await expect(editor).not.toContainText("wide_emoji");
+});
+
+test("絵文字の直前のBackspaceは手前の文字を消し、行頭が絵文字の行でHome→Backspaceすると前の行と結合する", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposeremojicaret");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.click();
+  await page.keyboard.insertText("ab 😀 cd");
+  await expect(editor.getByRole("img", { name: "😀" })).toHaveCount(1);
+  // "ab |😀 cd" へ戻してBackspace。絵文字ではなく手前の空白が消える。
+  for (let i = 0; i < 4; i += 1) await editor.press("ArrowLeft");
+  await editor.press("Backspace");
+  await editor.press("End");
+  await editor.press("Enter");
+  await page.keyboard.insertText("😀");
+  await editor.pressSequentially("y");
+  // 行頭の絵文字の手前へ移動してBackspace。改行が消えて前の行と結合する。
+  await editor.press("Home");
+  await editor.press("Backspace");
+
+  const [response] = await Promise.all([
+    page.waitForResponse(
+      (res) => res.url().includes("/api/notes/create") && res.request().method() === "POST"
+    ),
+    editor.press("Control+Enter"),
+  ]);
+  const note = (await response.json()) as { text: string };
+  expect(note.text).toBe("ab😀 cd😀y");
 });
 
 test("連結したshortcodeは閉じコロン後が英数字でない最後のものだけ絵文字化する", async ({ page, request }) => {
@@ -256,6 +290,53 @@ test("Bsky配送オン中はカスタム絵文字shortcodeを警告色のまま�
   await expect(bskyBtn).toHaveAttribute("title", "Blueskyに配送");
 });
 
+test("入力候補は書き足したときだけ開き、決定・Escで閉じ、既存IDへカーソルが入っただけでは開かない", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposersuggestopen");
+  await page.route("**/api/actors/suggest?**", (route) =>
+    route.fulfill({
+      json: [{
+        actor_id: "9001",
+        username: "fedi-user",
+        domain: "remote.example",
+        display_name: "Fedi user",
+        actor_type: "fedi",
+        avatar_url: null,
+        target: "fedi-user@remote.example",
+      }],
+    })
+  );
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  const listbox = page.getByRole("listbox", { name: "入力候補" });
+  await editor.click();
+  await editor.pressSequentially("@fedi");
+  await expect(listbox).toBeVisible();
+  await editor.press("Enter");
+  await expect(editor).toHaveText("@fedi-user@remote.example");
+  await expect(listbox).toHaveCount(0);
+
+  await editor.pressSequentially(" ok");
+  // 既存IDの末尾・内側へカーソルを動かしても候補は開かない。
+  for (let i = 0; i < 6; i += 1) await editor.press("ArrowLeft");
+  await page.waitForTimeout(500);
+  await expect(listbox).toHaveCount(0);
+
+  // IDに文字を書き足すと開き、Escで閉じる。同じIDの中を動いても閉じたまま。
+  await editor.pressSequentially("x");
+  await expect(listbox).toBeVisible();
+  await editor.press("Escape");
+  await expect(listbox).toHaveCount(0);
+  await editor.press("ArrowLeft");
+  await page.waitForTimeout(500);
+  await expect(listbox).toHaveCount(0);
+});
+
 test("上下矢印で入力候補の選択を移動できる", async ({ page, request }) => {
   const author = await registerUserViaApi(request, "e2ecomposerarrows");
   await seedAuth(page, author.token);
@@ -321,6 +402,61 @@ test("IME未確定中は入力DOMへ干渉せず、確定後に本文へ同期�
     }));
   });
   await expect(editor).toHaveText("日本");
+});
+
+test("IME変換中にメンション存在確認が返っても未確定文字を消さず、確定後に装飾を反映する", async ({
+  page,
+  request,
+}) => {
+  const author = await registerUserViaApi(request, "e2ecomposerimemention");
+  const target = await registerUserViaApi(request, "e2ecomposerimetarget");
+  await seedAuth(page, author.token);
+  await page.goto("/");
+  await page.waitForTimeout(2_000);
+
+  // 存在確認の応答を変換開始後まで止めておき、変換中に結果が届く状況を作る。
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  await page.route("**/api/actors/suggest**", async (route) => {
+    await gate;
+    await route.continue();
+  });
+
+  const editor = page.locator('[contenteditable="true"]').first();
+  await editor.fill(`@${target.username} `);
+  await editor.evaluate((element) => {
+    element.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    const composingText = document.createTextNode("にほん");
+    element.append(composingText);
+    Object.assign(window, { __composerComposingText: composingText });
+    element.dispatchEvent(new InputEvent("input", {
+      bubbles: true,
+      data: "にほん",
+      inputType: "insertCompositionText",
+      isComposing: true,
+    }));
+  });
+
+  const suggested = page.waitForResponse((res) => res.url().includes("/api/actors/suggest"));
+  release();
+  await suggested;
+  await page.waitForTimeout(500);
+  expect(await editor.evaluate(() => (window as typeof window & {
+    __composerComposingText?: Node;
+  }).__composerComposingText?.isConnected)).toBe(true);
+
+  await editor.evaluate(() => {
+    const node = (window as typeof window & { __composerComposingText?: Text }).__composerComposingText!;
+    node.data = "日本";
+    node.parentElement!.closest('[contenteditable="true"]')!.dispatchEvent(
+      new CompositionEvent("compositionend", { bubbles: true, data: "日本" }),
+    );
+  });
+  await expect(editor).toHaveText(`@${target.username} 日本`);
+  await expect(editor.locator("span", { hasText: `@${target.username}` })).toHaveCSS(
+    "color",
+    "rgb(22, 139, 210)",
+  );
 });
 
 test("Enterキー1回につき改行が1個だけ入り揺り戻しが起きない", async ({ page, request }) => {
