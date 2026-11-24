@@ -60,6 +60,7 @@ pub const ACTOR_REFERENCES: &[ActorReference] = &[
         column: "actor_id",
         unique: &[key(&["cid"])],
     },
+    plain("atp_deferred_writes", "actor_id"),
     ActorReference {
         table: "atp_preferences",
         column: "actor_id",
