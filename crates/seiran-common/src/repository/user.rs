@@ -192,6 +192,16 @@ pub trait UserRepository: Send + Sync {
         show: bool,
     ) -> Result<(), sqlx::Error>;
 
+    /// 絵文字リアクションを使うか（オフなら❤️だけで反応し、付いたリアクションも表示しない）。
+    async fn find_use_emoji_reactions(&self, user_id: i64) -> Result<bool, sqlx::Error>;
+
+    /// 絵文字リアクションを使うかの設定を更新する。
+    async fn update_use_emoji_reactions(
+        &self,
+        user_id: i64,
+        enabled: bool,
+    ) -> Result<(), sqlx::Error>;
+
     /// 最終ログイン成功時刻を取得する（ブルートフォース判定ウィンドウの起点用、#223）。
     async fn find_last_login_success_at(
         &self,
@@ -489,6 +499,28 @@ impl UserRepository for PgUserRepository {
     ) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE users SET show_quick_reactions = $1, updated_at = NOW() WHERE id = $2")
             .bind(show)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await
+            .map(|_| ())
+    }
+
+    async fn find_use_emoji_reactions(&self, user_id: i64) -> Result<bool, sqlx::Error> {
+        let row: Option<(bool,)> =
+            sqlx::query_as("SELECT use_emoji_reactions FROM users WHERE id = $1")
+                .bind(user_id)
+                .fetch_optional(&self.pool)
+                .await?;
+        Ok(row.map(|(v,)| v).unwrap_or(true))
+    }
+
+    async fn update_use_emoji_reactions(
+        &self,
+        user_id: i64,
+        enabled: bool,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query("UPDATE users SET use_emoji_reactions = $1, updated_at = NOW() WHERE id = $2")
+            .bind(enabled)
             .bind(user_id)
             .execute(&self.pool)
             .await

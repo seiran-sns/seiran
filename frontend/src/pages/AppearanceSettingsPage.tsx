@@ -47,7 +47,7 @@ function detectAutoLanguage(): string {
   return "en";
 }
 
-/** 設定画面「表示」（#55, #127）。アカウントに保存する言語・ワンタッチリアクションバーの表示と、
+/** 設定画面「表示」（#55, #127）。アカウントに保存する言語・絵文字リアクション・ワンタッチリアクションバーの表示と、
  * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・ギガ節約モードを選択する。 */
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
@@ -68,6 +68,22 @@ export default function AppearanceSettingsPage() {
   const [quickReactionsError, setQuickReactionsError] = useState("");
   // この項目を返さない版のサーバーでは、従来どおり表示されている。
   const showQuickReactions = user?.show_quick_reactions ?? true;
+  const [emojiReactionsSaving, setEmojiReactionsSaving] = useState(false);
+  const [emojiReactionsError, setEmojiReactionsError] = useState("");
+  const useEmojiReactions = user?.use_emoji_reactions ?? true;
+
+  async function toggleEmojiReactions(enabled: boolean) {
+    setEmojiReactionsSaving(true);
+    setEmojiReactionsError("");
+    try {
+      await api.account.updateEmojiReactions(enabled);
+      updateUser({ use_emoji_reactions: enabled });
+    } catch (err) {
+      setEmojiReactionsError(getErrorMessage(err));
+    } finally {
+      setEmojiReactionsSaving(false);
+    }
+  }
 
   async function toggleQuickReactions(show: boolean) {
     setQuickReactionsSaving(true);
@@ -133,6 +149,26 @@ export default function AppearanceSettingsPage() {
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.emojiReactionsTitle")}
+        </h3>
+        {emojiReactionsError && <p className={styles.error}>{emojiReactionsError}</p>}
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            checked={useEmojiReactions}
+            disabled={emojiReactionsSaving}
+            onChange={(e) => toggleEmojiReactions(e.target.checked)}
+          />
+          {t("account:appearanceSettings.emojiReactionsLabel")}
+        </label>
+      </div>
+
+      {/* 絵文字リアクションを使わない間はワンタッチリアクションバーも出ないので、選べないことを示す。 */}
+      <div
+        className={`${styles.section} ${useEmojiReactions ? "" : styles.sectionDisabled}`}
+        aria-disabled={!useEmojiReactions}
+      >
+        <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.quickReactionsTitle")}
         </h3>
         {quickReactionsError && <p className={styles.error}>{quickReactionsError}</p>}
@@ -140,7 +176,7 @@ export default function AppearanceSettingsPage() {
           <input
             type="checkbox"
             checked={showQuickReactions}
-            disabled={quickReactionsSaving}
+            disabled={quickReactionsSaving || !useEmojiReactions}
             onChange={(e) => toggleQuickReactions(e.target.checked)}
           />
           {t("account:appearanceSettings.quickReactionsLabel")}

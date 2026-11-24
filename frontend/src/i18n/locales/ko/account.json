@@ -31,6 +31,8 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "언어 환경설정이 저장되었습니다.",
+    "emojiReactionsTitle": "이모지 리액션",
+    "emojiReactionsLabel": "이모지 리액션 사용 (끄면 ❤️로만 반응하고 게시물에 달린 리액션도 표시하지 않음)",
     "quickReactionsTitle": "원터치 리액션 바",
     "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시",
     "deviceGroupTitle": "이 기기 전용 설정",

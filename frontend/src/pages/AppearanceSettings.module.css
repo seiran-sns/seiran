@@ -9,6 +9,11 @@
   border-bottom: none;
 }
 
+/* 他の設定に従って選べない項目（絵文字リアクションを使わない間のワンタッチリアクションバー）。 */
+.sectionDisabled {
+  opacity: 0.45;
+}
+
 .sectionTitle {
   font-size: 0.85rem;
   font-weight: 700;

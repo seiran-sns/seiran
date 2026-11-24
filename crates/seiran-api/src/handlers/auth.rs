@@ -130,6 +130,9 @@ pub struct UserInfo {
     /// 投稿のボタンバーの下にワンタッチリアクションバー（よく使う絵文字）を出すか
     /// （設定画面「表示」）。
     pub show_quick_reactions: bool,
+    /// 絵文字リアクションを使うか（設定画面「表示」）。オフなら投稿のボタンバーは❤️だけになり、
+    /// 付いたリアクション・ワンタッチリアクションバーも出さない。
+    pub use_emoji_reactions: bool,
     /// ログイントークンは無期限のため、新しいフロントエンドはこの値を使わない
     /// （#222関連）。旧バージョンのフロントエンド（トークン有効期限があった当時の
     /// スライディング延命実装）が引き続き動作できるよう、後方互換のためだけに
@@ -153,7 +156,7 @@ pub struct UserInfo {
 
 impl UserInfo {
     /// 作成直後のアカウント（登録・初期セットアップ・DID転入）の応答。作成直後は表示言語
-    /// 「自動」・ガイド非表示なし・ワンタッチリアクションバー表示・凍結なし・転入未了なし・DID転出済みなし。転入経由の
+    /// 「自動」・ガイド非表示なし・ワンタッチリアクションバー表示・絵文字リアクションを使う・凍結なし・転入未了なし・DID転出済みなし。転入経由の
     /// 呼び出し元だけが `migration_status` を上書きする。
     pub(crate) fn new_account(
         id: i64,
@@ -174,6 +177,7 @@ impl UserInfo {
             language_preference: None,
             hidden_guides: Vec::new(),
             show_quick_reactions: true,
+            use_emoji_reactions: true,
             token,
             is_suspended: false,
             migration_status: None,
@@ -564,6 +568,11 @@ async fn load_user_info(
         .find_show_quick_reactions(user_id)
         .await
         .unwrap_or(true);
+    let use_emoji_reactions = state
+        .users
+        .find_use_emoji_reactions(user_id)
+        .await
+        .unwrap_or(true);
 
     Ok(UserInfo {
         id: user_id,
@@ -575,6 +584,7 @@ async fn load_user_info(
         language_preference,
         hidden_guides,
         show_quick_reactions,
+        use_emoji_reactions,
         token,
         is_suspended: actor.suspended_at.is_some(),
         migration_status: fetch_incomplete_migration_status(state, user_id).await,

@@ -31,6 +31,8 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "Spracheinstellung gespeichert.",
+    "emojiReactionsTitle": "Emoji-Reaktionen",
+    "emojiReactionsLabel": "Emoji-Reaktionen verwenden (wenn aus, reagierst du nur mit ❤️ und Reaktionen auf Beiträgen werden ausgeblendet)",
     "quickReactionsTitle": "Schnellreaktionsleiste",
     "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen",
     "deviceGroupTitle": "Einstellungen nur für dieses Gerät",

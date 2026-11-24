@@ -15,6 +15,10 @@ export interface User {
   /** 投稿のボタンバーの下にワンタッチリアクションバー（よく使う絵文字）を出すか（設定画面「表示」）。
    * この項目を返さない版のサーバーでは `undefined` で、表示する扱いにする。 */
   show_quick_reactions?: boolean;
+  /** 絵文字リアクションを使うか（設定画面「表示」）。オフなら投稿のボタンバーは❤️だけになり、
+   * 付いたリアクション・ワンタッチリアクションバーも出さない。この項目を返さない版のサーバーでは
+   * `undefined` で、使う扱いにする。 */
+  use_emoji_reactions?: boolean;
   /** `GET /api/auth/me`のたびに再発行される新しいJWT（スライディング延命）。
    * 呼び出し側でlocalStorageへ保存し直すこと。 */
   token: string;

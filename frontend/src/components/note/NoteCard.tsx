@@ -75,6 +75,9 @@ interface NoteCardProps {
  * `MessageContent`（メッセージ画面のDM本文表示）からも引用先カードとして使う。 */
 export function QuoteCard({ note }: { note: Note }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  // 絵文字リアクションを使わない設定では、付いたリアクションを出さない（`NoteCardActions` と同じ）。
+  const useEmojiReactions = user?.use_emoji_reactions ?? true;
   const [showContent, setShowContent] = useState(!note.contentWarning);
 
   return (
@@ -156,9 +159,11 @@ export function QuoteCard({ note }: { note: Note }) {
               )}
             </>
           )}
-          <div className={styles.quoteReactions}>
-            <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
-          </div>
+          {useEmojiReactions && (
+            <div className={styles.quoteReactions}>
+              <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
+            </div>
+          )}
         </>
       )}
     </section>

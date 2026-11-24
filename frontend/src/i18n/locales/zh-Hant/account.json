@@ -31,6 +31,8 @@
     "languageDe": "Deutsch",
     "languageFr": "Français",
     "saved": "已儲存語言偏好設定。",
+    "emojiReactionsTitle": "表情符號回應",
+    "emojiReactionsLabel": "使用表情符號回應（關閉後只能用 ❤️ 回應，也不會顯示貼文上的回應）",
     "quickReactionsTitle": "一鍵回應列",
     "quickReactionsLabel": "顯示常用表情符號的一鍵回應列",
     "deviceGroupTitle": "僅限此裝置的設定",
