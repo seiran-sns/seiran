@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "定时帖子",
+    "scheduledPostsPending": "有定时帖子",
+    "followRequests": "待审核的关注"
+  },
+  "scheduledPosts": {
+    "title": "定时帖子",
+    "description": "到了预定时间会自动发布。无法发布的定时帖子（例如延迟超过24小时）会留在这里，可以编辑后重新定时、立即发布或删除。",
+    "empty": "没有定时帖子。可以从发帖栏的🕒定时。",
+    "failed": "无法发布：",
+    "replyTo": "回复 {{acct}}：",
+    "quoteOf": "引用 {{acct}}：",
+    "edit": "编辑",
+    "editTitle": "编辑定时帖子",
+    "publishNow": "立即发布",
+    "delete": "删除",
+    "published": "已发布。",
+    "deleted": "已删除定时帖子。",
+    "publishConfirmTitle": "要立即发布吗？",
+    "publishConfirmBody": "不等预定时间，现在就以此内容发布。",
+    "deleteConfirmTitle": "要删除定时帖子吗？",
+    "deleteConfirmBody": "此定时帖子将不会发布并被删除。"
+  }
+}

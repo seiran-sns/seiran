@@ -172,6 +172,10 @@ const ORPHANED_MEDIA_FILE_CONDITION: &str = "
     AND NOT EXISTS (SELECT 1 FROM actors a WHERE a.banner_media_id = media_files.id)
     AND NOT EXISTS (SELECT 1 FROM custom_emojis ce WHERE ce.media_file_id = media_files.id)
     AND NOT EXISTS (
+        SELECT 1 FROM scheduled_posts sp
+        WHERE sp.request->'attachment_ids' ? media_files.id::text
+    )
+    AND NOT EXISTS (
         SELECT 1 FROM site_settings ss
         WHERE ss.key IN ('site_icon_media_file_id', 'login_bg_media_file_id')
           AND ss.value = media_files.id::text

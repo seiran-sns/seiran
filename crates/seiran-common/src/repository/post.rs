@@ -437,6 +437,27 @@ pub struct InsertFullParams<'a> {
     /// ポストの言語（ISO 639-1、2文字コード）。Bsky配送の`langs`にのみ意味を持つ
     /// （AP配送では使わない）。無ければ`None`（従来通り言語情報なし）。
     pub language: Option<&'a str>,
+    /// 予約投稿の実行なら、その予約。投稿の INSERT と同じトランザクションで予約行を消す。
+    pub scheduled_post: Option<ScheduledPostSource>,
+}
+
+/// 予約投稿（`scheduled_posts`）から投稿を作るときの元の予約。
+#[derive(Clone, Copy, Debug)]
+pub struct ScheduledPostSource {
+    pub id: i64,
+    /// 実行側が読んだ時点の `scheduled_posts.revision`。
+    pub revision: i32,
+}
+
+/// `insert_full` が予約投稿の実行で拒まれた理由のうち、「他の誰かが先に処理した」ことを示すか。
+/// 他のプロセスが同じ予約を先に投稿した（`posts_scheduled_post_id_key` の一意制約違反）か、
+/// 実行中に予約が取り消し・編集された（予約行を読んだ版のまま消せない、`RowNotFound`）とき真。
+pub fn is_scheduled_post_already_handled(e: &sqlx::Error) -> bool {
+    match e {
+        sqlx::Error::RowNotFound => true,
+        sqlx::Error::Database(db) => db.constraint() == Some("posts_scheduled_post_id_key"),
+        _ => false,
+    }
 }
 
 /// `PostRepository::insert_remote_with_dedup` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1500,8 +1521,8 @@ impl PostRepository for PgPostRepository {
     async fn insert_full(&self, params: InsertFullParams<'_>) -> Result<(), sqlx::Error> {
         let mut tx = self.pool.begin().await?;
         sqlx::query(
-            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map, poll, content_warning, language)
-             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13, $14, $15, $16)",
+            "INSERT INTO posts (id, actor_id, body, ap_object_id, seiran_post_uuid, reply_to_post_id, quote_of_post_id, created_at, visibility, deliver_fedi, deliver_bsky, thread_root_post_id, emoji_map, poll, content_warning, language, scheduled_post_id)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::post_visibility_enum, $10, $11, $12, $13, $14, $15, $16, $17)",
         )
         .bind(params.id)
         .bind(params.actor_id)
@@ -1519,8 +1540,15 @@ impl PostRepository for PgPostRepository {
         .bind(params.poll)
         .bind(params.content_warning)
         .bind(params.language)
+        .bind(params.scheduled_post.map(|s| s.id))
         .execute(&mut *tx)
         .await?;
+
+        // 予約投稿の実行: 読んだ版の予約行を同じトランザクションで消す。消せなければ（実行中に
+        // 取り消し・編集された）投稿ごと取り消す。トランザクションを落とせば投稿も残らない。
+        if let Some(source) = params.scheduled_post {
+            crate::repository::scheduled_post::delete_for_publish(&mut tx, source).await?;
+        }
 
         if !params.recipient_actor_ids.is_empty() {
             sqlx::query(

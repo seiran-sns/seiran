@@ -37,6 +37,11 @@ pub async fn endpoints() -> Json<Vec<&'static str>> {
         "meta",
         "notes/create",
         "notes/delete",
+        "notes/drafts/count",
+        "notes/drafts/create",
+        "notes/drafts/delete",
+        "notes/drafts/list",
+        "notes/drafts/update",
         "notes/global-timeline",
         "notes/hybrid-timeline",
         "notes/local-timeline",
@@ -106,7 +111,7 @@ pub struct CursorParams {
 
 impl CursorParams {
     /// `limit`は1〜100に丸め、未指定なら`default_limit`。数値として解釈できないIDは無視する。
-    fn page(&self, default_limit: i64) -> Page {
+    pub(super) fn page(&self, default_limit: i64) -> Page {
         let parse = |id: &Option<String>| id.as_deref().and_then(|s| s.parse::<i64>().ok());
         Page {
             limit: self.limit.unwrap_or(default_limit).clamp(1, 100),

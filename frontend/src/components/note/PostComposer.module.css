@@ -461,6 +461,35 @@
 }
 
 /* #229: CW（閲覧注意）ガイド入力欄。 */
+.scheduleEditor {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.scheduleLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+
+.scheduleHint {
+  font-size: 0.76rem;
+  color: var(--text-faint);
+}
+
+.scheduleMark {
+  display: inline-flex;
+  margin-left: 4px;
+}
+
 .cwEditor {
   display: flex;
   align-items: center;

@@ -151,6 +151,8 @@ pub struct CreateStatusParams {
     /// 添付の閲覧注意。Mastodon では投稿単位なので、true なら添付すべてを NSFW 指定にする。
     #[serde(default, deserialize_with = "lenient::opt_bool")]
     pub sensitive: Option<bool>,
+    /// 予約投稿の日時（ISO 8601）。指定すると投稿せずに予約し、`ScheduledStatus` を返す。
+    pub scheduled_at: Option<String>,
 }
 
 /// `direct` の宛先は Mastodon では本文中のメンションで決まる。seiran の DM は宛先アクターIDの
@@ -225,6 +227,7 @@ async fn to_create_request(
             expires_at: None,
             expires_in_seconds: p.expires_in,
             expires_at_epoch_ms: None,
+            expired_after_ms: None,
         });
     let sensitive_attachment_ids = Some(if params.sensitive == Some(true) {
         params.media_ids.clone()
@@ -255,17 +258,27 @@ async fn to_create_request(
 
 /// POST /api/v1/statuses — 通常投稿・返信（`in_reply_to_id`）・引用（`quoted_status_id`）。
 /// 添付の閲覧注意（`sensitive`）は添付すべての NSFW 指定になる（CW は `spoiler_text`）。
-/// 予約投稿（`scheduled_at`）は未対応。
+/// `scheduled_at` を指定すると予約投稿になり、`ScheduledStatus` を返す（`scheduled_statuses`）。
 pub async fn create(
     user: AuthedUser,
     State(state): State<AppState>,
-    MastodonParams(params): MastodonParams<CreateStatusParams>,
+    MastodonParams(mut params): MastodonParams<CreateStatusParams>,
 ) -> Response {
     let viewer = Some(user.actor_id);
+    let scheduled_at = match params.scheduled_at.take().filter(|s| !s.is_empty()) {
+        Some(v) => match super::scheduled_statuses::parse_scheduled_at(&v) {
+            Ok(t) => Some(t),
+            Err(e) => return e.into_response(),
+        },
+        None => None,
+    };
     let req = match to_create_request(&state, params).await {
         Ok(req) => req,
         Err(e) => return e.into_response(),
     };
+    if let Some(scheduled_at) = scheduled_at {
+        return super::scheduled_statuses::create(&state, &user, req, scheduled_at).await;
+    }
     let resp = crate::handlers::notes::create_note(user, State(state.clone()), Json(req))
         .await
         .into_response();

@@ -71,6 +71,18 @@ const LINE_ICONS: Record<string, ReactNode> = {
       <path d="M12 11v6M12 7.6v.2" />
     </>
   ),
+  "🧰": (
+    <>
+      <rect x="3" y="8" width="18" height="12" rx="2" />
+      <path d="M9 8V5.5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1V8M3 13h18M10 11.5v3M14 11.5v3" />
+    </>
+  ),
+  "🕒": (
+    <>
+      <circle cx="12" cy="12" r="8.5" />
+      <path d="M12 7v5h4.5" />
+    </>
+  ),
   "☰": <path d="M4 6.5h16M4 12h16M4 17.5h16" />,
   // 通知欄の種別
   "➕": <path d="M12 4.5v15M4.5 12h15" />,

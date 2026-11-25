@@ -326,7 +326,7 @@ pub async fn build_me_detailed(state: &AppState, actor: &Actor) -> MisskeyMeDeta
 }
 
 /// seiranの可視性（`unlisted`/`followers_only`/`direct`）をMisskey本家の語彙に変換する。
-fn to_misskey_visibility(v: &str) -> String {
+pub(super) fn to_misskey_visibility(v: &str) -> String {
     match v {
         "unlisted" => "home",
         "followers_only" => "followers",

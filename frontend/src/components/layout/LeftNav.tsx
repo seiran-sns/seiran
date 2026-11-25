@@ -18,6 +18,8 @@ interface NavItem {
   badge?: number;
   /** 件数の無い「続いている処理がある」印（明滅する赤丸）。 */
   dot?: boolean;
+  /** 件数バッジとは別の「予約投稿がある」印（🕒）。件数バッジがあればそちらを優先して出す。 */
+  clock?: boolean;
 }
 
 const NAV_ITEMS: NavItem[] = [
@@ -26,6 +28,7 @@ const NAV_ITEMS: NavItem[] = [
   { to: "/notifications", icon: "🔔", labelKey: "leftNav.notifications" },
   { to: "/messages", icon: "✉️", labelKey: "leftNav.messages" },
   { to: "/settings/lists", icon: "📋", labelKey: "leftNav.lists" },
+  { to: "/features", icon: "🧰", labelKey: "leftNav.features" },
   { to: "/settings", icon: "⚙️", labelKey: "leftNav.settings" },
 ];
 
@@ -39,7 +42,8 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const { t } = useTranslation();
   const { user, logout } = useAuth();
   const site = useSiteMeta();
-  const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
+  const { dmUnreadCount, followRequestCount, scheduledPostCounts, unread, openReportCount } =
+    useStreamingContext();
   const { followImportActive, emojiImportActive } = useBackgroundImports();
   const location = useLocation();
   const [serverInfoOpen, setServerInfoOpen] = useState(false);
@@ -49,8 +53,17 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
   const baseItems = NAV_ITEMS.map((item) => {
     if (item.to === "/messages") return { ...item, badge: dmUnreadCount };
     if (item.to === "/notifications") return { ...item, badge: unread };
+    if (item.to === "/features") {
+      // 承認待ちフォローと投稿できなかった予約は対応が要るので件数バッジ、投稿待ちの予約は
+      // あることが分かればよいので🕒にする（両方あれば件数バッジだけを出す）。
+      return {
+        ...item,
+        badge: followRequestCount + scheduledPostCounts.failed,
+        clock: scheduledPostCounts.pending > 0,
+      };
+    }
     if (item.to === "/settings") {
-      return { ...item, badge: followRequestCount, dot: migrationImportActive || followImportActive };
+      return { ...item, dot: migrationImportActive || followImportActive };
     }
     return item;
   });
@@ -97,6 +110,11 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                   <span className={styles.navTooltip}>{t(`nav:${item.labelKey}`)}</span>
                   {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
                   {!item.badge && item.dot && <span className={styles.navDot} aria-hidden="true" />}
+                  {!item.badge && !item.dot && item.clock && (
+                    <span className={styles.navClock} title={t("nav:leftNav.scheduledPostsPending")}>
+                      <UiIcon emoji="🕒" />
+                    </span>
+                  )}
                 </NavLink>
               </li>
               {item.to === "/search" && (

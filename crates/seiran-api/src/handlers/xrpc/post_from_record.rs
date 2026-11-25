@@ -245,6 +245,7 @@ pub async fn create_post_from_record(
             // 検証せずそのままコミットする経路）で、record.langsが既に含まれる場合がある。
             // `posts.language`はseiranネイティブ投稿API向けの検証済み値専用のためNone固定。
             language: None,
+            scheduled_post: None,
         })
         .await
         .map_err(|e| ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)))?;

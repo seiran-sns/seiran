@@ -9,7 +9,9 @@ use seiran_common::repository::{ReactionFeedRow, TimelinePost};
 
 use super::delivery::at_uri_to_bsky_app_url;
 
-#[derive(Deserialize)]
+/// 予約投稿はこの形の JSON をそのまま `scheduled_posts.request` に保存し、実行時に読み戻す
+/// （直列化はエイリアスでなく正式なフィールド名で書くので、読み戻しても同じ値になる）。
+#[derive(Deserialize, Serialize, Clone, Default)]
 pub struct CreateNoteRequest {
     pub text: Option<String>,
     // JS の Number 精度問題を避けるため文字列で受け取り、サーバー側で i64 にパースする
@@ -103,7 +105,7 @@ impl CreateNoteRequest {
 }
 
 /// [`CreateNoteRequest::poll`] の中身。
-#[derive(Deserialize, Debug, Clone)]
+#[derive(Deserialize, Serialize, Debug, Clone)]
 pub struct PollCreateRequest {
     /// 選択肢テキスト（2〜10件、`validation::validate_poll_choices`で検証）。
     pub choices: Vec<String>,
@@ -118,10 +120,17 @@ pub struct PollCreateRequest {
     /// Unix epoch ミリ秒。Misskey本家の`poll.expiresAt`と同じJSONキー（互換のため）。
     #[serde(rename = "expiresAt")]
     pub expires_at_epoch_ms: Option<i64>,
+    /// 投稿時刻からの相対ミリ秒。Misskey本家の`poll.expiredAfter`と同じJSONキー（互換のため）。
+    #[serde(
+        rename = "expiredAfter",
+        default,
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub expired_after_ms: Option<i64>,
 }
 
 /// [`CreateNoteRequest::bsky_embed_choice`] の中身。
-#[derive(Deserialize, Debug, Clone, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Debug, Clone, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum BskyEmbedChoice {
     /// 添付済みの非アニメ静止画グループ全体（最大4枚、AT Protocol embed.images上限）。

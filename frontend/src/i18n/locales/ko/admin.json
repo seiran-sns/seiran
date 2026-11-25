@@ -370,7 +370,8 @@
       "follow": "새 팔로우 수",
       "listCount": "리스트 수",
       "listMember": "리스트당 최대 인원",
-      "search": "검색 횟수"
+      "search": "검색 횟수",
+      "scheduledPostCount": "예약 게시물 수"
     },
     "minutesUnit": "분",
     "hoursUnit": "시간",

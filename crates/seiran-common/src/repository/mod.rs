@@ -65,6 +65,7 @@ pub mod remote_instance_meta;
 pub mod report;
 pub mod repost_mute;
 pub mod rotation_key_backfill;
+pub mod scheduled_post;
 pub mod site_settings;
 pub mod storage_provider;
 pub mod terms_of_service;
@@ -123,7 +124,8 @@ pub use post::{
     find_post_ids_by_media_file_id, find_visible_by_ids as find_visible_posts_by_ids,
     DmSessionSummary, InsertFullParams, InsertRemoteWithDedupParams, InsertRepostParams,
     PgPostRepository, PostDeleteInfo, PostDeliveryMeta, PostRecord, PostRepository, PostSummary,
-    ProfileFeedFilter, ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo, TimelinePost,
+    ProfileFeedFilter, ReferenceKind, RemoteAttachment, RepostEntry, RepostUndoInfo,
+    ScheduledPostSource, TimelinePost,
 };
 pub use reaction::{
     DeletedReaction, NewReaction, PgReactionRepository, PostReactionRow, ReactionFeedRow,

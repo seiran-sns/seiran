@@ -370,7 +370,8 @@
       "follow": "新追蹤數",
       "listCount": "列表數",
       "listMember": "每個列表最多人數",
-      "search": "搜尋次數"
+      "search": "搜尋次數",
+      "scheduledPostCount": "預約貼文數"
     },
     "minutesUnit": "分鐘",
     "hoursUnit": "小時",

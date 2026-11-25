@@ -207,7 +207,15 @@
       "modalTitle": "Benutzer-ID einfügen",
       "noResults": "Keine passenden Benutzer gefunden"
     },
-    "bskyDeliveryDeferredHint": "Die Zustellung an Bluesky wird zurückgehalten, bis dein Bluesky-Import abgeschlossen ist, und erfolgt danach."
+    "bskyDeliveryDeferredHint": "Die Zustellung an Bluesky wird zurückgehalten, bis dein Bluesky-Import abgeschlossen ist, und erfolgt danach.",
+    "schedule": {
+      "toggleTitle": "Beitrag planen",
+      "label": "Veröffentlichen am",
+      "hint": "Ein Klick auf eine Veröffentlichen-Schaltfläche plant den Beitrag für diesen Zeitpunkt (frühestens in 5 Minuten).",
+      "editHint": "Schalte 🕒 aus und klicke auf eine Veröffentlichen-Schaltfläche, um sofort zu veröffentlichen.",
+      "saved": "Geplant. Du findest den Beitrag unter Funktionen > Geplante Beiträge.",
+      "buttonMark": "Geplant"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Klicken Sie zum Entfernen",

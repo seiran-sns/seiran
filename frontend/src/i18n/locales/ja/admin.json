@@ -370,7 +370,8 @@
       "follow": "新規フォロー数",
       "listCount": "リスト作成数",
       "listMember": "リスト最大人数",
-      "search": "検索回数"
+      "search": "検索回数",
+      "scheduledPostCount": "予約投稿の保持数"
     },
     "minutesUnit": "分",
     "hoursUnit": "時間",

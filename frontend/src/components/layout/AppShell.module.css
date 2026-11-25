@@ -128,6 +128,14 @@
   flex-shrink: 0;
 }
 
+/* 件数バッジとは別の「予約投稿がある」印（🕒）。注意を促すものではないので赤くしない。 */
+.navClock {
+  margin-left: auto;
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
 /* 件数の無い「続いている処理がある」印（Bluesky からの転入の取り込み中など）。 */
 .navDot {
   margin-left: auto;

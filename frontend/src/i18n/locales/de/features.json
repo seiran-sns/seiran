@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "Geplante Beiträge",
+    "scheduledPostsPending": "Es gibt geplante Beiträge",
+    "followRequests": "Folgeanfragen"
+  },
+  "scheduledPosts": {
+    "title": "Geplante Beiträge",
+    "description": "Beiträge werden zum geplanten Zeitpunkt automatisch veröffentlicht. Beiträge, die nicht veröffentlicht werden konnten (z. B. mehr als 24 Stunden verspätet), bleiben hier, damit du sie bearbeiten und neu planen, sofort veröffentlichen oder löschen kannst.",
+    "empty": "Keine geplanten Beiträge. Mit 🕒 im Eingabefeld kannst du einen planen.",
+    "failed": "Konnte nicht veröffentlicht werden: ",
+    "replyTo": "Antwort an {{acct}}:",
+    "quoteOf": "Zitat von {{acct}}:",
+    "edit": "Bearbeiten",
+    "editTitle": "Geplanten Beitrag bearbeiten",
+    "publishNow": "Jetzt veröffentlichen",
+    "delete": "Löschen",
+    "published": "Veröffentlicht.",
+    "deleted": "Geplanter Beitrag gelöscht.",
+    "publishConfirmTitle": "Jetzt veröffentlichen?",
+    "publishConfirmBody": "Der Beitrag wird jetzt veröffentlicht, ohne auf den geplanten Zeitpunkt zu warten.",
+    "deleteConfirmTitle": "Geplanten Beitrag löschen?",
+    "deleteConfirmBody": "Dieser Beitrag wird verworfen, ohne veröffentlicht zu werden."
+  }
+}

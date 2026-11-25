@@ -1,6 +1,49 @@
 import { cursorParams, request } from "./core";
-import type { BskyEmbedChoice, FrequentReaction, Note, NotificationItem, PollCreateInput, RawNote, ReactResult, ReactionActor, RepostEntry } from "./types";
+import type { BskyEmbedChoice, CreateNoteBody, FrequentReaction, Note, NotificationItem, PollCreateInput, RawNote, ReactResult, ReactionActor, RepostEntry } from "./types";
 import { normalizeNote } from "./types";
+
+/** `api.notes.create` の引数から投稿 API の本文を組み立てる（予約投稿も同じ本文を送る）。 */
+export function createNoteBody(
+  text: string,
+  deliverToFedi: boolean = true,
+  deliverToBsky: boolean = true,
+  attachmentIds: string[] = [],
+  replyToId?: string,
+  renoteId?: string,
+  visibility?: "public" | "unlisted" | "followers_only" | "direct",
+  recipientActorIds?: string[],
+  quoteOfId?: string,
+  bskyEmbedChoice?: BskyEmbedChoice,
+  poll?: PollCreateInput,
+  contentWarning?: string,
+  linkCardUrls?: string[],
+  language?: string,
+  sensitiveAttachmentIds: string[] = [],
+): CreateNoteBody {
+  return {
+    text,
+    deliver_to_fedi: deliverToFedi,
+    deliver_to_bsky: deliverToBsky,
+    attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
+    // 空でも送る（省略するとドライブ側の指定が使われる。Misskey 互換クライアント向け）。
+    sensitive_attachment_ids: sensitiveAttachmentIds,
+    reply_to_id: replyToId,
+    renote_id: renoteId,
+    quote_of_id: quoteOfId,
+    visibility,
+    recipient_actor_ids: recipientActorIds,
+    bsky_embed_choice: bskyEmbedChoice,
+    poll: poll && {
+      choices: poll.choices,
+      multiple: poll.multiple,
+      expiresAtIso: poll.expiresAtIso,
+      expiresInSeconds: poll.expiresInSeconds,
+    },
+    content_warning: contentWarning,
+    link_card_urls: linkCardUrls && linkCardUrls.length > 0 ? linkCardUrls : undefined,
+    language,
+  };
+}
 
 export const notes = {
   async get(id: string) {
@@ -26,29 +69,27 @@ export const notes = {
     sensitiveAttachmentIds: string[] = [],
   ) {
     return normalizeNote(
-      await request<RawNote>("POST", "/notes/create", {
-        text,
-        deliver_to_fedi: deliverToFedi,
-        deliver_to_bsky: deliverToBsky,
-        attachment_ids: attachmentIds.length > 0 ? attachmentIds : undefined,
-        // 空でも送る（省略するとドライブ側の指定が使われる。Misskey 互換クライアント向け）。
-        sensitive_attachment_ids: sensitiveAttachmentIds,
-        reply_to_id: replyToId,
-        renote_id: renoteId,
-        quote_of_id: quoteOfId,
-        visibility,
-        recipient_actor_ids: recipientActorIds,
-        bsky_embed_choice: bskyEmbedChoice,
-        poll: poll && {
-          choices: poll.choices,
-          multiple: poll.multiple,
-          expiresAtIso: poll.expiresAtIso,
-          expiresInSeconds: poll.expiresInSeconds,
-        },
-        content_warning: contentWarning,
-        link_card_urls: linkCardUrls && linkCardUrls.length > 0 ? linkCardUrls : undefined,
-        language,
-      }),
+      await request<RawNote>(
+        "POST",
+        "/notes/create",
+        createNoteBody(
+          text,
+          deliverToFedi,
+          deliverToBsky,
+          attachmentIds,
+          replyToId,
+          renoteId,
+          visibility,
+          recipientActorIds,
+          quoteOfId,
+          bskyEmbedChoice,
+          poll,
+          contentWarning,
+          linkCardUrls,
+          language,
+          sensitiveAttachmentIds,
+        ),
+      ),
     );
   },
   async localTimeline(params?: {

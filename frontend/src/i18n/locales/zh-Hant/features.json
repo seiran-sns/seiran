@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "預約貼文",
+    "scheduledPostsPending": "有預約貼文",
+    "followRequests": "待審核的追蹤"
+  },
+  "scheduledPosts": {
+    "title": "預約貼文",
+    "description": "到了預約時間會自動發佈。無法發佈的預約（例如延遲超過24小時）會留在這裡，可以編輯後重新預約、立即發佈或刪除。",
+    "empty": "沒有預約貼文。可以從發文欄的🕒預約。",
+    "failed": "無法發佈：",
+    "replyTo": "回覆 {{acct}}：",
+    "quoteOf": "引用 {{acct}}：",
+    "edit": "編輯",
+    "editTitle": "編輯預約貼文",
+    "publishNow": "立即發佈",
+    "delete": "刪除",
+    "published": "已發佈。",
+    "deleted": "已刪除預約。",
+    "publishConfirmTitle": "要立即發佈嗎？",
+    "publishConfirmBody": "不等預約時間，現在就以此內容發佈。",
+    "deleteConfirmTitle": "要刪除預約嗎？",
+    "deleteConfirmBody": "此預約將不會發佈並被刪除。"
+  }
+}

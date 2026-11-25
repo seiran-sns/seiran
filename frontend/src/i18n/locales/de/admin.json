@@ -370,7 +370,8 @@
       "follow": "Neue Follows",
       "listCount": "Listen",
       "listMember": "Mitglieder pro Liste",
-      "search": "Suchen"
+      "search": "Suchen",
+      "scheduledPostCount": "Geplante Beiträge"
     },
     "minutesUnit": "Min.",
     "hoursUnit": "Std.",

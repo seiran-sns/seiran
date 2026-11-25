@@ -702,7 +702,7 @@ impl ReplyContext {
 /// Misskey本家の`visibility`語彙（`home`/`followers`/`specified`）をseiran語彙
 /// （`unlisted`/`followers_only`/`direct`）へ正規化する。`public`およびseiran語彙が
 /// そのまま来た場合・未知の値はそのまま通す（後続の判定で弾かれる）。
-fn normalize_misskey_visibility(v: &str) -> &str {
+pub(crate) fn normalize_misskey_visibility(v: &str) -> &str {
     match v {
         "home" => "unlisted",
         "followers" => "followers_only",

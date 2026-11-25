@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "予約投稿",
+    "scheduledPostsPending": "予約投稿があります",
+    "followRequests": "承認待ちフォロー"
+  },
+  "scheduledPosts": {
+    "title": "予約投稿",
+    "description": "予約日時になると自動で投稿されます。予約日時から24時間以上遅れて投稿できなかった予約などは、ここで編集して予約し直すか、今すぐ投稿するか、削除できます。",
+    "empty": "予約投稿はありません。投稿欄の🕒から予約できます。",
+    "failed": "投稿できませんでした: ",
+    "replyTo": "{{acct}} への返信:",
+    "quoteOf": "{{acct}} の引用:",
+    "edit": "編集",
+    "editTitle": "予約投稿の編集",
+    "publishNow": "今すぐ投稿",
+    "delete": "削除",
+    "published": "投稿しました。",
+    "deleted": "予約を削除しました。",
+    "publishConfirmTitle": "今すぐ投稿しますか？",
+    "publishConfirmBody": "予約日時を待たずに、この内容で今すぐ投稿します。",
+    "deleteConfirmTitle": "予約を削除しますか？",
+    "deleteConfirmBody": "この予約は投稿されずに消えます。"
+  }
+}

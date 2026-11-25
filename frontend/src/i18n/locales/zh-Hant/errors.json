@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "確認碼已過期（有效期 15 分鐘）。請使用「重新傳送驗證碼」取得新的確認碼",
   "PLC_TOKEN_INVALID": "確認碼不正確。請輸入原伺服器最新郵件中的確認碼",
   "INVALID_OPERATOR_URL": "營運者的網址必須以 http:// 或 https:// 開頭",
-  "INVALID_CONTACT_EMAIL": "聯絡用電子郵件地址格式不正確"
+  "INVALID_CONTACT_EMAIL": "聯絡用電子郵件地址格式不正確",
+  "SCHEDULED_AT_TOO_SOON": "預約時間必須在5分鐘後以後。",
+  "SCHEDULED_AT_TOO_FAR": "預約時間必須在一年以內。",
+  "INVALID_SCHEDULED_AT": "預約時間格式不正確。",
+  "TOO_MANY_SCHEDULED_POSTS": "無法再預約。請刪除不需要的預約。",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "轉發無法預約。",
+  "SCHEDULED_POST_NOT_FOUND": "找不到預約。可能已發佈或刪除。",
+  "SCHEDULED_POST_CHANGED": "此預約已發佈，或已在其他畫面中變更。",
+  "SCHEDULED_POST_TOO_LATE": "已超過預約時間24小時以上，因此未發佈。",
+  "INVALID_SCHEDULED_REQUEST": "無法讀取預約內容。",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "不支援沒有預約時間的草稿。",
+  "POLL_ALREADY_EXPIRED": "投票的截止時間早於發佈時間。"
 }

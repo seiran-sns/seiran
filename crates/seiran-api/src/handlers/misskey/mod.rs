@@ -12,6 +12,7 @@
 //! リポジトリ層から直接組み立てる。
 
 pub mod app_auth;
+pub mod drafts;
 pub mod endpoints;
 pub mod streaming;
 pub mod types;

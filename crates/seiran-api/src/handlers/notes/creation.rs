@@ -4,7 +4,7 @@ use delivery::{
     redirect_bridge_post_meta, resolve_quote_embed, resolve_reply_context,
     with_bridge_delivery_targets, DeliveryTargets, RegularPostDelivery, ReplyContext,
 };
-use seiran_common::repository::NewNotification;
+use seiran_common::repository::{NewNotification, ScheduledPostSource};
 use validation::{
     validate_attachment_ids, validate_cw, validate_dm_text_length, validate_link_card_urls,
     validate_poll_choices, validate_text_length,
@@ -305,6 +305,28 @@ fn validate_quote_visibility(quoted_vis: &str, new_vis: &str) -> Result<(), ApiE
     }
 }
 
+/// 投稿の作成をどの経路から行うか（予約投稿は `handlers::scheduled_posts`）。
+#[derive(Clone, Copy)]
+enum CreateMode {
+    /// 今すぐ投稿する（投稿 API）。
+    Immediate,
+    /// 予約を受け付ける時の検証だけ。投稿数・話しかけた相手のレート制限は実行時に数えるので
+    /// ここでは数えも記録もしない（記録すると、まだ投稿していない分で枠を使ってしまう）。
+    ScheduleCheck,
+    /// 予約の実行。
+    Scheduled(ScheduledPostSource),
+}
+
+impl CreateMode {
+    fn counts_rate_limits(self) -> bool {
+        !matches!(self, CreateMode::ScheduleCheck)
+    }
+
+    fn is_scheduled(self) -> bool {
+        !matches!(self, CreateMode::Immediate)
+    }
+}
+
 /// [`validate_create_regular_post_input`] が確定した値。ここから先の永続化・配送
 /// （[`persist_regular_post`]）は、この構造体が既に妥当であることを前提にする
 /// （＝もう一度バリデーションし直さない）。
@@ -322,6 +344,7 @@ struct ValidatedCreatePost<'a> {
     attachment_ids_i64: Vec<i64>,
     reply_ctx: ReplyContext,
     req: &'a CreateNoteRequest,
+    scheduled_post: Option<ScheduledPostSource>,
 }
 
 /// 通常投稿・リプライ・引用投稿の入力を検証し、可視性・配送先プロトコル・DM宛先・
@@ -332,12 +355,15 @@ async fn validate_create_regular_post_input<'a>(
     actor_id: i64,
     req: &'a CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
+    mode: CreateMode,
 ) -> Result<ValidatedCreatePost<'a>, ApiError> {
     let text = req.text.as_deref().unwrap_or("").to_string();
     if text.trim().is_empty() {
         return Err(ApiError::BadRequest("text は空にできません".to_owned()));
     }
-    crate::rate_limit::check_post_rate_limit(state, actor_id).await?;
+    if mode.counts_rate_limits() {
+        crate::rate_limit::check_post_rate_limit(state, actor_id).await?;
+    }
 
     let reply_ctx = match &req.reply_to_id {
         Some(id) => resolve_reply_context(state, id, actor_id).await?,
@@ -356,7 +382,7 @@ async fn validate_create_regular_post_input<'a>(
 
     validate_post_text_length(state, &text, visibility, has_bsky_recipient, deliver_bsky).await?;
     validate_attachments_and_embed_choice(req, visibility, has_bsky_recipient)?;
-    let poll_json = build_poll_json(req, visibility, now)?;
+    let poll_json = build_poll_json(req, visibility, now, mode.is_scheduled())?;
     let content_warning = validate_content_warning(req, visibility)?;
     // ポスト言語（Bsky配送の`langs`にのみ意味を持つ、AP配送では使わない）。表示言語設定と
     // 同じ許可リストで検証する。Misskey互換APIクライアント等、本フィールドを送らない
@@ -392,7 +418,7 @@ async fn validate_create_regular_post_input<'a>(
     .await?;
     crate::role_restriction::require_mentions_allowed(state, actor_id, restriction, &text).await?;
 
-    if visibility != "direct" {
+    if visibility != "direct" && mode.counts_rate_limits() {
         let mut contact_targets =
             extract_local_mention_actor_ids(&text, &state.local_domain, &state.db).await;
         contact_targets.extend(reply_ctx.parent_local_actor_id);
@@ -427,6 +453,10 @@ async fn validate_create_regular_post_input<'a>(
         attachment_ids_i64,
         reply_ctx,
         req,
+        scheduled_post: match mode {
+            CreateMode::Scheduled(source) => Some(source),
+            _ => None,
+        },
     })
 }
 
@@ -575,11 +605,14 @@ fn validate_attachments_and_embed_choice(
 
 /// アンケート（#228）を`posts.poll`の形のJSONへ組み立てる。DMには馴染まないため禁止する
 /// （BSKY_DM_NO_ATTACHMENTSと同じ理由）。期限は 絶対時刻（ISO8601） > Misskey互換epochミリ秒 >
-/// 相対秒数 の優先順で解決し、いずれも無ければ無期限（endTimeを省略）。
+/// 相対秒数 > Misskey互換の相対ミリ秒 の優先順で解決し、いずれも無ければ無期限（endTimeを省略）。
+/// 予約投稿（`reject_expired`）では、投稿する時点で締め切りを過ぎているアンケートを拒む
+/// （予約日時より前の締め切りを指定した、または予約の実行が遅れた）。
 fn build_poll_json(
     req: &CreateNoteRequest,
     visibility: &str,
     now: chrono::DateTime<chrono::Utc>,
+    reject_expired: bool,
 ) -> Result<Option<serde_json::Value>, ApiError> {
     let Some(p) = &req.poll else {
         return Ok(None);
@@ -599,7 +632,14 @@ fn build_poll_json(
         .or_else(|| {
             p.expires_in_seconds
                 .map(|secs| now + chrono::Duration::seconds(secs))
+        })
+        .or_else(|| {
+            p.expired_after_ms
+                .map(|ms| now + chrono::Duration::milliseconds(ms))
         });
+    if reject_expired && end_time.is_some_and(|t| t <= now) {
+        return Err(ApiError::BadRequest("POLL_ALREADY_EXPIRED".to_owned()));
+    }
     Ok(Some(serde_json::json!({
         "multiple": p.multiple.unwrap_or(false),
         "options": choices.into_iter().map(|name| serde_json::json!({"name": name, "votes": 0})).collect::<Vec<_>>(),
@@ -668,11 +708,75 @@ async fn create_regular_post(
     req: &CreateNoteRequest,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Response {
-    let validated = match validate_create_regular_post_input(state, actor_id, req, now).await {
-        Ok(v) => v,
-        Err(e) => return e.into_response(),
-    };
-    persist_regular_post(state, actor_id, username, display_name, now, validated).await
+    let validated =
+        match validate_create_regular_post_input(state, actor_id, req, now, CreateMode::Immediate)
+            .await
+        {
+            Ok(v) => v,
+            Err(e) => return e.into_response(),
+        };
+    match persist_regular_post(state, actor_id, username, display_name, now, validated).await {
+        Ok(note) => Json(note).into_response(),
+        Err(e) => e.into_response(),
+    }
+}
+
+/// 予約を受け付ける前に、予約日時に投稿するとしたら通る内容かを検証する（予約日時を
+/// `now` として扱う）。リポスト（本文などを持たない `renote_id`）は予約できない。
+/// `req` は Misskey の引用の正規化（`normalize_misskey_quote`）を済ませたものを渡す。
+pub(crate) async fn validate_scheduled_request(
+    state: &AppState,
+    actor_id: i64,
+    req: &CreateNoteRequest,
+    scheduled_at: chrono::DateTime<chrono::Utc>,
+) -> Result<(), ApiError> {
+    if req.renote_id.is_some() {
+        return Err(ApiError::BadRequest(
+            "SCHEDULED_RENOTE_NOT_SUPPORTED".to_owned(),
+        ));
+    }
+    validate_create_regular_post_input(
+        state,
+        actor_id,
+        req,
+        scheduled_at,
+        CreateMode::ScheduleCheck,
+    )
+    .await
+    .map(|_| ())
+}
+
+/// 予約投稿を今の時刻で投稿する。投稿の INSERT と同じトランザクションで予約行（`source` の版）を
+/// 消し、既に他の誰かが処理していれば `Conflict("SCHEDULED_POST_ALREADY_HANDLED")` を返す。
+pub(crate) async fn publish_scheduled_post(
+    state: &AppState,
+    author: &Actor,
+    req: &CreateNoteRequest,
+    source: ScheduledPostSource,
+) -> Result<NoteResponse, ApiError> {
+    if req.renote_id.is_some() {
+        return Err(ApiError::BadRequest(
+            "SCHEDULED_RENOTE_NOT_SUPPORTED".to_owned(),
+        ));
+    }
+    let now = chrono::Utc::now();
+    let validated = validate_create_regular_post_input(
+        state,
+        author.id,
+        req,
+        now,
+        CreateMode::Scheduled(source),
+    )
+    .await?;
+    persist_regular_post(
+        state,
+        author.id,
+        author.username.clone(),
+        author.display_name.clone(),
+        now,
+        validated,
+    )
+    .await
 }
 
 /// [`validate_create_regular_post_input`] が確定した入力をもとに、投稿の永続化・
@@ -762,7 +866,7 @@ async fn persist_regular_post(
     display_name: Option<String>,
     now: chrono::DateTime<chrono::Utc>,
     validated: ValidatedCreatePost<'_>,
-) -> Response {
+) -> Result<NoteResponse, ApiError> {
     let ValidatedCreatePost {
         text,
         visibility,
@@ -777,6 +881,7 @@ async fn persist_regular_post(
         attachment_ids_i64,
         reply_ctx,
         req,
+        scheduled_post,
     } = validated;
 
     let post_id = generate_snowflake_id(now);
@@ -822,23 +927,26 @@ async fn persist_regular_post(
             poll: poll_json.as_ref(),
             content_warning: content_warning.as_deref(),
             language: req.language.as_deref(),
+            scheduled_post,
         })
         .await
     {
-        return ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)).into_response();
+        if scheduled_post.is_some()
+            && seiran_common::repository::post::is_scheduled_post_already_handled(&e)
+        {
+            return Err(ApiError::Conflict("SCHEDULED_POST_ALREADY_HANDLED"));
+        }
+        return Err(ApiError::Internal(format!("投稿の INSERT 失敗: {}", e)));
     }
 
-    if let Err(e) = attach_media_files(
+    attach_media_files(
         state,
         actor_id,
         post_id,
         &attachment_ids_i64,
         req.sensitive_attachment_ids.as_deref(),
     )
-    .await
-    {
-        return e.into_response();
-    }
+    .await?;
 
     if !req.link_card_urls.is_empty() {
         delivery::attach_link_cards_from_urls(state, post_id, &req.link_card_urls).await;
@@ -1020,7 +1128,7 @@ async fn persist_regular_post(
         broadcast_new_note(state, actor_id, &note_resp).await;
     }
 
-    Json(note_resp).into_response()
+    Ok(note_resp)
 }
 
 pub async fn create_note(

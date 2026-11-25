@@ -509,6 +509,25 @@ fn notes_routes() -> Router<AppState> {
             post(handlers::misskey::endpoints::notes_search_by_tag),
         )
         .route("/api/open", post(handlers::open_target::open_target))
+        // 予約投稿（`handlers::scheduled_posts`）
+        .route(
+            "/api/scheduled-posts",
+            get(handlers::scheduled_posts::list_handler)
+                .post(handlers::scheduled_posts::create_handler),
+        )
+        .route(
+            "/api/scheduled-posts/counts",
+            get(handlers::scheduled_posts::counts_handler),
+        )
+        .route(
+            "/api/scheduled-posts/:id",
+            put(handlers::scheduled_posts::update_handler)
+                .delete(handlers::scheduled_posts::delete_handler),
+        )
+        .route(
+            "/api/scheduled-posts/:id/publish",
+            post(handlers::scheduled_posts::publish_handler),
+        )
         // ダイレクトメッセージ（DM本体の送受信は既存の /api/notes/create を再利用する）
         .route("/api/dm/sessions", get(handlers::dm::sessions))
         .route(
@@ -783,6 +802,27 @@ fn misskey_routes() -> Router<AppState> {
             "/api/notes/delete",
             post(handlers::misskey::endpoints::notes_delete),
         )
+        // 予約投稿（Misskey は予約付きの下書きとして扱う、`handlers::misskey::drafts`）
+        .route(
+            "/api/notes/drafts/create",
+            post(handlers::misskey::drafts::create),
+        )
+        .route(
+            "/api/notes/drafts/update",
+            post(handlers::misskey::drafts::update),
+        )
+        .route(
+            "/api/notes/drafts/delete",
+            post(handlers::misskey::drafts::delete),
+        )
+        .route(
+            "/api/notes/drafts/list",
+            post(handlers::misskey::drafts::list),
+        )
+        .route(
+            "/api/notes/drafts/count",
+            post(handlers::misskey::drafts::count),
+        )
         .route(
             "/api/notes/unrenote",
             post(handlers::misskey::endpoints::notes_unrenote),
@@ -930,8 +970,8 @@ fn misskey_routes() -> Router<AppState> {
 /// Mastodon の `{"error": "..."}` 形に揃える（`route_layer` なのでこのルーター内のルートだけ）。
 fn mastodon_routes() -> Router<AppState> {
     use handlers::mastodon::{
-        accounts, emoji_reactions, instance, media, notifications, oauth, search, statuses,
-        streaming, timelines,
+        accounts, emoji_reactions, instance, media, notifications, oauth, scheduled_statuses,
+        search, statuses, streaming, timelines,
     };
     let stubs = [
         "/api/v1/filters",
@@ -942,7 +982,6 @@ fn mastodon_routes() -> Router<AppState> {
         "/api/v1/followed_tags",
         "/api/v1/featured_tags",
         "/api/v1/endorsements",
-        "/api/v1/scheduled_statuses",
         "/api/v1/follow_requests",
         "/api/v1/domain_blocks",
         "/api/v1/trends",
@@ -1018,6 +1057,13 @@ fn mastodon_routes() -> Router<AppState> {
         .route("/api/v1/lists", get(timelines::lists))
         .route("/api/v1/lists/:id", get(timelines::list_show))
         .route("/api/v1/statuses", post(statuses::create))
+        .route("/api/v1/scheduled_statuses", get(scheduled_statuses::index))
+        .route(
+            "/api/v1/scheduled_statuses/:id",
+            get(scheduled_statuses::show)
+                .put(scheduled_statuses::update)
+                .delete(scheduled_statuses::destroy),
+        )
         .route(
             "/api/v1/statuses/:id",
             get(statuses::show).delete(statuses::delete),

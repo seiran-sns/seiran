@@ -207,7 +207,15 @@
       "modalTitle": "插入用户ID",
       "noResults": "未找到匹配的用户"
     },
-    "bskyDeliveryDeferredHint": "在从 Bluesky 迁入的数据导入完成之前，投递到 Bluesky 的内容会暂缓，导入完成后再送达。"
+    "bskyDeliveryDeferredHint": "在从 Bluesky 迁入的数据导入完成之前，投递到 Bluesky 的内容会暂缓，导入完成后再送达。",
+    "schedule": {
+      "toggleTitle": "定时发布",
+      "label": "定时时间",
+      "hint": "按下发布按钮后，会定时在此时间发布（5分钟后以后）。",
+      "editHint": "关闭🕒后按下发布按钮，就会立即发布。",
+      "saved": "已定时。可以在「功能」>「定时帖子」中查看。",
+      "buttonMark": "定时"
+    }
   },
   "reactionChips": {
     "clickToRemove": "点击删除",

@@ -207,7 +207,15 @@
       "modalTitle": "插入使用者ID",
       "noResults": "找不到符合的使用者"
     },
-    "bskyDeliveryDeferredHint": "在從 Bluesky 遷入的資料匯入完成之前，傳送到 Bluesky 的內容會暫緩，匯入完成後再送達。"
+    "bskyDeliveryDeferredHint": "在從 Bluesky 遷入的資料匯入完成之前，傳送到 Bluesky 的內容會暫緩，匯入完成後再送達。",
+    "schedule": {
+      "toggleTitle": "預約發佈",
+      "label": "預約時間",
+      "hint": "按下發佈按鈕後，會預約在此時間發佈（5分鐘後以後）。",
+      "editHint": "關閉🕒後按下發佈按鈕，就會立即發佈。",
+      "saved": "已預約。可以在「功能」>「預約貼文」中查看。",
+      "buttonMark": "預約"
+    }
   },
   "reactionChips": {
     "clickToRemove": "點擊以移除",

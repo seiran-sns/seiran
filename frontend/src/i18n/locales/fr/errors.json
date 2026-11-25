@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "Le code de confirmation a expiré (il est valable 15 minutes). Utilisez « Renvoyer le code » pour en obtenir un nouveau",
   "PLC_TOKEN_INVALID": "Le code de confirmation est incorrect. Saisissez le code du dernier e-mail envoyé par votre ancien serveur",
   "INVALID_OPERATOR_URL": "L’URL de l’opérateur doit commencer par http:// ou https://",
-  "INVALID_CONTACT_EMAIL": "L’adresse e-mail de contact n’est pas valide"
+  "INVALID_CONTACT_EMAIL": "L’adresse e-mail de contact n’est pas valide",
+  "SCHEDULED_AT_TOO_SOON": "L'heure prévue doit être dans au moins 5 minutes.",
+  "SCHEDULED_AT_TOO_FAR": "L'heure prévue doit être dans moins d'un an.",
+  "INVALID_SCHEDULED_AT": "L'heure prévue n'est pas valide.",
+  "TOO_MANY_SCHEDULED_POSTS": "Vous ne pouvez plus programmer de publications. Supprimez celles dont vous n'avez plus besoin.",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "Les republications ne peuvent pas être programmées.",
+  "SCHEDULED_POST_NOT_FOUND": "Publication programmée introuvable. Elle a peut-être déjà été publiée ou supprimée.",
+  "SCHEDULED_POST_CHANGED": "Cette publication programmée a déjà été publiée ou modifiée ailleurs.",
+  "SCHEDULED_POST_TOO_LATE": "Non publiée car l'heure prévue était dépassée de plus de 24 heures.",
+  "INVALID_SCHEDULED_REQUEST": "Impossible de lire la publication programmée.",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Les brouillons sans heure prévue ne sont pas pris en charge.",
+  "POLL_ALREADY_EXPIRED": "Le sondage serait déjà clos au moment de la publication."
 }

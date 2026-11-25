@@ -370,7 +370,8 @@
       "follow": "新关注数",
       "listCount": "列表数",
       "listMember": "每个列表最多人数",
-      "search": "搜索次数"
+      "search": "搜索次数",
+      "scheduledPostCount": "定时帖子数"
     },
     "minutesUnit": "分钟",
     "hoursUnit": "小时",

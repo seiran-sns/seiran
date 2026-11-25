@@ -207,7 +207,15 @@
       "modalTitle": "Insérer un identifiant utilisateur",
       "noResults": "Aucun utilisateur correspondant trouvé"
     },
-    "bskyDeliveryDeferredHint": "La diffusion vers Bluesky est suspendue jusqu’à la fin de l’importation depuis Bluesky, puis elle est envoyée."
+    "bskyDeliveryDeferredHint": "La diffusion vers Bluesky est suspendue jusqu’à la fin de l’importation depuis Bluesky, puis elle est envoyée.",
+    "schedule": {
+      "toggleTitle": "Programmer la publication",
+      "label": "Publier le",
+      "hint": "Un bouton de publication programme la publication à cette heure (au moins dans 5 minutes).",
+      "editHint": "Désactivez 🕒 et appuyez sur un bouton de publication pour publier maintenant.",
+      "saved": "Programmée. Vous la trouverez dans Fonctions > Publications programmées.",
+      "buttonMark": "Programmée"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Cliquez pour supprimer",

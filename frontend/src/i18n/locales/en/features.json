@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "Scheduled posts",
+    "scheduledPostsPending": "You have scheduled posts",
+    "followRequests": "Follow requests"
+  },
+  "scheduledPosts": {
+    "title": "Scheduled posts",
+    "description": "Posts are published automatically at their scheduled time. Posts that could not be published (for example, more than 24 hours late) stay here so you can edit and reschedule, publish now, or delete them.",
+    "empty": "No scheduled posts. Use 🕒 in the composer to schedule one.",
+    "failed": "Could not be published: ",
+    "replyTo": "Reply to {{acct}}:",
+    "quoteOf": "Quoting {{acct}}:",
+    "edit": "Edit",
+    "editTitle": "Edit scheduled post",
+    "publishNow": "Publish now",
+    "delete": "Delete",
+    "published": "Published.",
+    "deleted": "Scheduled post deleted.",
+    "publishConfirmTitle": "Publish now?",
+    "publishConfirmBody": "This will publish the post now instead of waiting for the scheduled time.",
+    "deleteConfirmTitle": "Delete scheduled post?",
+    "deleteConfirmBody": "This post will be discarded without being published."
+  }
+}

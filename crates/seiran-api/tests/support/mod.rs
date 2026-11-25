@@ -300,6 +300,7 @@ pub async fn create_fixture_post(pool: &sqlx::PgPool, actor_id: i64, post: Fixtu
             poll: post.poll,
             content_warning: post.content_warning,
             language: None,
+            scheduled_post: None,
         })
         .await
         .expect("fixture 投稿作成に失敗");

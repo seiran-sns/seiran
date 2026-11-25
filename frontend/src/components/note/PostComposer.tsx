@@ -15,12 +15,22 @@ import {
   ActorSuggestion,
   api,
   BskyEmbedChoice,
+  createNoteBody,
   DriveFile,
   Note,
   PollCreateInput,
   PublicEmoji,
+  ScheduledPost,
   getErrorMessage,
 } from "../../api/client";
+import { useStreamingContext } from "../../contexts/StreamingContext";
+import { useToast } from "../../contexts/ToastContext";
+import {
+  defaultScheduleValue,
+  draftFromScheduledPost,
+  minScheduleValue,
+  toDatetimeLocal,
+} from "../../lib/scheduledPost";
 import {
   acct,
   calcRemaining,
@@ -90,6 +100,11 @@ interface PostComposerProps {
   quoteTo?: Note;
   /** 本文の初期値（ハッシュタグ入力済みでの投稿ダイアログ起動等）。 */
   initialText?: string;
+  /** 指定時はこの予約投稿を編集する（予約一覧から開く）。予約日時を外して送ると今すぐ投稿する。
+   * 返信先・引用元は `replyTo`・`quoteTo` に渡す。書きかけはローカルに保存しない。 */
+  editingScheduled?: ScheduledPost;
+  /** 予約（新規・編集）を保存したときのコールバック。 */
+  onScheduled?: (post: ScheduledPost) => void;
 }
 
 type Visibility = "public" | "unlisted" | "followers_only";
@@ -240,8 +255,12 @@ export default function PostComposer({
   replyTo,
   quoteTo,
   initialText,
+  editingScheduled,
+  onScheduled,
 }: PostComposerProps) {
   const { t } = useTranslation();
+  const { refreshScheduledPostCounts } = useStreamingContext();
+  const { showSuccess } = useToast();
   const lowContrast = useLowContrast();
   const { user } = useAuth();
   const bskyDeliveryDeferred = useBskyDeliveryDeferred();
@@ -264,14 +283,27 @@ export default function PostComposer({
   const userId = user?.id;
   const replyToId = replyTo?.id;
   const quoteToId = quoteTo?.id;
+  const editingScheduledId = editingScheduled?.id;
   const draftTarget: DraftTarget | null = useMemo(() => {
-    if (userId === undefined) return null;
+    // 予約の編集は予約そのものが下書きなので、ローカルの書きかけ（新規・返信・引用の下書き）に
+    // 書き込まない（書き込むと、同じ返信先への別の書きかけを予約の内容で上書きしてしまう）。
+    if (userId === undefined || editingScheduledId !== undefined) return null;
     if (replyToId !== undefined) return { mode: "reply", userId, postId: replyToId };
     if (quoteToId !== undefined) return { mode: "quote", userId, postId: quoteToId };
     return { mode: "compose", userId };
-  }, [userId, replyToId, quoteToId]);
+  }, [userId, replyToId, quoteToId, editingScheduledId]);
   const [initialDraft] = useState(() =>
-    draftTarget ? loadComposerDraft(draftTarget) : null,
+    editingScheduled
+      ? draftFromScheduledPost(editingScheduled)
+      : draftTarget
+        ? loadComposerDraft(draftTarget)
+        : null,
+  );
+  // 予約投稿（🕒）。オンの間は投稿ボタンが予約日時に投稿する予約になる。予約の編集では最初から
+  // オンで、オフにして送ると今すぐ投稿する。
+  const [scheduleEnabled, setScheduleEnabled] = useState(!!editingScheduled);
+  const [scheduleAt, setScheduleAt] = useState(() =>
+    editingScheduled ? toDatetimeLocal(new Date(editingScheduled.scheduledAt)) : "",
   );
   // 新規投稿・引用の「最後に送信した公開範囲・配送先」（返信は親ポストから決まる専用の
   // デフォルトを持つため対象外、後述のdefaultVisibility参照）。
@@ -344,6 +376,7 @@ export default function PostComposer({
   const cwBtnRef = useRef<HTMLButtonElement>(null);
   const emojiBtnRef = useRef<HTMLButtonElement>(null);
   const userIdBtnRef = useRef<HTMLButtonElement>(null);
+  const scheduleBtnRef = useRef<HTMLButtonElement>(null);
   const unlistedBtnRef = useRef<HTMLButtonElement>(null);
   const privateBtnRef = useRef<HTMLButtonElement>(null);
   const formRef = useRef<HTMLFormElement>(null);
@@ -617,6 +650,14 @@ export default function PostComposer({
   // CWガイド文が空（trim後）、または100書記素を超える間は送信できない。
   const cwInvalid =
     cwEnabled && (cwGuide.trim().length === 0 || countGraphemes(cwGuide) > MAX_CW_LEN);
+  // 予約日時が未入力の間は予約できない（過ぎた日時・近すぎる日時はサーバーが理由付きで拒む）。
+  const scheduleInvalid = scheduleEnabled && Number.isNaN(new Date(scheduleAt).getTime());
+  // 予約中は投稿ボタンに🕒を添え、押すと予約になることを示す。
+  const scheduleMark = scheduleEnabled ? (
+    <span className={styles.scheduleMark} aria-label={t("home:postComposer.schedule.buttonMark")}>
+      <UiIcon emoji="🕒" />
+    </span>
+  ) : null;
 
   // Bsky embed選択のラジオボタンリストが出せない場合（Bsky配送オフ or CW中）の代替。
   // seiranは複数のURLリンクカードを同時に持てるため、URL候補はラジオでなくチェックボックス
@@ -688,6 +729,7 @@ export default function PostComposer({
       embedChoiceMissing ||
       pollInvalid ||
       cwInvalid ||
+      scheduleInvalid ||
       user?.did_moved_out
     )
       return;
@@ -707,7 +749,7 @@ export default function PostComposer({
               : {}),
           }
         : undefined;
-      const note = await api.notes.create(
+      const body = createNoteBody(
         text.trim(),
         deliverFedi,
         deliverBsky,
@@ -724,6 +766,39 @@ export default function PostComposer({
         language,
         attachments.filter((a) => a.isSensitive).map((a) => a.id),
       );
+      let note: Note | null = null;
+      if (scheduleEnabled) {
+        const at = new Date(scheduleAt).toISOString();
+        const saved = editingScheduled
+          ? await api.scheduledPosts.update(editingScheduled.id, at, body)
+          : await api.scheduledPosts.create(at, body);
+        refreshScheduledPostCounts();
+        showSuccess(t("home:postComposer.schedule.saved"));
+        onScheduled?.(saved);
+      } else if (editingScheduled) {
+        note = await api.scheduledPosts.publish(editingScheduled.id, body);
+        refreshScheduledPostCounts();
+      } else {
+        note = await api.notes.create(
+          text.trim(),
+          deliverFedi,
+          deliverBsky,
+          attachmentIds,
+          replyTo?.id,
+          undefined,
+          v,
+          undefined,
+          quoteTo?.id,
+          bskyEmbedChoice ?? undefined,
+          pollPayload,
+          cwEnabled ? cwGuide.trim() : undefined,
+          showUrlCardCheckboxList ? checkedLinkCardUrls : undefined,
+          language,
+          attachments.filter((a) => a.isSensitive).map((a) => a.id),
+        );
+      }
+      setScheduleEnabled(false);
+      setScheduleAt("");
       setText("");
       setAttachments([]);
       setBskyEmbedChoice(null);
@@ -743,7 +818,7 @@ export default function PostComposer({
         setDefaultVisibility(v);
         saveComposerDefaults({ visibility: v, deliverFedi, deliverBsky });
       }
-      onPosted?.(note);
+      if (note) onPosted?.(note);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {
@@ -825,7 +900,13 @@ export default function PostComposer({
   // 無効化中なら無反応〕へ）。
 
   const postButtonsGenericDisabled =
-    posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid;
+    posting ||
+    !text.trim() ||
+    overLimit ||
+    embedChoiceMissing ||
+    pollInvalid ||
+    cwInvalid ||
+    scheduleInvalid;
 
   function isPostButtonDisabled(v: Visibility): boolean {
     if (postButtonsGenericDisabled) return true;
@@ -866,6 +947,7 @@ export default function PostComposer({
     "cw",
     "emoji",
     "userId",
+    "schedule",
   ] as const;
   type ControlBtnKey = (typeof controlBtnKeys)[number];
   const controlBtnRefs: Record<ControlBtnKey, typeof fediBtnRef> = {
@@ -877,6 +959,7 @@ export default function PostComposer({
     cw: cwBtnRef,
     emoji: emojiBtnRef,
     userId: userIdBtnRef,
+    schedule: scheduleBtnRef,
   };
   const controlBtnOrder: ControlBtnKey[] = controlBtnKeys.filter((key) => {
     // 言語選択はBsky配送の`langs`にのみ意味を持つため、Bskyボタン自体が出せない
@@ -1132,6 +1215,25 @@ export default function PostComposer({
         >
           @
         </button>
+        <button
+          ref={scheduleBtnRef}
+          type="button"
+          className={`${styles.iconBtn} ${scheduleEnabled ? styles.scopeActive : ""}`}
+          onClick={() => {
+            if (scheduleEnabled) {
+              setScheduleEnabled(false);
+            } else {
+              setScheduleEnabled(true);
+              if (!scheduleAt) setScheduleAt(defaultScheduleValue());
+            }
+          }}
+          onKeyDown={(e) => handleControlBtnKeyDown(e, "schedule")}
+          title={t("home:postComposer.schedule.toggleTitle")}
+          aria-label={t("home:postComposer.schedule.toggleTitle")}
+          aria-pressed={scheduleEnabled}
+        >
+          <UiIcon emoji="🕒" />
+        </button>
         <span
           className={`${styles.charCount} ${overLimit ? styles.charCountOver : ""}`}
         >
@@ -1164,6 +1266,26 @@ export default function PostComposer({
       </Modal>
 
       <div className={styles.bottomRow}>
+        {scheduleEnabled && (
+          <div className={styles.scheduleEditor}>
+            <label className={styles.scheduleLabel}>
+              <UiIcon emoji="🕒" />
+              {t("home:postComposer.schedule.label")}
+              <input
+                type="datetime-local"
+                className={styles.pollExpiryDatetime}
+                value={scheduleAt}
+                min={minScheduleValue()}
+                onChange={(e) => setScheduleAt(e.target.value)}
+              />
+            </label>
+            <span className={styles.scheduleHint}>
+              {editingScheduled
+                ? t("home:postComposer.schedule.editHint")
+                : t("home:postComposer.schedule.hint")}
+            </span>
+          </div>
+        )}
         {cwEnabled && (
           <div className={styles.cwEditor}>
             <input
@@ -1414,7 +1536,7 @@ export default function PostComposer({
                   ref={publicBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "public" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || scheduleInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("public")}
                   onFocus={() => handleSubmitBtnFocus("public")}
                   onBlur={handleSubmitBtnBlur}
@@ -1424,6 +1546,7 @@ export default function PostComposer({
                     <UiIcon emoji="🌐" />
                   </span>
                   {t("home:postComposer.postButtonPublic")}
+                {scheduleMark}
                 </button>
               )}
               {replyVisibilityOptions.includes("unlisted") && (
@@ -1431,7 +1554,7 @@ export default function PostComposer({
                   ref={unlistedBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || scheduleInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("unlisted")}
                   onFocus={() => handleSubmitBtnFocus("unlisted")}
                   onBlur={handleSubmitBtnBlur}
@@ -1441,6 +1564,7 @@ export default function PostComposer({
                     <UiIcon emoji="🌙" />
                   </span>
                   {t("home:postComposer.postButtonUnlisted")}
+                {scheduleMark}
                 </button>
               )}
               {replyVisibilityOptions.includes("followers_only") && (
@@ -1448,7 +1572,7 @@ export default function PostComposer({
                   ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
+                  disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || scheduleInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}
@@ -1458,6 +1582,7 @@ export default function PostComposer({
                     <UiIcon emoji="🔒️" />
                   </span>
                   {t("home:postComposer.postButtonPrivate")}
+                  {scheduleMark}
                 </button>
               )}
             </div>
@@ -1474,6 +1599,7 @@ export default function PostComposer({
                   embedChoiceMissing ||
                   pollInvalid ||
                   cwInvalid ||
+                  scheduleInvalid ||
                   isVisibilityDisabled("public") ||
                   user?.did_moved_out
                 }
@@ -1493,12 +1619,13 @@ export default function PostComposer({
                   <UiIcon emoji="🌐" />
                 </span>
                 {t("home:postComposer.postButtonPublic")}
+                {scheduleMark}
               </button>
               <button
                 ref={unlistedBtnRef}
                 type="button"
                 className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "unlisted" ? styles.postBtnDefault : ""}`}
-                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || user?.did_moved_out}
+                disabled={posting || !text.trim() || overLimit || embedChoiceMissing || pollInvalid || cwInvalid || scheduleInvalid || user?.did_moved_out}
                 onClick={() => submitWithVisibility("unlisted")}
                 onFocus={() => handleSubmitBtnFocus("unlisted")}
                 onBlur={handleSubmitBtnBlur}
@@ -1508,6 +1635,7 @@ export default function PostComposer({
                   <UiIcon emoji="🌙" />
                 </span>
                 {t("home:postComposer.postButtonUnlisted")}
+                {scheduleMark}
               </button>
               <div
                 className={styles.postBtnTooltipWrap}
@@ -1519,7 +1647,7 @@ export default function PostComposer({
                   ref={privateBtnRef}
                   type="button"
                   className={`${styles.postBtnVariant} ${effectiveDefaultVisibility === "followers_only" ? styles.postBtnDefault : ""}`}
-                  disabled={posting || !text.trim() || overLimit || deliverBsky || user?.did_moved_out}
+                  disabled={posting || !text.trim() || overLimit || deliverBsky || scheduleInvalid || user?.did_moved_out}
                   onClick={() => submitWithVisibility("followers_only")}
                   onFocus={() => handleSubmitBtnFocus("followers_only")}
                   onBlur={handleSubmitBtnBlur}
@@ -1529,6 +1657,7 @@ export default function PostComposer({
                     <UiIcon emoji="🔒️" />
                   </span>
                   {t("home:postComposer.postButtonPrivate")}
+                  {scheduleMark}
                 </button>
                 {showPrivateTooltip && (
                   <span className={styles.popoverBelow} role="status">
