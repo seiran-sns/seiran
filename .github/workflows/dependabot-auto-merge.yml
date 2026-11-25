@@ -2,7 +2,7 @@ name: Dependabot auto-merge
 
 # Dependabot のセキュリティ更新 PR に auto-merge を設定する。main のルールセットが CI の
 # 通過を必須にしているので、マージは CI が通ってから行われる。マージ後の版上げとリリースは
-# security-release.yml が行う（docs/architecture.md 3.1節）。
+# bump.yml が行う（docs/architecture.md 3.1節）。
 #
 # 対象はセキュリティ勧告に紐づく更新（alert-lookup で GHSA が引けるもの）。メジャー更新も本番用の
 # 依存も含める: 修正がメジャー版にしか無いとき、人の判断を待つ間は脆弱性が開いたままになる。

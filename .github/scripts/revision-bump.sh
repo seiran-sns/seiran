@@ -1,5 +1,5 @@
 #!/bin/bash
-# main のリビジョン桁を上げて push する共通処理（security-bump.sh・image-rescan-bump.sh が
+# main のリビジョン桁を上げて push する共通処理（security-bump.sh・manual-bump.sh・image-rescan-bump.sh が
 # source する）。版上げの push が main の CI を起こし、その CI が公開イメージを出す。
 #
 #   bump_revision <判定の関数> <コミットメッセージ>

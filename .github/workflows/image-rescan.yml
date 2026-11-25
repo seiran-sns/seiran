@@ -17,7 +17,7 @@ name: Image rescan
 # ci.yml の image-build は深刻度を問わずに作り直すので、版を上げるリリースには
 # その時点の修正がすべて入る。
 #
-# 版上げの push は GitHub App のトークンで行う（security-release.yml と同じ。GITHUB_TOKEN の
+# 版上げの push は GitHub App のトークンで行う（bump.yml と同じ。GITHUB_TOKEN の
 # push では main の CI が起動しない）。
 on:
   schedule:
