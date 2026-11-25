@@ -1,41 +1,44 @@
 name: Security release
 
-# Dependabot のセキュリティ更新が main に入って CI が通ったら、リビジョン桁を上げて main へ
-# push する。その push の CI（ci.yml の image-build・image-publish）が公開イメージを出す。
-# 判断と版上げは .github/scripts/security-bump.sh。
+# main の CI が通ったら、リビジョン桁を上げて main へ push する。その push の CI（ci.yml の
+# image-build・image-publish）が公開イメージを出す。
 #
-# 版上げを PR に含めずマージ後にここで直列に行うのは、複数の修正 PR が同時に来たときに
-# 版の行で衝突させないため。push は GitHub App のトークンで行う（GITHUB_TOKEN の push では
-# main の CI が起動しない。App は main のルールセットの例外にしておく）。
+# - auto-merge（squash。コミットの作者が Dependabot のまま）で入ったセキュリティ修正は、人を
+#   待たずに版を上げる（判断と版上げは .github/scripts/security-bump.sh）。
+# - それ以外で、main がリリース済みの版から進んでいれば（人がマージした PR。Dependabot の PR を
+#   含む）、版上げのジョブを Environment security-release-review の承認待ちにする。開発機での
+#   画面・動作確認が済んだら承認すると版を上げる（.github/scripts/manual-bump.sh）。承認しなければ
+#   版は上がらない（Reject するか、次の push の承認待ちに置き換わるのに任せる）。飛ばさずに
+#   承認待ちを残すのは、版上げを忘れても Actions に残って気づけるようにするため。
+#   Environment には必須の承認者を設定しておく（無いと承認を待たずに版が上がる）。
+# - 手動実行（workflow_dispatch、main のみ）でも同じ承認待ちを作れる。承認待ちを Reject した・
+#   期限（30日）が切れた後に出し直すため。
 #
-# auto-merge（squash。コミットの作者が Dependabot のまま）で入った修正は自動で版を上げる。
-# 人がマージした Dependabot の PR（勧告に紐づかない更新等、auto-merge の対象外のもの）は、版上げの
-# ジョブを Environment security-release-review の承認待ちにする。飛ばしてしまうと版上げを
-# 忘れても気づけないため。承認すれば同じ手順で版を上げる（Environment に必須の承認者を設定しておく）。
+# 版上げを PR に含めずマージ後にここで直列に行うのは、複数の PR が同時に来たときに版の行で
+# 衝突させないため。push は GitHub App のトークンで行う（GITHUB_TOKEN の push では main の CI が
+# 起動しない。App は main のルールセットの例外にしておく）。
 on:
   workflow_run:
     workflows: [CI]
     types: [completed]
     branches: [main]
-
-concurrency:
-  group: security-release
-  cancel-in-progress: false
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  # auto: auto-merge で入った修正、review: 人がマージした Dependabot の PR、none: それ以外
+  # auto: auto-merge で入った Dependabot の修正、review: 人の承認で版を上げる、none: 何もしない
   classify:
     name: Classify
     if: >-
-      github.event.workflow_run.conclusion == 'success' &&
-      github.event.workflow_run.event == 'push'
+      (github.event_name == 'workflow_run' &&
+       github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.event == 'push') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
     outputs:
       mode: ${{ steps.mode.outputs.mode }}
     steps:
@@ -43,19 +46,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
+          EVENT: ${{ github.event_name }}
           SHA: ${{ github.event.workflow_run.head_sha }}
           AUTHOR: ${{ github.event.workflow_run.head_commit.author.name }}
         run: |
-          if [ "$AUTHOR" = "dependabot[bot]" ]; then
+          # $SHA がリリース済みの版（タグ v<版>）より進んでいるか。版上げのコミット自身（その CI が
+          # タグを付けた）で承認待ちを作らないため。タグが無い（その版がまだリリースされていない）
+          # なら、その版の CI がリリースするので進んでいないとみなす。
+          unreleased() {
+              local toml version ahead
+              toml="$(gh api -H 'Accept: application/vnd.github.raw' "repos/$REPO/contents/Cargo.toml?ref=$SHA")"
+              version="$(sed -n '/^\[workspace.package\]/,/^\[/{s/^\(version\|version_suffix\) *= *"\(.*\)"/\2/p}' <<< "$toml" | tr -d '\n')"
+              ahead="$(gh api "repos/$REPO/compare/v$version...$SHA" --jq .ahead_by 2> /dev/null)" || return 1
+              [ "$ahead" -gt 0 ]
+          }
+          if [ "$EVENT" = workflow_dispatch ]; then
+              mode=review
+          elif [ "$AUTHOR" = "dependabot[bot]" ]; then
               mode=auto
-          elif gh api "repos/$REPO/commits/$SHA/pulls" \
-                  --jq '.[] | select(.merged_at != null) | .user.login' | grep -qx 'dependabot\[bot\]'; then
+          elif unreleased; then
               mode=review
           else
               mode=none
           fi
           echo "mode=$mode" >> "$GITHUB_OUTPUT"
-          echo "$SHA: $mode" >> "$GITHUB_STEP_SUMMARY"
+          echo "${SHA:-$EVENT}: $mode" >> "$GITHUB_STEP_SUMMARY"
 
   bump:
     name: Bump revision
@@ -63,6 +78,12 @@ jobs:
     if: needs.classify.outputs.mode == 'auto' || needs.classify.outputs.mode == 'review'
     # Environment は式で空にできないので、自動のときは承認者の無い security-release を使う
     environment: ${{ needs.classify.outputs.mode == 'review' && 'security-release-review' || 'security-release' }}
+    # 自動の版上げは直列に行い、取り消さない。承認待ちは別のグループにして、新しい承認待ちが
+    # 古いものを置き換える（承認すると、その時点の main の版を上げるので古いものは要らない）。
+    # 同じグループにすると、承認待ちの間、自動の版上げ（セキュリティ修正のリリース）が止まる。
+    concurrency:
+      group: ${{ needs.classify.outputs.mode == 'review' && 'release-review' || 'security-release' }}
+      cancel-in-progress: ${{ needs.classify.outputs.mode == 'review' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v3
@@ -88,5 +109,11 @@ jobs:
           git config user.email "${user_id}+${APP_SLUG}[bot]@users.noreply.github.com"
       - name: Bump and push
         env:
+          MODE: ${{ needs.classify.outputs.mode }}
           FIXED_SHA: ${{ github.event.workflow_run.head_sha }}
-        run: .github/scripts/security-bump.sh "$FIXED_SHA"
+        run: |
+          if [ "$MODE" = auto ]; then
+              .github/scripts/security-bump.sh "$FIXED_SHA"
+          else
+              .github/scripts/manual-bump.sh
+          fi
