@@ -13,6 +13,53 @@ pub fn at_uri_to_bsky_app_url(at_uri: &str) -> String {
     }
 }
 
+/// `at://did/collection/rkey` 形式の AT URI から、投稿者の Bsky.app プロフィール URL を作る。
+pub fn at_uri_to_bsky_profile_url(at_uri: &str) -> Option<String> {
+    let without_prefix = at_uri.strip_prefix("at://")?;
+    let did = without_prefix.split('/').next().filter(|d| !d.is_empty())?;
+    Some(format!("https://bsky.app/profile/{}", did))
+}
+
+/// Bsky にしか実体が無い投稿を引用したとき、Fedi 向け本文の末尾に付ける引用ブロック。
+/// URL をカードにしない表示環境でも引用元の内容が読めるようにする。1行目は引用元の投稿者
+/// （表示名をプロフィールへのリンクにし、ハンドルを添える）、続けて引用元の本文。
+///
+/// 受け取る側の言語は分からないので、「〜の投稿」のような文言は付けない。ハンドルに `@` を
+/// 付けないのは、Misskey が受信 HTML の `@名前` をメンション構文として読み、
+/// `@alice.bsky.social` を自サーバーのユーザー `@alice` へのメンションにしてしまうため。
+/// 本文が空（画像だけの投稿等）なら、何を引用したかはリンクで分かるので付けない。
+pub fn bsky_quote_block_html(
+    display_name: Option<&str>,
+    handle: &str,
+    profile_url: &str,
+    body: &str,
+) -> Option<String> {
+    if body.trim().is_empty() {
+        return None;
+    }
+    let name = display_name
+        .map(str::trim)
+        .filter(|n| !n.is_empty() && *n != handle);
+    let author = match name {
+        Some(name) => format!(
+            r#"<a href="{}" rel="nofollow noopener">{}</a> ({})"#,
+            escape_html(profile_url),
+            escape_html(name),
+            escape_html(handle)
+        ),
+        None => format!(
+            r#"<a href="{}" rel="nofollow noopener">{}</a>"#,
+            escape_html(profile_url),
+            escape_html(handle)
+        ),
+    };
+    Some(format!(
+        "<blockquote><p>{}</p>{}</blockquote>",
+        author,
+        plain_to_html(body.trim())
+    ))
+}
+
 /// HTML の特殊文字をエスケープする（`plain_to_html`／`plain_to_html_with_mentions` 共通）。
 fn escape_html(s: &str) -> String {
     s.replace('&', "&amp;")
@@ -81,6 +128,58 @@ pub fn plain_to_html_with_mentions(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bsky_quote_block_html_puts_author_then_body() {
+        let html = bsky_quote_block_html(
+            Some("Alice <A>"),
+            "alice.bsky.social",
+            "https://bsky.app/profile/did:plc:abc",
+            "line1\nline2\n\npara2",
+        )
+        .unwrap();
+        assert_eq!(
+            html,
+            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">Alice &lt;A&gt;</a> (alice.bsky.social)</p><p>line1<br>line2</p><p>para2</p></blockquote>"
+        );
+    }
+
+    #[test]
+    fn bsky_quote_block_html_uses_handle_without_display_name() {
+        let html = bsky_quote_block_html(
+            None,
+            "alice.bsky.social",
+            "https://bsky.app/profile/did:plc:abc",
+            "hi",
+        )
+        .unwrap();
+        assert!(html.starts_with(
+            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">alice.bsky.social</a></p>"
+        ));
+        assert!(!html.contains('@'));
+    }
+
+    #[test]
+    fn bsky_quote_block_html_skips_empty_body() {
+        assert_eq!(
+            bsky_quote_block_html(
+                Some("Alice"),
+                "alice.bsky.social",
+                "https://bsky.app/profile/x",
+                "  \n "
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn at_uri_to_bsky_profile_url_extracts_did() {
+        assert_eq!(
+            at_uri_to_bsky_profile_url("at://did:plc:abc/app.bsky.feed.post/3k"),
+            Some("https://bsky.app/profile/did:plc:abc".to_owned())
+        );
+        assert_eq!(at_uri_to_bsky_profile_url("https://example.com"), None);
+    }
 
     #[test]
     fn test_plain_to_html_single_paragraph() {
