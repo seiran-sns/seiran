@@ -24,11 +24,16 @@ pub fn at_uri_to_bsky_profile_url(at_uri: &str) -> Option<String> {
 /// URL をカードにしない表示環境でも引用元の内容が読めるようにする。1行目は引用元の投稿者
 /// （表示名をプロフィールへのリンクにし、ハンドルを添える）、続けて引用元の本文。
 ///
-/// 受け取る側の言語は分からないので、「〜の投稿」のような文言は付けない。ハンドル（1行目と、
-/// 本文中のメンション）は `<code>` で囲む。Misskey は受信 HTML の `@名前` をメンション構文として
-/// 読み、`@alice.bsky.social` を自サーバーのユーザー `@alice` へのメンションにしてしまうが、
-/// インラインコードの中はメンションとして読まないため。同じ理由で、`@` で始まる文字列を
-/// `<a>` の中に置かない（Misskey は `@` で始まるリンクもメンションに変換する）。
+/// 受け取る側の言語は分からないので、「〜の投稿」のような文言は付けない。
+///
+/// Misskey は受信した `<blockquote>` の中身をタグを捨てた文字列にしてから引用にする（残るのは
+/// `<br>` の改行だけ）。そのため中は1つの `<p>` にまとめ、行・段落の区切りを `<br>` で書く
+/// （`<p>` で区切ると Misskey では1行につながる）。同じ理由で `<code>` も捨てられ、本文に残った
+/// `@alice.bsky.social` はメンション構文として読まれて、存在しないメンションになってしまう。
+/// ハンドル（1行目と本文中のメンション）は `@` の直後に単語結合子（U+2060、見えない文字）を
+/// 挟み、メンションとして成立しないようにする（`<code>` は Mastodon 等で等幅にする見た目だけ）。
+/// `@` で始まる文字列を `<a>` の中に置かないのも、Misskey が `@` で始まるリンクをメンションに
+/// 変換するため。
 /// 本文が空（画像だけの投稿等）なら、何を引用したかはリンクで分かるので付けない。
 pub fn bsky_quote_block_html(
     display_name: Option<&str>,
@@ -42,7 +47,7 @@ pub fn bsky_quote_block_html(
     let name = display_name
         .map(str::trim)
         .filter(|n| !n.is_empty() && *n != handle);
-    let handle_code = format!("<code>@{}</code>", escape_html(handle));
+    let handle_code = handle_code_html(handle);
     let author = match name {
         Some(name) => format!(
             r#"<a href="{}" rel="nofollow noopener">{}</a> {}"#,
@@ -55,7 +60,7 @@ pub fn bsky_quote_block_html(
         None => handle_code,
     };
     Some(format!(
-        "<blockquote><p>{}</p>{}</blockquote>",
+        "<blockquote><p>{}<br>{}</p></blockquote>",
         author,
         markdown_links_to_html(body.trim())
     ))
@@ -63,7 +68,8 @@ pub fn bsky_quote_block_html(
 
 /// 内部リンクマーカー `[表示テキスト](URL)`（Bsky の `#link` facet を焼き込んだもの、
 /// `atp::facets::apply_link_facets`）を `<a>` にし、他は `plain_to_html` と同じく段落・改行を
-/// HTML にする。リモート Bsky 投稿の本文をそのまま HTML にするとマーカーが記号のまま見えるため。
+/// `<br>` にする（段落も `<br><br>`。理由は `bsky_quote_block_html`）。リモート Bsky 投稿の本文を
+/// そのまま HTML にするとマーカーが記号のまま見えるため。
 /// URL が `http(s)://` で始まらないもの・閉じていないものはテキストのまま残す。
 fn markdown_links_to_html(text: &str) -> String {
     let mut linked = String::with_capacity(text.len() * 2);
@@ -97,10 +103,12 @@ fn markdown_links_to_html(text: &str) -> String {
         }
     }
     linked.push_str(&escape_with_handle_code(rest));
-    linked
-        .split("\n\n")
-        .map(|para| format!("<p>{}</p>", para.replace('\n', "<br>")))
-        .collect()
+    linked.replace('\n', "<br>")
+}
+
+/// 引用ブロック中のハンドル表記（理由は `bsky_quote_block_html`）。
+fn handle_code_html(handle: &str) -> String {
+    format!("<code>@\u{2060}{}</code>", escape_html(handle))
 }
 
 /// HTML エスケープしつつ、本文中の Bsky ハンドルのメンション（`@` の後にドットを含むドメイン
@@ -125,7 +133,7 @@ fn escape_with_handle_code(text: &str) -> String {
                 handle.contains('.') && !handle.starts_with(['.', '-']) && !handle.contains("..");
             if valid {
                 out.push_str(&escape_html(&text[plain_start..i]));
-                out.push_str(&format!("<code>@{}</code>", escape_html(handle)));
+                out.push_str(&handle_code_html(handle));
                 let end = i + 1 + handle.len();
                 plain_start = end;
                 while iter.peek().is_some_and(|(j, _)| *j < end) {
@@ -221,7 +229,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             html,
-            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">Alice &lt;A&gt;</a> <code>@alice.bsky.social</code></p><p>line1<br>line2</p><p>para2</p></blockquote>"
+            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">Alice &lt;A&gt;</a> <code>@\u{2060}alice.bsky.social</code><br>line1<br>line2<br><br>para2</p></blockquote>"
         );
     }
 
@@ -234,7 +242,9 @@ mod tests {
             "hi",
         )
         .unwrap();
-        assert!(html.starts_with("<blockquote><p><code>@alice.bsky.social</code></p>"));
+        assert!(
+            html.starts_with("<blockquote><p><code>@\u{2060}alice.bsky.social</code><br>hi</p>")
+        );
     }
 
     #[test]
@@ -261,7 +271,7 @@ mod tests {
         )
         .unwrap();
         assert!(html.contains(
-            "hi <code>@bob.bsky.social</code>. mail me@example.com or @carol (<code>@dave.example.jp</code>)"
+            "hi <code>@\u{2060}bob.bsky.social</code>. mail me@example.com or @carol (<code>@\u{2060}dave.example.jp</code>)"
         ));
     }
 
