@@ -77,12 +77,19 @@ function applyColor(siteColor: string, isDark: boolean, lowContrast: boolean) {
     );
     return;
   }
-  // 低コントラストのライトでは白に混ぜると背景より明るく浮くので、ダークと同じく背景側へ混ぜる。
-  const deepMixTarget = isDark || lowContrast ? "var(--bg-elev-2)" : "white";
   const accentColor = isDark ? `color-mix(in srgb, ${color} ${lowContrast ? 70 : 60}%, white)` : color;
   root.setProperty("--accent", accentColor);
   root.setProperty("--accent-strong", color);
   root.setProperty("--accent-hover", `color-mix(in srgb, ${color} 82%, black)`);
+  if (lowContrast) {
+    // 選択中のトグル等の背景。背景側へ混ぜると暗くなってグレーアウトに見えるので、明るさは
+    // ページ背景より少し明るい値に固定し、サイトカラーの色相だけを控えめに付ける。
+    const [l, hoverL] = isDark ? ["0.34", "0.38"] : ["0.955", "0.925"];
+    root.setProperty("--accent-deep", `oklch(from ${siteColor} ${l} 0.045 h)`);
+    root.setProperty("--accent-deep-hover", `oklch(from ${siteColor} ${hoverL} 0.055 h)`);
+    return;
+  }
+  const deepMixTarget = isDark ? "var(--bg-elev-2)" : "white";
   root.setProperty("--accent-deep", `color-mix(in srgb, ${color} 14%, ${deepMixTarget})`);
   root.setProperty("--accent-deep-hover", `color-mix(in srgb, ${color} 24%, ${deepMixTarget})`);
 }
