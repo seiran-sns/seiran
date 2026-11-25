@@ -260,6 +260,7 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
   const [tab, setTab] = useState<Tab>("unicode");
   const [annotations, setAnnotations] = useState<EmojiAnnotationIndex>(new Map());
   const bodyRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     // `i18n.language` は検出された生の言語コード（例: "ja-JP"）を返すことがあるため、
@@ -405,25 +406,69 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
     });
   }
 
-  /** 絵文字の上の左右矢印で前後の絵文字へ移る（Slack と同じ。先頭で左は末尾へ、末尾で右は先頭へ回る）。 */
+  /**
+   * 上下矢印の移動先。横長のカスタム絵文字があり1行の件数が行ごとに違うため、添字ではなく画面上の
+   * 位置で決める: 真下（真上）の行のうち、横方向の中心がいちばん近いボタン。無ければ `null`。
+   */
+  function verticalNeighbor(buttons: HTMLElement[], current: HTMLElement, down: boolean): HTMLElement | null {
+    const cur = current.getBoundingClientRect();
+    const centerX = cur.left + cur.width / 2;
+    const rects = buttons.map((el) => ({ el, rect: el.getBoundingClientRect() }));
+    const beyond = rects.filter(({ rect }) =>
+      down ? rect.top >= cur.bottom - 2 : rect.bottom <= cur.top + 2
+    );
+    if (beyond.length === 0) return null;
+    // 隣の行 = 下なら上端がいちばん上、上なら下端がいちばん下のボタンと同じ行。
+    const rowEdge = down
+      ? Math.min(...beyond.map(({ rect }) => rect.top))
+      : Math.max(...beyond.map(({ rect }) => rect.bottom));
+    const row = beyond.filter(({ rect }) =>
+      Math.abs((down ? rect.top : rect.bottom) - rowEdge) < cur.height / 2
+    );
+    let best = row[0];
+    for (const candidate of row) {
+      const distance = Math.abs(candidate.rect.left + candidate.rect.width / 2 - centerX);
+      if (distance < Math.abs(best.rect.left + best.rect.width / 2 - centerX)) best = candidate;
+    }
+    return best.el;
+  }
+
+  /**
+   * 絵文字の上の矢印キー（Slack と同じ）。左右は前後の絵文字へ（先頭で左は末尾へ、末尾で右は
+   * 先頭へ回る）、上下は上下の行の絵文字へ。いちばん上の行で上を押すと検索欄へ戻る。
+   * 一覧のスクロールは、フォーカスした絵文字が見えるようブラウザが合わせる。
+   */
   function handleBodyKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
-    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(e.key)) return;
     const current = (e.target as HTMLElement).closest<HTMLElement>("[data-picker-item]");
     if (!current) return;
     const buttons = visibleItemButtons();
     const index = buttons.indexOf(current);
-    if (index < 0 || buttons.length === 0) return;
+    if (index < 0) return;
     e.preventDefault();
-    const step = e.key === "ArrowRight" ? 1 : -1;
-    buttons[(index + step + buttons.length) % buttons.length].focus();
+    if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+      const step = e.key === "ArrowRight" ? 1 : -1;
+      buttons[(index + step + buttons.length) % buttons.length].focus();
+      return;
+    }
+    const next = verticalNeighbor(buttons, current, e.key === "ArrowDown");
+    if (next) next.focus();
+    else if (e.key === "ArrowUp") searchRef.current?.focus();
   }
 
-  /** 検索欄の末尾にカーソルがあるときの右矢印で、先頭の絵文字へ移る。 */
+  /**
+   * 検索欄の下矢印、または末尾にカーソルがあるときの右矢印で、先頭の絵文字へ移る。
+   * IME の変換中は何もしない（ATOK では下矢印が注目文節の確定など、変換操作に使われる）。
+   */
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
-    if (e.key !== "ArrowRight" || e.nativeEvent.isComposing) return;
-    const input = e.currentTarget;
-    const end = input.value.length;
-    if (input.selectionStart !== end || input.selectionEnd !== end) return;
+    if (e.key !== "ArrowRight" && e.key !== "ArrowDown") return;
+    // 変換中のキーは isComposing、変換確定直後のキーは keyCode 229 で来るブラウザがある。
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return;
+    if (e.key === "ArrowRight") {
+      const input = e.currentTarget;
+      const end = input.value.length;
+      if (input.selectionStart !== end || input.selectionEnd !== end) return;
+    }
     const first = visibleItemButtons()[0];
     if (!first) return;
     e.preventDefault();
@@ -433,6 +478,7 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
   return (
     <div className={styles.wrap}>
       <input
+        ref={searchRef}
         type="text"
         className={styles.search}
         placeholder={t("home:reactionPicker.searchPlaceholder")}
