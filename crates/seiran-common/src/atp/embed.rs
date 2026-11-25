@@ -146,6 +146,8 @@ pub fn parse_bsky_embed_link_card(embed: &JsonValue, did: &str) -> Option<Parsed
 
 /// AP Note の `record.embed` を解析し、添付URL一覧を組み立てる。
 /// `app.bsky.embed.images` → `https://cdn.bsky.app/img/feed_fullsize/plain/{did}/{cid}`
+/// `app.bsky.embed.gallery`（5枚以上の画像。Bluesky公式アプリが使う）→ `items[].image` を
+///   `images` と同じ扱いにする（`image` を持たない要素は飛ばす）
 /// `app.bsky.embed.video` → HLSプレイリスト `https://video.bsky.app/watch/{did}/{cid}/playlist.m3u8`
 ///   （動画本体はBluesky公式の動画処理パイプラインでHLSにトランスコードされて配信されるため、
 ///   PDS上のblob自体を指すURLではなくこの固定パターンを使う。サムネイルも同様のパターン）。
@@ -156,46 +158,8 @@ pub fn parse_bsky_embed_link_card(embed: &JsonValue, did: &str) -> Option<Parsed
 pub fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedAttachment> {
     let embed_type = embed.get("$type").and_then(|v| v.as_str()).unwrap_or("");
     match embed_type {
-        "app.bsky.embed.images" => embed
-            .get("images")
-            .and_then(|v| v.as_array())
-            .map(|images| {
-                images
-                    .iter()
-                    .filter_map(|img| {
-                        let cid = img.get("image")?.get("ref")?.get("$link")?.as_str()?;
-                        let mime_type = img
-                            .get("image")
-                            .and_then(|i| i.get("mimeType"))
-                            .and_then(|v| v.as_str())
-                            .unwrap_or("image/jpeg")
-                            .to_string();
-                        let width = img
-                            .get("aspectRatio")
-                            .and_then(|a| a.get("width"))
-                            .and_then(|v| v.as_i64())
-                            .unwrap_or(0) as i32;
-                        let height = img
-                            .get("aspectRatio")
-                            .and_then(|a| a.get("height"))
-                            .and_then(|v| v.as_i64())
-                            .unwrap_or(0) as i32;
-                        let url = format!(
-                            "https://cdn.bsky.app/img/feed_fullsize/plain/{}/{}",
-                            did, cid
-                        );
-                        Some(ParsedAttachment {
-                            url,
-                            mime_type,
-                            width,
-                            height,
-                            thumbnail_url: None,
-                            is_gif: false,
-                        })
-                    })
-                    .collect()
-            })
-            .unwrap_or_default(),
+        "app.bsky.embed.images" => parse_bsky_image_items(embed.get("images"), did),
+        "app.bsky.embed.gallery" => parse_bsky_image_items(embed.get("items"), did),
         "app.bsky.embed.video" => {
             let Some(cid) = embed
                 .get("video")
@@ -250,6 +214,47 @@ pub fn parse_bsky_embed_attachments(embed: &JsonValue, did: &str) -> Vec<ParsedA
             .unwrap_or_default(),
         _ => vec![],
     }
+}
+
+/// `app.bsky.embed.images` の `images[]` / `app.bsky.embed.gallery` の `items[]` から画像添付を
+/// 組み立てる。どちらも各要素が `image`（blob）と `aspectRatio` を持つ。
+fn parse_bsky_image_items(items: Option<&JsonValue>, did: &str) -> Vec<ParsedAttachment> {
+    let Some(items) = items.and_then(|v| v.as_array()) else {
+        return vec![];
+    };
+    items
+        .iter()
+        .filter_map(|img| {
+            let image = img.get("image")?;
+            let cid = image.get("ref")?.get("$link")?.as_str()?;
+            let mime_type = image
+                .get("mimeType")
+                .and_then(|v| v.as_str())
+                .unwrap_or("image/jpeg")
+                .to_string();
+            let width = img
+                .get("aspectRatio")
+                .and_then(|a| a.get("width"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
+            let height = img
+                .get("aspectRatio")
+                .and_then(|a| a.get("height"))
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0) as i32;
+            Some(ParsedAttachment {
+                url: format!(
+                    "https://cdn.bsky.app/img/feed_fullsize/plain/{}/{}",
+                    did, cid
+                ),
+                mime_type,
+                width,
+                height,
+                thumbnail_url: None,
+                is_gif: false,
+            })
+        })
+        .collect()
 }
 
 /// `record.embed` から引用先の at:// URI を抽出する（#116）。
@@ -368,5 +373,58 @@ mod tests {
             parse_bsky_embed_quote_uri(&embed).as_deref(),
             Some("at://did:plc:alice/app.bsky.feed.post/quoted")
         );
+    }
+
+    #[test]
+    fn gallery_embed_is_parsed_like_images() {
+        let item = |cid: &str| {
+            serde_json::json!({
+                "$type": "app.bsky.embed.gallery#image",
+                "alt": "",
+                "aspectRatio": { "width": 4000, "height": 3000 },
+                "image": {
+                    "$type": "blob",
+                    "mimeType": "image/jpeg",
+                    "ref": { "$link": cid },
+                    "size": 1
+                }
+            })
+        };
+        let items: Vec<_> = (0..6).map(|i| item(&format!("cid{i}"))).collect();
+        let embed = serde_json::json!({ "$type": "app.bsky.embed.gallery", "items": items });
+
+        let attachments = parse_bsky_embed_attachments(&embed, "did:plc:test");
+
+        assert_eq!(attachments.len(), 6);
+        assert_eq!(
+            attachments[5].url,
+            "https://cdn.bsky.app/img/feed_fullsize/plain/did:plc:test/cid5"
+        );
+        assert_eq!(attachments[0].mime_type, "image/jpeg");
+        assert_eq!(attachments[0].width, 4000);
+        assert_eq!(attachments[0].height, 3000);
+    }
+
+    #[test]
+    fn gallery_inside_record_with_media_is_parsed() {
+        let embed = serde_json::json!({
+            "$type": "app.bsky.embed.recordWithMedia",
+            "record": {
+                "$type": "app.bsky.embed.record",
+                "record": { "uri": "at://did:plc:alice/app.bsky.feed.post/quoted" }
+            },
+            "media": {
+                "$type": "app.bsky.embed.gallery",
+                "items": [
+                    { "image": { "ref": { "$link": "cid0" }, "mimeType": "image/png" } },
+                    { "$type": "app.bsky.embed.gallery#unknown" }
+                ]
+            }
+        });
+
+        let attachments = parse_bsky_embed_attachments(&embed, "did:plc:test");
+
+        assert_eq!(attachments.len(), 1);
+        assert_eq!(attachments[0].mime_type, "image/png");
     }
 }
