@@ -161,7 +161,7 @@ pub async fn xrpc_request_plc_operation_signature(
         .into_response();
     }
 
-    let language = super::server::atp_mail_language(&state, login.id, &headers).await;
+    let language = super::server::atp_mail_language(&state, login.id, headers).await;
     if let Err(e) = crate::mailer::send_plc_operation_signature_code(
         &smtp_settings,
         language,
