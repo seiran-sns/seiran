@@ -11,7 +11,7 @@ use reqwest::redirect::Policy;
 
 use seiran_common::atp::{resolve_service_endpoint, sign_service_auth_jwt};
 
-use super::{extract_bearer, service_did};
+use super::auth::{authenticate, ScopeNeed, XrpcRequest};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -59,15 +59,14 @@ pub async fn xrpc_proxy_fallback(
             .into_response();
     };
 
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
+    let xrpc = XrpcRequest {
+        method: method.clone(),
+        path: uri.path().to_string(),
+        headers: headers.clone(),
     };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,

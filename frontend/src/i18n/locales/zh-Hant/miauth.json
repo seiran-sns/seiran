@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "請在應用程式中輸入以下授權碼。",
     "invalidRequest": "授權請求無效。請從應用程式重新開始。"
+  },
+  "atprotoOAuth": {
+    "title": "允許存取你的 Bluesky 帳號",
+    "invalidRequest": "授權請求無效。請從應用程式重新開始。",
+    "clientHost": "提供者：{{host}}",
+    "selfDeclaredNote": "應用程式名稱與圖示由應用程式自行宣告。請確認你信任提供者的網域。",
+    "account": "目前登入：@{{handle}}",
+    "loginHintMismatch": "此應用程式要求以 @{{hint}} 登入。",
+    "switchAccount": "使用其他帳號登入",
+    "scopeTitle": "此應用程式將可以",
+    "scopeAtproto": "確認你的 Bluesky 帳號（@{{handle}}）",
+    "scopeGeneric": "讀寫貼文、喜歡、追蹤等，並查看時間軸與通知",
+    "scopeEmail": "查看你的電子郵件地址",
+    "approve": "允許",
+    "deny": "拒絕"
   }
 }

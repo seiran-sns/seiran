@@ -132,7 +132,14 @@
     "issuedWarning": "このトークンは今だけ表示されます。閉じると二度と表示できません。",
     "copyButton": "コピー",
     "copiedButton": "コピーしました",
-    "dismissButton": "閉じる"
+    "dismissButton": "閉じる",
+    "oauthClient": "Bluesky アプリ · {{host}}",
+    "authorizedAt": "{{date}} に許可",
+    "oauthScopes": "権限: {{scopes}}",
+    "scopeSeparator": "・",
+    "scopeAtproto": "アカウントの確認",
+    "scopeGeneric": "投稿などの読み書き",
+    "scopeEmail": "メールアドレスの参照"
   },
   "appPasswordsSettings": {
     "description": "Bluesky クライアント（TOKIMEKI など）にログインするとき、メインパスワードの代わりに使うパスワードです。ユーザー名には Bluesky のハンドル（例: name.seiran.org）を入れてください。クライアントごとに発行しておけば、使わなくなったものだけを無効化できます。",

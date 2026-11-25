@@ -132,7 +132,14 @@
     "issuedWarning": "Ce jeton n'est affiché que maintenant. Il ne pourra plus être affiché après la fermeture.",
     "copyButton": "Copier",
     "copiedButton": "Copié",
-    "dismissButton": "Fermer"
+    "dismissButton": "Fermer",
+    "oauthClient": "Application Bluesky · {{host}}",
+    "authorizedAt": "Autorisée le {{date}}",
+    "oauthScopes": "Autorisations : {{scopes}}",
+    "scopeSeparator": ", ",
+    "scopeAtproto": "confirmer le compte",
+    "scopeGeneric": "lire et écrire des publications, etc.",
+    "scopeEmail": "voir l’adresse e-mail"
   },
   "appPasswordsSettings": {
     "description": "Mots de passe à utiliser à la place de votre mot de passe principal pour vous connecter à des clients Bluesky (comme TOKIMEKI). Saisissez votre identifiant Bluesky (ex. name.seiran.org) comme nom d’utilisateur. Créez-en un par client pour pouvoir révoquer uniquement ceux que vous n’utilisez plus.",

@@ -132,7 +132,14 @@
     "issuedWarning": "此權杖僅在現在顯示。關閉後將無法再次顯示。",
     "copyButton": "複製",
     "copiedButton": "已複製",
-    "dismissButton": "關閉"
+    "dismissButton": "關閉",
+    "oauthClient": "Bluesky 應用程式 · {{host}}",
+    "authorizedAt": "{{date}} 授權",
+    "oauthScopes": "權限：{{scopes}}",
+    "scopeSeparator": "、",
+    "scopeAtproto": "確認帳號",
+    "scopeGeneric": "讀寫貼文等",
+    "scopeEmail": "查看電子郵件地址"
   },
   "appPasswordsSettings": {
     "description": "登入 Bluesky 用戶端（如 TOKIMEKI）時代替主密碼使用的密碼。使用者名稱請填寫 Bluesky 帳號（例：name.seiran.org）。為每個用戶端分別建立，就能只撤銷不再使用的那個。",

@@ -1,5 +1,14 @@
 import { mailLanguage, request } from "./core";
-import type { AuthResponse, LoginResult, SetupStatus, User, VerifyEmailResponse, VerifyTokenResponse } from "./types";
+import type {
+  AtprotoOAuthRequestInfo,
+  AtprotoOAuthSession,
+  AuthResponse,
+  LoginResult,
+  SetupStatus,
+  User,
+  VerifyEmailResponse,
+  VerifyTokenResponse,
+} from "./types";
 import { authenticationOptions, credentialJson } from "./webauthn";
 import type { AuthenticationOptionsJson, WebAuthnEnvelope } from "./webauthn";
 
@@ -172,6 +181,34 @@ export const oauth = {
       params,
     );
     return { redirectUrl: res.redirect_url, code: res.code };
+  },
+};
+
+/** AT Protocol OAuth（Bluesky クライアントの「Bluesky アカウントでログイン」）。 */
+export const atprotoOAuth = {
+  /** 承認画面に出す内容（クライアント・求められた権限・ログイン中のアカウント）。 */
+  request(requestUri: string) {
+    return request<AtprotoOAuthRequestInfo>(
+      "GET",
+      `/atproto-oauth/request?request_uri=${encodeURIComponent(requestUri)}`,
+    );
+  },
+  approve(requestUri: string) {
+    return request<{ redirect_url: string }>("POST", "/atproto-oauth/approve", {
+      request_uri: requestUri,
+    });
+  },
+  deny(requestUri: string) {
+    return request<{ redirect_url: string }>("POST", "/atproto-oauth/deny", {
+      request_uri: requestUri,
+    });
+  },
+  /** 設定画面: 連携中のクライアント。 */
+  sessions() {
+    return request<AtprotoOAuthSession[]>("GET", "/account/atproto-oauth-sessions");
+  },
+  revokeSession(id: string) {
+    return request<void>("DELETE", `/account/atproto-oauth-sessions/${encodeURIComponent(id)}`);
   },
 };
 

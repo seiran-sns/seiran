@@ -21,6 +21,7 @@ pub mod ap_public;
 pub mod app_token;
 pub mod at_migration;
 pub mod atp;
+pub mod atp_oauth;
 pub mod atp_preferences;
 pub mod atp_session;
 pub mod auth_rate_limit;

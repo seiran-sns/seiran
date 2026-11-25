@@ -871,6 +871,33 @@ export interface CreateAppTokenResponse {
   created_at: string;
 }
 
+/** AT Protocol OAuth の承認画面の内容（`GET /atproto-oauth/request`）。クライアント名・ロゴ・
+ * URL はクライアントの自己申告で、`client_host`（`client_id` のホスト名）だけが確かな値。 */
+export interface AtprotoOAuthRequestInfo {
+  client_id: string;
+  client_host: string;
+  client_name: string | null;
+  client_uri: string | null;
+  logo_uri: string | null;
+  /** 付与する権限（`atproto`・`transition:generic`・`transition:email` のうち要求されたもの）。 */
+  scopes: string[];
+  handle: string;
+  did: string;
+  login_hint: string | null;
+  /** クライアントが指定したアカウント（`login_hint`）とログイン中のアカウントが一致するか。 */
+  login_hint_matches: boolean;
+}
+
+/** 連携中の AT Protocol OAuth クライアント（`GET /account/atproto-oauth-sessions`）。 */
+export interface AtprotoOAuthSession {
+  id: string;
+  client_id: string;
+  client_host: string;
+  client_name: string;
+  scopes: string[];
+  created_at: string;
+}
+
 /** 発行済みアプリパスワードの1件（`GET /account/app-passwords`）。 */
 export interface AppPasswordRow {
   id: string;

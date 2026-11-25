@@ -1,7 +1,6 @@
 use axum::{
     body::Bytes,
     extract::{Query, State},
-    http::HeaderMap,
     response::IntoResponse,
     Json,
 };
@@ -22,7 +21,8 @@ use seiran_common::{
 };
 use uuid::Uuid;
 
-use super::{extract_bearer, service_did};
+use super::auth::{authenticate, ScopeNeed, XrpcRequest};
+use super::service_did;
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -59,27 +59,42 @@ fn peek_unverified_iss(jwt: &str) -> Option<String> {
 ///
 /// 受信バイト列のSHA-256からCIDを計算して返す（`getBlob`と対になる`sha256`→CID変換）。
 pub async fn xrpc_upload_blob(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     body: Bytes,
 ) -> impl IntoResponse {
+    let headers = &xrpc.headers;
     let Some(auth_header) = headers.get("authorization").and_then(|v| v.to_str().ok()) else {
         return ApiError::Unauthorized("Authorization ヘッダがありません").into_response();
     };
-    let Some(jwt) = auth_header.strip_prefix("Bearer ") else {
-        return ApiError::Unauthorized("Bearer トークンが必要です").into_response();
+    // OAuth（DPoP）のクライアント本人。サービス間認証 JWT は Bearer でしか来ない。
+    let oauth_caller = if auth_header.starts_with("DPoP ") {
+        match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
+            Ok(caller) => Some(caller),
+            Err(res) => return res,
+        }
+    } else {
+        None
     };
+    let jwt = auth_header.strip_prefix("Bearer ").unwrap_or_default();
+    if oauth_caller.is_none() && jwt.is_empty() {
+        return ApiError::Unauthorized("Bearer トークンが必要です").into_response();
+    }
 
     // 3要素目は「進行中の動画パイプラインジョブが必須か」（`store_uploaded_blob`参照）。
     // 通常セッションJWT経由はユーザー本人であることを検証済みのため不要、サービス間認証JWT
     // 経由（DIDの署名鍵さえあれば誰でも自己署名JWTを作れる）は必須にして悪用を防ぐ。
-    let (actor_id, did_for_log, require_pending_video_job): (i64, String, bool) =
-        if let Ok(verified) = state
+    let session_did = oauth_caller.map(|c| c.did).or_else(|| {
+        state
             .local_auth
             .verify_atp_access_token(jwt, &service_did(&state))
-        {
-            match state.actors.find_by_did(&verified.did).await {
-                Ok(Some(actor)) => (actor.id, verified.did, false),
+            .ok()
+            .map(|v| v.did)
+    });
+    let (actor_id, did_for_log, require_pending_video_job): (i64, String, bool) =
+        if let Some(did) = session_did {
+            match state.actors.find_by_did(&did).await {
+                Ok(Some(actor)) => (actor.id, did, false),
                 _ => {
                     return ApiError::Unauthorized("アクターが見つかりません").into_response();
                 }
@@ -697,16 +712,10 @@ pub async fn xrpc_describe_repo(
 /// （他人のリポジトリへの書き込みを防ぐ）。
 async fn authenticate_atp_write(
     state: &AppState,
-    headers: &HeaderMap,
+    xrpc: &XrpcRequest,
     repo_param: &str,
 ) -> Result<Actor, axum::response::Response> {
-    let Some(token) = extract_bearer(headers) else {
-        return Err(ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response());
-    };
-    let verified = state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(state))
-        .map_err(|_| ApiError::Unauthorized("トークンが無効です").into_response())?;
+    let verified = authenticate(state, xrpc, ScopeNeed::Generic).await?;
 
     let actor = resolve_repo_actor(state, repo_param).await?;
     let Some(actor_did) = actor.at_did.as_deref() else {
@@ -804,11 +813,11 @@ pub struct CreateRecordRequest {
 /// `app.bsky.feed.post` のみ `post_from_record::create_post_from_record` の専用パイプライン
 /// （`posts` テーブル反映・Fedi配送込み）を経由する。
 pub async fn xrpc_create_record(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<CreateRecordRequest>,
 ) -> impl IntoResponse {
-    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+    let actor = match authenticate_atp_write(&state, &xrpc, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -881,11 +890,11 @@ pub struct PutRecordRequest {
 /// `app.bsky.feed.post` は Bsky に投稿編集機能が無いため常に新規作成として扱う
 /// （既存の `at_uri` と衝突する `rkey` を指定した場合は `posts.at_uri` の UNIQUE 制約でエラーになる）。
 pub async fn xrpc_put_record(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<PutRecordRequest>,
 ) -> impl IntoResponse {
-    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+    let actor = match authenticate_atp_write(&state, &xrpc, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -955,11 +964,11 @@ pub struct DeleteRecordRequest {
 /// `com.atproto.repo.deleteRecord` — レコードを削除する。`app.bsky.feed.post`は
 /// `post_from_record::delete_post_by_rkey`（`handlers::notes::delete_note`と同じ処理）を経由する。
 pub async fn xrpc_delete_record(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<DeleteRecordRequest>,
 ) -> impl IntoResponse {
-    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+    let actor = match authenticate_atp_write(&state, &xrpc, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };
@@ -1014,11 +1023,11 @@ pub struct ApplyWritesRequest {
 /// （＝要素ごとに別のcommitになる。途中で失敗すると、それより前の要素は既にコミット済みのまま
 /// 残る＝部分適用される。トランザクション的な全体ロールバックは行わない）。
 pub async fn xrpc_apply_writes(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<ApplyWritesRequest>,
 ) -> impl IntoResponse {
-    let actor = match authenticate_atp_write(&state, &headers, &req.repo).await {
+    let actor = match authenticate_atp_write(&state, &xrpc, &req.repo).await {
         Ok(a) => a,
         Err(resp) => return resp,
     };

@@ -42,6 +42,7 @@ ID の採番は2系統:
 | `atp_deferred_writes` | DID 転入の有効化まで積んでおく ATP への書き込み |
 | `post_record_blobs` / `post_record_blobs_backfill` | ローカル投稿の ATP レコードが参照する blob の `media_files` 行、その既存投稿分のバックフィル待ち |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
+| `atp_oauth_requests` / `atp_oauth_sessions` | ATP OAuth の認可要求（PAR〜認可コード）と、承認済みクライアントのセッション |
 | `at_migration_requests` / `at_migration_records` / `at_migration_blobs` / `at_migration_resume_tokens` | DID 転入の状態機械とステージング、再開リンク |
 | `local_username_claims` / `local_email_claims` | ローカルアカウントのユーザー名・メールアドレスの名簿（重複判定、転入中の確保） |
 | `pending_did_provisions` | 「DNS TXT 登録完了待ち」の新規ローカルアカウント（DID 発行前） |
@@ -324,6 +325,10 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `atp_app_passwords`: `createAppPassword` のアプリパスワードの argon2 ハッシュと `revoked_at`。`revokeAppPassword` が名前で無効化するので、有効なもの（`revoked_at IS NULL`）の中で `(actor_id, name)` を一意にする部分ユニークインデックスを持つ（発行は `ON CONFLICT DO NOTHING` で重複を判定）。
 - `atp_refresh_tokens`: refreshJwt の `jti` の `expires_at`/`revoked_at`。更新のたびに古い `jti` を失効させる（ワンタイム）。`app_password_id` はそのセッションを始めたアプリパスワード（メインパスワードなら NULL）で、アプリパスワードの無効化時にそのセッションもまとめて失効させるために使う。
 - JWT 自体は保存しない。メインパスワードかアプリパスワードかは JWT の `privileged` クレームに持つ（`docs/protocols.md` 3節）。
+
+### ATP OAuth（`atp_oauth_requests` / `atp_oauth_sessions`）
+- `atp_oauth_requests`: PAR で受けた認可要求。`request_uri` の id、`client_id`、検証済みの要求パラメータ（JSONB）、DPoP 鍵の拇印 `dpop_jkt`、機密クライアントなら鍵の `kid`、`expires_at`（5分）。承認で `actor_id`・付与スコープ・認可コードのハッシュと期限（1分）を書き込み、トークン交換で消す（交換は `DELETE ... RETURNING` の1文で、同じコードの二重交換を防ぐ）。期限切れの行は定期的に消す。
+- `atp_oauth_sessions`: 承認済みのセッション。`actor_id`、`client_id`、表示用のクライアント名（承認時点の値）、付与スコープ、`dpop_jkt`、機密クライアントなら `client_kid`、現在と1つ前のリフレッシュトークンのハッシュ、`created_at`・`expires_at`（公開クライアントは承認から2週間で固定、機密クライアントはリフレッシュのたびに3か月先へ延ばす）、`revoked_at`。`users.token_valid_after` より前に作られたセッションは失効扱い。
 
 ### `atp_preferences`
 `getPreferences`/`putPreferences` の不透明な配列（JSONB）を `actor_id` ごとに1行（全置換）。中身は解釈せず、`users` とも同期しない。

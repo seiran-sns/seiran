@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "다음 인증 코드를 앱에 입력하세요.",
     "invalidRequest": "인증 요청이 올바르지 않습니다. 앱에서 다시 시도하세요."
+  },
+  "atprotoOAuth": {
+    "title": "Bluesky 계정 접근 허용",
+    "invalidRequest": "인증 요청이 올바르지 않습니다. 앱에서 다시 시작하세요.",
+    "clientHost": "제공: {{host}}",
+    "selfDeclaredNote": "앱 이름과 아이콘은 앱이 스스로 밝힌 것입니다. 제공 도메인을 신뢰할 수 있는지 확인하세요.",
+    "account": "로그인한 계정: @{{handle}}",
+    "loginHintMismatch": "이 앱은 @{{hint}} 계정으로 로그인하기를 요청하고 있습니다.",
+    "switchAccount": "다른 계정으로 로그인",
+    "scopeTitle": "이 앱에 허용할 작업",
+    "scopeAtproto": "Bluesky 계정(@{{handle}}) 확인",
+    "scopeGeneric": "게시물·좋아요·팔로우 등의 읽기와 쓰기, 타임라인과 알림 보기",
+    "scopeEmail": "이메일 주소 보기",
+    "approve": "허용",
+    "deny": "거부"
   }
 }

@@ -1,18 +1,35 @@
 import { FormEvent, useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { api, AppTokenRow, CreateAppTokenResponse, getErrorMessage } from "../api/client";
+import {
+  api,
+  AppTokenRow,
+  AtprotoOAuthSession,
+  CreateAppTokenResponse,
+  getErrorMessage,
+} from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useToast } from "../contexts/ToastContext";
 import { formatDate } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import styles from "./AppTokensSettings.module.css";
 
-/** メインメニュー「設定」内の発行済みアプリトークン一覧・発行・無効化（#60）。 */
+/** OAuth で許可した権限の短い名前（`account:appTokensSettings.*`）。 */
+const OAUTH_SCOPE_LABELS: Record<string, string> = {
+  atproto: "scopeAtproto",
+  "transition:generic": "scopeGeneric",
+  "transition:email": "scopeEmail",
+};
+
+/**
+ * メインメニュー「設定」内の発行済みアプリトークン一覧・発行・無効化（#60）。Bluesky クライアントに
+ * OAuth で許可したセッションも、外部アプリに渡した権限として同じ一覧に並べる。
+ */
 export default function AppTokensSettingsPage() {
   const { t } = useTranslation();
   const { showError } = useToast();
 
   const [tokens, setTokens] = useState<AppTokenRow[] | null>(null);
+  const [oauthSessions, setOauthSessions] = useState<AtprotoOAuthSession[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [newName, setNewName] = useState("");
@@ -24,9 +41,11 @@ export default function AppTokensSettingsPage() {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.appTokens
-      .list()
-      .then(setTokens)
+    Promise.all([api.appTokens.list(), api.atprotoOAuth.sessions()])
+      .then(([appTokens, sessions]) => {
+        setTokens(appTokens);
+        setOauthSessions(sessions);
+      })
       .catch((e) => showError(getErrorMessage(e)))
       .finally(() => setLoading(false));
   }, [showError]);
@@ -40,6 +59,18 @@ export default function AppTokensSettingsPage() {
     try {
       await api.appTokens.revoke(token.id);
       setTokens((prev) => prev?.filter((tk) => tk.id !== token.id) ?? null);
+    } catch (e) {
+      showError(getErrorMessage(e));
+    } finally {
+      setRevokingId(null);
+    }
+  }
+
+  async function revokeOAuthSession(session: AtprotoOAuthSession) {
+    setRevokingId(session.id);
+    try {
+      await api.atprotoOAuth.revokeSession(session.id);
+      setOauthSessions((prev) => prev?.filter((s) => s.id !== session.id) ?? null);
     } catch (e) {
       showError(getErrorMessage(e));
     } finally {
@@ -110,11 +141,11 @@ export default function AppTokensSettingsPage() {
       </form>
 
       {loading && <p className={panel.message}>{t("common:loading")}</p>}
-      {!loading && tokens && tokens.length === 0 && (
+      {!loading && tokens && oauthSessions && tokens.length + oauthSessions.length === 0 && (
         <p className={panel.message}>{t("account:appTokensSettings.empty")}</p>
       )}
 
-      {!loading && tokens && tokens.length > 0 && (
+      {!loading && tokens && oauthSessions && tokens.length + oauthSessions.length > 0 && (
         <ul className={styles.list}>
           {tokens.map((token) => (
             <li key={token.id} className={styles.row}>
@@ -129,6 +160,37 @@ export default function AppTokensSettingsPage() {
                 className={styles.revokeBtn}
                 disabled={revokingId === token.id}
                 onClick={() => revoke(token)}
+              >
+                {t("account:appTokensSettings.revokeButton")}
+              </button>
+            </li>
+          ))}
+          {oauthSessions.map((session) => (
+            <li key={`oauth-${session.id}`} className={styles.row}>
+              <div className={styles.info}>
+                <span className={styles.clientName}>{session.client_name}</span>
+                <span className={styles.createdAt}>
+                  {t("account:appTokensSettings.oauthClient", { host: session.client_host })}
+                </span>
+                <span className={styles.createdAt}>
+                  {t("account:appTokensSettings.oauthScopes", {
+                    scopes: session.scopes
+                      .filter((scope) => OAUTH_SCOPE_LABELS[scope])
+                      .map((scope) => t(`account:appTokensSettings.${OAUTH_SCOPE_LABELS[scope]}`))
+                      .join(t("account:appTokensSettings.scopeSeparator")),
+                  })}
+                </span>
+                <span className={styles.createdAt}>
+                  {t("account:appTokensSettings.authorizedAt", {
+                    date: formatDate(session.created_at),
+                  })}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={styles.revokeBtn}
+                disabled={revokingId === session.id}
+                onClick={() => revokeOAuthSession(session)}
               >
                 {t("account:appTokensSettings.revokeButton")}
               </button>

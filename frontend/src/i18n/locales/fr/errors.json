@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "Un mot de passe d’application avec cet usage existe déjà",
   "APP_PASSWORD_NOT_FOUND": "Mot de passe d’application introuvable",
   "ATP_ACCOUNT_REQUIRED": "Ce compte n’a pas de compte Bluesky",
-  "APP_PASSWORD_NOT_PERMITTED": "Cette action n’est pas autorisée avec une connexion par mot de passe d’application"
+  "APP_PASSWORD_NOT_PERMITTED": "Cette action n’est pas autorisée avec une connexion par mot de passe d’application",
+  "OAUTH_REQUEST_NOT_FOUND": "La demande d’autorisation est introuvable ou a expiré. Recommencez depuis l’application.",
+  "OAUTH_CLIENT_UNAVAILABLE": "Impossible de charger les informations de l’application. Réessayez plus tard.",
+  "OAUTH_INVALID_SCOPE": "Les autorisations demandées par l’application sont invalides",
+  "OAUTH_SESSION_NOT_FOUND": "Autorisation introuvable"
 }

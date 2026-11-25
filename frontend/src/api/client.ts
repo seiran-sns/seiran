@@ -14,7 +14,7 @@ export * from "./types";
 export { createNoteBody } from "./notes";
 
 import { openTarget, reports, meta, about, appTokens, appPasswords, media, emojis } from "./misc";
-import { setup, auth, miauth, oauth, misskeyAppAuth } from "./auth";
+import { setup, auth, miauth, oauth, atprotoOAuth, misskeyAppAuth } from "./auth";
 import { notes, notifications, reactions } from "./notes";
 import { users, alsoKnownAs, blocks, mutes, repostMutes, actors, account } from "./users";
 import { admin } from "./admin";
@@ -48,6 +48,7 @@ export const api = {
   account,
   miauth,
   oauth,
+  atprotoOAuth,
   misskeyAppAuth,
   appTokens,
   appPasswords,

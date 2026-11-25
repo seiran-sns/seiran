@@ -14,6 +14,14 @@ use crate::{handlers, middleware, AppState};
 /// Mastodon 互換 API のうち、ブラウザ上の Web クライアント（Elk・Phanpy 等、任意のオリジン）
 /// から直接叩かれるパス。認証は `Authorization: Bearer` だけで Cookie を使わないので、
 /// `/xrpc/*` と同じくオリジン制限の対象外にする。SPA 専用の `/api/oauth/*`（承認画面）は含めない。
+/// AT Protocol OAuth のうち、ブラウザ上のクライアント（任意のオリジン）から直接叩かれるパス。
+fn is_atproto_oauth_public_path(path: &str) -> bool {
+    matches!(
+        path,
+        "/oauth/atproto/par" | "/oauth/atproto/token" | "/oauth/atproto/revoke"
+    )
+}
+
 fn is_mastodon_public_path(path: &str) -> bool {
     path.starts_with("/api/v1/")
         || path.starts_with("/api/v2/")
@@ -43,6 +51,7 @@ fn cors_layer(state: &AppState) -> CorsLayer {
             if path.starts_with("/xrpc/")
                 || path.starts_with("/.well-known/")
                 || is_mastodon_public_path(path)
+                || is_atproto_oauth_public_path(path)
             {
                 return true;
             }
@@ -64,6 +73,12 @@ fn cors_layer(state: &AppState) -> CorsLayer {
         // ブラウザのCORS仕様上安全（`Access-Control-Allow-Headers: *`は非credentialedリクエストで
         // のみ有効、credentialed併用時のみ禁止される組み合わせ）。
         .allow_headers(Any)
+        // DPoP の nonce とその要求（`WWW-Authenticate`）は、公開しないとブラウザ上のクライアントが
+        // 読めず、古い nonce での失敗を延々と繰り返す。
+        .expose_headers([
+            axum::http::HeaderName::from_static("dpop-nonce"),
+            axum::http::header::WWW_AUTHENTICATE,
+        ])
 }
 
 /// 管理系ルート。ロールごとに専用ルータへ分割し、`route_layer`で認可を強制する（#221）。
@@ -1269,6 +1284,32 @@ fn xrpc_routes() -> Router<AppState> {
         )
 }
 
+/// AT Protocol OAuth（`docs/protocols.md` 3節「OAuth」）。
+fn atproto_oauth_routes() -> Router<AppState> {
+    use handlers::atproto_oauth as h;
+    Router::new()
+        .route(
+            "/.well-known/oauth-protected-resource",
+            get(h::protected_resource_metadata),
+        )
+        .route(
+            "/.well-known/oauth-authorization-server",
+            get(h::authorization_server_metadata),
+        )
+        .route("/oauth/atproto/par", post(h::par))
+        .route("/oauth/atproto/authorize", get(h::authorize))
+        .route("/oauth/atproto/token", post(h::token_endpoint))
+        .route("/oauth/atproto/revoke", post(h::revoke))
+        .route("/api/atproto-oauth/request", get(h::request_info))
+        .route("/api/atproto-oauth/approve", post(h::approve))
+        .route("/api/atproto-oauth/deny", post(h::deny))
+        .route("/api/account/atproto-oauth-sessions", get(h::list_sessions))
+        .route(
+            "/api/account/atproto-oauth-sessions/:id",
+            delete(h::revoke_session),
+        )
+}
+
 /// api ロールの axum ルーターを構築する（CORS 適用込み）。
 pub fn router(state: AppState) -> Router {
     let cors = cors_layer(&state);
@@ -1282,12 +1323,19 @@ pub fn router(state: AppState) -> Router {
         .merge(misskey_routes())
         .merge(mastodon_routes())
         .merge(xrpc_routes())
+        .merge(atproto_oauth_routes())
         // どのルートにも当たらないリクエスト。未実装のXRPCメソッドは `atproto-proxy`
         // ヘッダー付きなら AppView 等へ透過転送し、それ以外はフロントエンドの静的ファイル・
         // SPA の index.html を返す（`handlers::frontend`。明示的な `.route()` の方が優先
         // されるため、ここに置いても既存のハンドラを妨げない）。
         .fallback(handlers::frontend::fallback)
-        .with_state(state)
+        .with_state(state.clone())
+        // OAuth（DPoP）の XRPC 応答に次の nonce を付ける。フォールバックの代理転送にも効くよう、
+        // ルートではなくルーター全体に掛ける。
+        .layer(axum::middleware::from_fn_with_state(
+            state,
+            handlers::xrpc::auth::attach_dpop_nonce,
+        ))
         // Misskey クライアントの `i`（ボディ/クエリ）トークンを Authorization ヘッダーへ
         // 合成するブリッジ。既存ハンドラの extract_auth 呼び出しは無改修のまま両対応になる。
         .layer(axum::middleware::from_fn(

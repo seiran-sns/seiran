@@ -279,6 +279,52 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `getSession` — did/handle を返す。
 - `jsonwebtoken` の `Validation::default()` は `aud` クレームがあるだけで拒否するため、`AtpSessionClaims` の検証では `set_audience` を必ず呼ぶ。
 
+### OAuth（外部ATプロトコルクライアント）
+AT Protocol の OAuth プロファイルに沿った認可サーバー兼リソースサーバー。TOKIMEKI など、パスワードを受け取らず OAuth だけでログインするクライアントのためのもの。クライアントはハンドル → DID → DID ドキュメントの PDS（`https://{local_domain}`）とたどり、PDS のメタデータから認可サーバーを見つけるので、seiran 自身が両方を兼ねる（認可サーバーはユーザーのログインを確かめる側で、seiran のアカウントを認証できるのは seiran だけ）。実装は `handlers::atproto_oauth`（エンドポイント・承認画面と設定画面の API）、`atproto_oauth`（DPoP・クライアントの識別と認証・トークン）、`handlers::xrpc::auth`（XRPC での検証）。
+
+**メタデータ**
+- `GET /.well-known/oauth-protected-resource`: `resource` と `authorization_servers` はどちらも `https://{local_domain}`。
+- `GET /.well-known/oauth-authorization-server`: `issuer` は `https://{local_domain}`。PAR 必須（`require_pushed_authorization_requests: true`）、`response_types_supported: ["code"]`、`grant_types_supported: ["authorization_code", "refresh_token"]`、`code_challenge_methods_supported: ["S256"]`、`token_endpoint_auth_methods_supported: ["none", "private_key_jwt"]`、`token_endpoint_auth_signing_alg_values_supported`・`dpop_signing_alg_values_supported: ["ES256"]`、`scopes_supported: ["atproto", "transition:generic", "transition:email"]`、`authorization_response_iss_parameter_supported: true`、`client_id_metadata_document_supported: true`。
+- エンドポイントは `/oauth/atproto/{par,authorize,token,revoke}`。Mastodon 互換 OAuth の `/oauth/{authorize,token,revoke}` とは別のパスにする（どちらもメタデータや登録で場所を知らせるので、名前を揃える必要が無い）。
+
+**クライアント**
+- 事前登録は無い。`client_id` はクライアントメタデータ（JSON）の HTTPS URL で、PAR のたびに取りに行く（`net::fetch_json_validated` で私設アドレス宛ては拒否、`client_id` が取得元の URL と一致すること、`dpop_bound_access_tokens: true`、`scope` に `atproto` を含むこと、`redirect_uris` の各 URL の形を検証）。取得結果は5分だけプロセス内に置く。
+- `client_id` が `http://localhost`（クエリで `redirect_uri`・`scope` を指定できる）の開発用クライアントも受け付ける。公開クライアント扱いで、`redirect_uri` はループバック IP（`http://127.0.0.1`・`http://[::1]`、省略時はその2つ）のみ。
+- `redirect_uri` は、Web アプリは https だけ、ネイティブアプリは https・ループバック IP の http・`client_id` のホスト名を逆順にしたカスタムスキーム（`com.example.app:/callback`）。ループバック IP 宛てはポートだけ違っても一致とみなす（ネイティブアプリは起動のたびに空いているポートを使う）。
+- `token_endpoint_auth_method` が `private_key_jwt` なら機密クライアント。PAR・トークン要求に `client_assertion`（ES256、`aud` は issuer、`jti` の再利用は拒否）を求め、メタデータの `jwks`/`jwks_uri` の鍵で検証する。セッションは最初に使った鍵の `kid` に紐付け、以後のリフレッシュも同じ鍵を要る（クライアントが鍵を外したらそのセッションは使えなくなる）。
+
+**スコープ**
+- `atproto`（必須）: 単独なら DID とハンドルが分かるだけ（`getSession` の `did`/`handle`）。それ以外の XRPC は 403 `InsufficientScope`。
+- `transition:generic`: アプリパスワードと同じ範囲（レコードの読み書き・`uploadBlob`・AppView への代理・`getPreferences`/`putPreferences`）。PLC 操作・`deactivateAccount`・アプリパスワードの管理は許さない（`privileged` でないセッションと同じ扱い）。
+- `transition:email`: `getSession` の応答に `email`/`emailConfirmed` を含める。無ければ含めない（`createSession` のセッションの `getSession` も含めない）。
+- `transition:chat.bsky` など対応していないスコープは、要求されても付与せずに承認を通し、トークン応答の `scope` には実際に付与したものだけを返す（seiran は Bluesky の DM を持たない）。
+
+**流れ**
+1. PAR（`POST /oauth/atproto/par`、DPoP 必須）: 要求を検証して `atp_oauth_requests` に保存し、`request_uri`（有効5分）を返す。DPoP 鍵の拇印（`jkt`）を要求に紐付け、以後のトークン要求は同じ鍵でしか通さない。
+2. 認可（`GET /oauth/atproto/authorize?client_id&request_uri`）: 要求を確かめ、SPA の承認画面 `/oauth-atproto?request_uri=...` へ 303。未ログインなら seiran の通常ログイン（TOTP・パスキーを含む）を経て戻る。`login_hint` があってログイン中のアカウントと違えば、承認画面でそう示し、アカウントを切り替えるか拒否するかを選ばせる。DID を持たないアカウント（シングルホスト）は承認できない。
+3. 承認画面: クライアント名・ロゴは自己申告なので、`client_id` のホスト名を必ず並べて表示する。要求されたスコープを日本語で示す（`transition:email` は「メールアドレスの参照」と明示）。毎回承認を求める（「次回から確認しない」は持たない）。承認は `POST /api/atproto-oauth/authorize`（seiran の通常トークン）で、認可コード（有効1分、一度きり）を発行してリダイレクト先（`code`・`state`・`iss`）を返す。拒否は `error=access_denied` で返す。
+4. トークン（`POST /oauth/atproto/token`、DPoP 必須）: `authorization_code`（PKCE の `code_verifier`・`redirect_uri` を照合）と `refresh_token` を受ける。応答は `access_token`・`token_type: "DPoP"`・`expires_in`・`refresh_token`・`scope`・`sub`（DID）。
+5. 失効（`POST /oauth/atproto/revoke`、RFC 7009）: アクセストークンかリフレッシュトークンを受け、そのセッションを失効させる。
+
+**トークンとセッション**
+- アクセストークンは seiran の secret で HS256 署名した JWT（`sub`=DID、`scope`、`cnf.jkt`、セッション id、有効1時間）。クライアントにとっては中身を読まない不透明な値。
+- リフレッシュトークンはランダム値で、`atp_oauth_sessions` にはハッシュだけを置く。使うたびに新しいものへ替える（確認と置き換えは1文）。1つ前のトークンが再び使われたら漏えいとみなしてセッションごと失効させる。
+- セッションの上限: 公開クライアントは承認から2週間（リフレッシュしても延びない）。機密クライアントは最後のリフレッシュから3か月（使い続けている限り続く）。
+- XRPC はアクセストークンの検証のたびにセッションが失効していないかを確かめる（設定画面での取り消しをすぐ効かせるため）。
+
+**DPoP**
+- 証明は `typ: dpop+jwt`・ES256・ヘッダーに公開鍵（`jwk`）。`htm`・`htu`（クエリとフラグメントを除いた URL。トンネル越しでも `https://{local_domain}{path}` で比べる）・`iat`（前後5分以内）・`jti`・`nonce` を検証し、XRPC では `ath`（アクセストークンの SHA-256）も照合する。
+- nonce はサーバーの secret と時刻（3分刻み）から HMAC で作り、現在と直前の刻みを受け付ける。保存しないので、プロセスが複数あっても共有が要らない。古い・無い nonce には、トークン系は 400 `{"error": "use_dpop_nonce"}`、XRPC は 401 `WWW-Authenticate: DPoP error="use_dpop_nonce"` で応え、どちらも `DPoP-Nonce` ヘッダーで新しい値を渡す。
+- `jti` の再利用は、nonce の有効期間だけ覚えて拒否する。覚える場所（`replay_guard::ReplayGuard`、`Messaging` が作る）はジョブキューと同じく `REDIS_URL` があれば Redis（複数プロセスで共有）、無ければプロセス内。機密クライアントの `client_assertion` の `jti` も同じ場所で覚える。
+
+**XRPC での認証**
+- `Authorization: Bearer <accessJwt>`（`createSession` 由来）と `Authorization: DPoP <access_token>` + `DPoP` ヘッダー（OAuth 由来）の両方を、1つの検証関数で受ける。各ハンドラは検証済みの DID・`privileged`・スコープを受け取るだけにし、トークンの種類を見分けない。
+- CORS: `/oauth/atproto/{par,token,revoke}` はブラウザ上のクライアント（任意のオリジン）から直接叩かれるので、`/xrpc/*` と同じくオリジン制限の対象外にする。`DPoP-Nonce` と `WWW-Authenticate` を `Access-Control-Expose-Headers` に入れる（入れないとブラウザのクライアントが nonce を読めず、毎回やり直しになる）。
+
+**管理**
+- 連携中の OAuth クライアントは、設定の「アプリトークン」画面にアプリトークンと同じ一覧で並べ、個別に取り消せる（`atp_oauth_sessions.revoked_at`）。一覧にはクライアント名・`client_id` のホスト名・付与したスコープ・承認日時を出す。
+- パスワードの変更・リセットでは、アプリトークンと同じく OAuth セッションもすべて失効させる。
+
 ### 書き込み系エンドポイント（外部ATプロトコルクライアント）
 accessJwt で任意コレクションに書き込める。`authenticate_atp_write`（`xrpc/repo.rs`）が、検証済み DID と `repo` の一致を確認する。
 

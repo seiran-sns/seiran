@@ -42,7 +42,7 @@ pub async fn authenticate_manager(
             .local_auth
             .verify_atp_access_token(token, &service_did(state))
         {
-            require_privileged_session(&verified)?;
+            require_privileged_session(verified.privileged)?;
             let actor = state
                 .actors
                 .find_by_did(&verified.did)

@@ -4,6 +4,7 @@
 //! ここでは AppState 構築（[`init_state`]）・ルーター構築（[`router`]）・
 //! 起動時タスク（[`spawn_startup_tasks`]）を公開し、実際の serve は呼び出し側が行う。
 
+pub mod atproto_oauth;
 pub mod error;
 pub mod handlers;
 pub mod i18n;
@@ -164,6 +165,8 @@ pub struct AppState {
     /// TOTP（二段階認証）設定・リカバリーコード・メール経由の強制解除リクエスト（#65）。
     pub totp: Arc<dyn TotpRepository>,
     pub webauthn: Arc<Webauthn>,
+    /// DPoP 証明・クライアント認証 JWT の `jti` の再利用の検出（ATP OAuth）。
+    pub replay_guard: Arc<seiran_common::replay_guard::ReplayGuard>,
 }
 
 /// `enqueue_remote_follow_list_sync` の重複投入防止クールダウン（#229）。
@@ -775,6 +778,7 @@ pub async fn init_state(
         job_queue,
         stream_hub,
         atp_events,
+        replay_guard,
         shutdown,
     } = messaging;
     let local_auth = Arc::new(LocalAuthProvider::new(secrets.jwt_secret_bytes()));
@@ -942,6 +946,7 @@ pub async fn init_state(
         relays,
         totp,
         webauthn,
+        replay_guard,
     }
 }
 

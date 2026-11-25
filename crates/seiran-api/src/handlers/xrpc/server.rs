@@ -10,6 +10,7 @@ use sha2::Digest;
 use seiran_common::atp::resolve_external_handle;
 use seiran_common::LocalAuthProvider;
 
+use super::auth::{authenticate, ScopeNeed, XrpcRequest};
 use super::{extract_bearer, require_privileged_session, service_did};
 use crate::error::ApiError;
 use crate::handlers::app_passwords;
@@ -481,48 +482,50 @@ pub async fn xrpc_delete_session(
 
 /// `com.atproto.server.getSession` — accessJwt を検証し、現在のセッション情報を返す。
 pub async fn xrpc_get_session(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Identity).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
         _ => return ApiError::Unauthorized("アクターが見つかりません").into_response(),
     };
 
-    Json(serde_json::json!({
+    let mut body = serde_json::json!({
         "did": verified.did,
         "handle": format!("{}.{}", actor.username, state.local_domain),
         "active": true,
-    }))
-    .into_response()
+    });
+    // OAuth で `transition:email` を許されたクライアントにだけメールアドレスを見せる。
+    if verified.email_scope {
+        let login = state
+            .users
+            .find_login_by_username(&actor.username)
+            .await
+            .ok()
+            .flatten();
+        if let Some(login) = login {
+            body["email"] = serde_json::json!(login.email);
+            // seiran はアカウント単位の確認済みフラグを持たない（`createSession` と同じ扱い）。
+            body["emailConfirmed"] = serde_json::json!(true);
+        }
+    }
+    Json(body).into_response()
 }
 
 /// `com.atproto.server.checkAccountStatus` — 転出先PDSが移行準備状況を確認するために
 /// 呼ぶ、読み取りのみのステータス。認可パターンは`xrpc_get_session`と同じ
 /// （トークンから解決したDIDのアカウントについてのみ返す）。
 pub async fn xrpc_check_account_status(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
@@ -562,20 +565,14 @@ pub async fn xrpc_check_account_status(
 /// 「seiran上でのこのアカウントの通常利用は終わり」という状態に統一する。4つ目の状態を
 /// 新設しない設計判断）。
 pub async fn xrpc_deactivate_account(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
-    if let Err(e) = require_privileged_session(&verified) {
+    if let Err(e) = require_privileged_session(verified.privileged) {
         return e.into_response();
     }
     let actor = match state.actors.find_by_did(&verified.did).await {

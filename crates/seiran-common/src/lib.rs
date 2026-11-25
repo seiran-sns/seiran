@@ -30,6 +30,7 @@ pub mod net;
 pub mod oembed_whitelist;
 pub mod queue;
 pub mod rate_limit;
+pub mod replay_guard;
 pub mod repository;
 pub mod rotation_key_backfill;
 pub mod secrets;

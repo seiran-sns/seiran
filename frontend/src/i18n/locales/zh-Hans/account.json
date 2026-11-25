@@ -132,7 +132,14 @@
     "issuedWarning": "此令牌仅现在显示。关闭后将无法再次显示。",
     "copyButton": "复制",
     "copiedButton": "已复制",
-    "dismissButton": "关闭"
+    "dismissButton": "关闭",
+    "oauthClient": "Bluesky 应用 · {{host}}",
+    "authorizedAt": "{{date}} 授权",
+    "oauthScopes": "权限：{{scopes}}",
+    "scopeSeparator": "、",
+    "scopeAtproto": "确认账号",
+    "scopeGeneric": "读写帖子等",
+    "scopeEmail": "查看电子邮件地址"
   },
   "appPasswordsSettings": {
     "description": "登录 Bluesky 客户端（如 TOKIMEKI）时代替主密码使用的密码。用户名请填写 Bluesky 账号（例：name.seiran.org）。为每个客户端分别创建，就可以只吊销不再使用的那个。",

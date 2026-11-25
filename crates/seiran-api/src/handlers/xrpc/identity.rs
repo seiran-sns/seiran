@@ -2,7 +2,7 @@
 //! `crates/seiran-common/src/atp/migration_client.rs`（seiranが転入先として他PDSへ
 //! 呼ぶクライアント側）と対になる、サーバー側の実装。
 
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Json};
 use serde::Deserialize;
 use sha2::Digest;
 
@@ -11,7 +11,8 @@ use seiran_common::atp::plc::{
     signing_key_from_pem,
 };
 
-use super::{extract_bearer, require_privileged_session, service_did};
+use super::auth::{authenticate, ScopeNeed, XrpcRequest};
+use super::require_privileged_session;
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -20,18 +21,12 @@ const PLC_SIGNATURE_PURPOSE: &str = "plc_operation_signature";
 /// `com.atproto.identity.getRecommendedDidCredentials` — 現在のDIDドキュメントの
 /// 推奨フィールド（転出先クライアントが引き継ぐべき値）を返す、読み取りのみ。
 pub async fn xrpc_get_recommended_did_credentials(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
     let actor = match state.actors.find_by_did(&verified.did).await {
         Ok(Some(a)) => a,
@@ -93,20 +88,15 @@ fn current_rotation_key_dids(
 /// Phase Aゲート（`at_rotation_key_pem`必須）は`signPlcOperation`側でも再確認するが、
 /// ここでも早期に弾く（コード送信自体を無駄にしないため）。
 pub async fn xrpc_request_plc_operation_signature(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let Some(token) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
-    if let Err(e) = require_privileged_session(&verified) {
+    let headers = &xrpc.headers;
+    if let Err(e) = require_privileged_session(verified.privileged) {
         return e.into_response();
     }
     let actor = match state.actors.find_by_did(&verified.did).await {
@@ -214,21 +204,15 @@ pub struct SignPlcOperationRequest {
 /// PLC更新オペレーションをアカウント単位ローテーションキーで署名して返す
 /// （提出はしない、`submitPlcOperation`は別ステップ）。
 pub async fn xrpc_sign_plc_operation(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<SignPlcOperationRequest>,
 ) -> impl IntoResponse {
-    let Some(bearer) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(bearer, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
-    if let Err(e) = require_privileged_session(&verified) {
+    if let Err(e) = require_privileged_session(verified.privileged) {
         return e.into_response();
     }
     let actor = match state.actors.find_by_did(&verified.did).await {
@@ -316,21 +300,15 @@ pub struct SubmitPlcOperationRequest {
 /// 提出する（リクエスト中にDIDヒントがあっても信用しない）。成功時に`#identity`/`#account`
 /// イベントを発火し、`did_moved_out_at`をセットする。
 pub async fn xrpc_submit_plc_operation(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<SubmitPlcOperationRequest>,
 ) -> impl IntoResponse {
-    let Some(bearer) = extract_bearer(&headers) else {
-        return ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response();
-    };
-    let verified = match state
-        .local_auth
-        .verify_atp_access_token(bearer, &service_did(&state))
-    {
+    let verified = match authenticate(&state, &xrpc, ScopeNeed::Generic).await {
         Ok(v) => v,
-        Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
+        Err(res) => return res,
     };
-    if let Err(e) = require_privileged_session(&verified) {
+    if let Err(e) = require_privileged_session(verified.privileged) {
         return e.into_response();
     }
     let actor = match state.actors.find_by_did(&verified.did).await {
