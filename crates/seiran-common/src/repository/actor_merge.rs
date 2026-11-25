@@ -54,7 +54,14 @@ pub const ACTOR_REFERENCES: &[ActorReference] = &[
     plain("actors", "bridge_real_actor_id"),
     plain("actors", "seiran_pair_actor_id"),
     plain("at_migration_requests", "actor_id"),
-    plain("atp_app_passwords", "actor_id"),
+    ActorReference {
+        table: "atp_app_passwords",
+        column: "actor_id",
+        unique: &[UniqueKey {
+            others: &["name"],
+            predicate: Some("{t}.revoked_at IS NULL"),
+        }],
+    },
     ActorReference {
         table: "atp_blocks",
         column: "actor_id",
