@@ -375,6 +375,7 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
         key={item.key}
         type="button"
         className={`${styles.item} ${styles[`span${span}`]}`}
+        data-picker-item=""
         title={item.label}
         onClick={(e) => {
           e.stopPropagation();
@@ -390,6 +391,45 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
     );
   }
 
+  /**
+   * いま操作できる絵文字ボタン（文書順）。たたんだセクションで1行目より後ろに隠れている分は
+   * 描画されていても見えないので除く。
+   */
+  function visibleItemButtons(): HTMLElement[] {
+    const body = bodyRef.current;
+    if (!body) return [];
+    return Array.from(body.querySelectorAll<HTMLElement>("[data-picker-item]")).filter((el) => {
+      const clip = el.closest(`.${styles.gridCollapsed}`);
+      if (!clip) return true;
+      return el.getBoundingClientRect().top < clip.getBoundingClientRect().bottom - 1;
+    });
+  }
+
+  /** 絵文字の上の左右矢印で前後の絵文字へ移る（Slack と同じ。先頭で左は末尾へ、末尾で右は先頭へ回る）。 */
+  function handleBodyKeyDown(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    const current = (e.target as HTMLElement).closest<HTMLElement>("[data-picker-item]");
+    if (!current) return;
+    const buttons = visibleItemButtons();
+    const index = buttons.indexOf(current);
+    if (index < 0 || buttons.length === 0) return;
+    e.preventDefault();
+    const step = e.key === "ArrowRight" ? 1 : -1;
+    buttons[(index + step + buttons.length) % buttons.length].focus();
+  }
+
+  /** 検索欄の末尾にカーソルがあるときの右矢印で、先頭の絵文字へ移る。 */
+  function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key !== "ArrowRight" || e.nativeEvent.isComposing) return;
+    const input = e.currentTarget;
+    const end = input.value.length;
+    if (input.selectionStart !== end || input.selectionEnd !== end) return;
+    const first = visibleItemButtons()[0];
+    if (!first) return;
+    e.preventDefault();
+    first.focus();
+  }
+
   return (
     <div className={styles.wrap}>
       <input
@@ -398,6 +438,7 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
         placeholder={t("home:reactionPicker.searchPlaceholder")}
         value={query}
         onChange={(e) => setQuery(e.target.value)}
+        onKeyDown={handleSearchKeyDown}
         autoFocus
       />
 
@@ -429,7 +470,7 @@ export default function EmojiPickerPanel({ onPick, unicodeOnly = false }: EmojiP
         </div>
       )}
 
-      <div className={styles.body} ref={bodyRef}>
+      <div className={styles.body} ref={bodyRef} onKeyDown={handleBodyKeyDown}>
         {loading ? (
           <p className={styles.message}>{t("common:loading")}</p>
         ) : query.trim() ? (
