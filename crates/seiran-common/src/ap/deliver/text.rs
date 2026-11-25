@@ -56,8 +56,50 @@ pub fn bsky_quote_block_html(
     Some(format!(
         "<blockquote><p>{}</p>{}</blockquote>",
         author,
-        plain_to_html(body.trim())
+        markdown_links_to_html(body.trim())
     ))
+}
+
+/// 内部リンクマーカー `[表示テキスト](URL)`（Bsky の `#link` facet を焼き込んだもの、
+/// `atp::facets::apply_link_facets`）を `<a>` にし、他は `plain_to_html` と同じく段落・改行を
+/// HTML にする。リモート Bsky 投稿の本文をそのまま HTML にするとマーカーが記号のまま見えるため。
+/// URL が `http(s)://` で始まらないもの・閉じていないものはテキストのまま残す。
+fn markdown_links_to_html(text: &str) -> String {
+    let mut linked = String::with_capacity(text.len() * 2);
+    let mut rest = text;
+    while let Some(open) = rest.find('[') {
+        let after_open = &rest[open + 1..];
+        let link = after_open.find("](").and_then(|mid| {
+            let label = &after_open[..mid];
+            let url_part = &after_open[mid + 2..];
+            let close = url_part.find(')')?;
+            let url = &url_part[..close];
+            let valid = !label.contains(['\n', '[', ']'])
+                && (url.starts_with("https://") || url.starts_with("http://"))
+                && !url.contains(char::is_whitespace);
+            valid.then_some((label, url, open + 1 + mid + 2 + close + 1))
+        });
+        match link {
+            Some((label, url, consumed)) => {
+                linked.push_str(&escape_html(&rest[..open]));
+                linked.push_str(&format!(
+                    r#"<a href="{}" rel="nofollow noopener">{}</a>"#,
+                    escape_html(url),
+                    escape_html(label)
+                ));
+                rest = &rest[consumed..];
+            }
+            None => {
+                linked.push_str(&escape_html(&rest[..=open]));
+                rest = &rest[open + 1..];
+            }
+        }
+    }
+    linked.push_str(&escape_html(rest));
+    linked
+        .split("\n\n")
+        .map(|para| format!("<p>{}</p>", para.replace('\n', "<br>")))
+        .collect()
 }
 
 /// HTML の特殊文字をエスケープする（`plain_to_html`／`plain_to_html_with_mentions` 共通）。
@@ -157,6 +199,20 @@ mod tests {
             "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">alice.bsky.social</a></p>"
         ));
         assert!(!html.contains('@'));
+    }
+
+    #[test]
+    fn bsky_quote_block_html_turns_link_markers_into_anchors() {
+        let html = bsky_quote_block_html(
+            None,
+            "a.bsky.social",
+            "https://bsky.app/profile/x",
+            "see [bsky.app/settings/pri...](https://bsky.app/settings/privacy) and [not a link] (x) [y](javascript:z) [a] b [c](https://c.example)",
+        )
+        .unwrap();
+        assert!(html.contains(
+            r#"see <a href="https://bsky.app/settings/privacy" rel="nofollow noopener">bsky.app/settings/pri...</a> and [not a link] (x) [y](javascript:z) [a] b <a href="https://c.example" rel="nofollow noopener">c</a>"#
+        ));
     }
 
     #[test]
