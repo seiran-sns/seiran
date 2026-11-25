@@ -208,6 +208,7 @@ pub const ACTOR_REFERENCES: &[ActorReference] = &[
         column: "muter_actor_id",
         unique: &[key(&["muted_actor_id"])],
     },
+    plain("scheduled_posts", "actor_id"),
     plain("search_log", "actor_id"),
     plain("user_contact_log", "actor_id"),
     plain("user_contact_log", "target_actor_id"),
