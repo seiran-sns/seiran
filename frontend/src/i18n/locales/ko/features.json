@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "예약 게시물",
+    "scheduledPostsPending": "예약 게시물이 있습니다",
+    "followRequests": "승인 대기 중인 팔로우"
+  },
+  "scheduledPosts": {
+    "title": "예약 게시물",
+    "description": "예약 시간이 되면 자동으로 게시됩니다. 게시하지 못한 예약(예: 24시간 이상 지연)은 여기에 남아 있으며, 편집해서 다시 예약하거나 지금 게시하거나 삭제할 수 있습니다.",
+    "empty": "예약 게시물이 없습니다. 작성란의 🕒에서 예약할 수 있습니다.",
+    "failed": "게시하지 못했습니다: ",
+    "replyTo": "{{acct}}에게 답글:",
+    "quoteOf": "{{acct}} 인용:",
+    "edit": "편집",
+    "editTitle": "예약 게시물 편집",
+    "publishNow": "지금 게시",
+    "delete": "삭제",
+    "published": "게시했습니다.",
+    "deleted": "예약을 삭제했습니다.",
+    "publishConfirmTitle": "지금 게시할까요?",
+    "publishConfirmBody": "예약 시간을 기다리지 않고 지금 이 내용으로 게시합니다.",
+    "deleteConfirmTitle": "예약을 삭제할까요?",
+    "deleteConfirmBody": "이 예약은 게시되지 않고 사라집니다."
+  }
+}

@@ -1018,6 +1018,7 @@ async fn materialize_migrated_post(
             poll: poll.as_ref(),
             content_warning: content_warning.as_deref(),
             language: language.as_deref(),
+            scheduled_post: None,
         })
         .await
         .map_err(|e| {

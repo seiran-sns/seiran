@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "El código de confirmación ha caducado (es válido durante 15 minutos). Usa «Reenviar el código» para obtener uno nuevo",
   "PLC_TOKEN_INVALID": "El código de confirmación no es correcto. Introduce el código del correo más reciente de tu servidor anterior",
   "INVALID_OPERATOR_URL": "La URL del operador debe empezar por http:// o https://",
-  "INVALID_CONTACT_EMAIL": "La dirección de correo de contacto no es válida"
+  "INVALID_CONTACT_EMAIL": "La dirección de correo de contacto no es válida",
+  "SCHEDULED_AT_TOO_SOON": "La hora programada debe ser al menos dentro de 5 minutos.",
+  "SCHEDULED_AT_TOO_FAR": "La hora programada debe estar dentro de un año.",
+  "INVALID_SCHEDULED_AT": "La hora programada no es válida.",
+  "TOO_MANY_SCHEDULED_POSTS": "No puedes programar más publicaciones. Elimina las que ya no necesites.",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "Las republicaciones no se pueden programar.",
+  "SCHEDULED_POST_NOT_FOUND": "No se encontró la publicación programada. Puede que ya se haya publicado o eliminado.",
+  "SCHEDULED_POST_CHANGED": "Esta publicación programada ya se publicó o se cambió en otro lugar.",
+  "SCHEDULED_POST_TOO_LATE": "No se publicó porque habían pasado más de 24 horas desde la hora programada.",
+  "INVALID_SCHEDULED_REQUEST": "No se pudo leer la publicación programada.",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "No se admiten borradores sin hora programada.",
+  "POLL_ALREADY_EXPIRED": "La encuesta ya estaría cerrada en el momento de publicar."
 }

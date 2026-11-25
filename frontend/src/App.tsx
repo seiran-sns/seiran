@@ -19,6 +19,8 @@ const AccountSettingsPage = lazy(() => import("./pages/AccountSettingsPage"));
 const AdminPage = lazy(() => import("./pages/AdminPage"));
 const FollowImportSettingsPage = lazy(() => import("./pages/FollowImportSettingsPage"));
 const FollowRequestsSettingsPage = lazy(() => import("./pages/FollowRequestsSettingsPage"));
+const FeaturesMenuPage = lazy(() => import("./pages/FeaturesMenuPage"));
+const ScheduledPostsPage = lazy(() => import("./pages/ScheduledPostsPage"));
 const HashtagPage = lazy(() => import("./pages/HashtagPage"));
 const ListDetailPage = lazy(() => import("./pages/ListDetailPage"));
 const ListsSettingsPage = lazy(() => import("./pages/ListsSettingsPage"));
@@ -230,10 +232,28 @@ function AppRoutes() {
           }
         />
         <Route
-          path="/settings/follow-requests"
+          path="/features"
+          element={
+            <RequireAuth>
+              <FeaturesMenuPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/features/follow-requests"
           element={
             <RequireAuth>
               <FollowRequestsSettingsPage />
+            </RequireAuth>
+          }
+        />
+        {/* 承認待ちフォローは設定から「機能」へ移った。ブックマーク等の古い URL を移動先へ送る。 */}
+        <Route path="/settings/follow-requests" element={<Navigate to="/features/follow-requests" replace />} />
+        <Route
+          path="/features/scheduled-posts"
+          element={
+            <RequireAuth>
+              <ScheduledPostsPage />
             </RequireAuth>
           }
         />

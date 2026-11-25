@@ -80,6 +80,9 @@ interface StreamingValue {
   /** bio/profile_fields内リンクの非同期解決完了を購読する（ProfilePageが使用）。戻り値で解除。
    * ログイン中クライアント全員へ無条件配信されるため、呼び出し側で対象URLかを判定すること。 */
   registerLinkResolved: (cb: LinkResolvedListener) => () => void;
+  /** 予約の投稿・失敗・他のタブでの操作（`scheduledPostsChanged`）を購読する（予約一覧が
+   * 使用）。戻り値で解除。 */
+  registerScheduledPostsChanged: (cb: () => void) => () => void;
   /** DM新着（visibility="direct"のnoteイベント）を購読する（MessagesPageが使用）。戻り値で解除。 */
   registerDirectMessage: (cb: NoteListener) => () => void;
   /** 未読のあるDMセッション数（左ペインバッジ用）。 */
@@ -91,6 +94,12 @@ interface StreamingValue {
   followRequestCount: number;
   /** サーバーから承認待ち件数を再取得する（承認/拒否操作後・ページロード時に呼ぶ）。 */
   refreshFollowRequestCount: () => void;
+  /** 予約投稿の件数。投稿待ち（`pending`）は「機能」メニューの🕒印、投稿できなかったもの
+   * （`failed`）は件数バッジにする。 */
+  scheduledPostCounts: { pending: number; failed: number };
+  /** サーバーから予約投稿の件数を再取得する（予約の操作後に呼ぶ。実行ループの投稿・失敗は
+   * ストリーミングの`scheduledPostsChanged`で取り直す）。 */
+  refreshScheduledPostCounts: () => void;
   /** 未処理の通報の件数（通報を扱えるロールだけ。管理メニュー・通報タブのバッジ用）。 */
   openReportCount: number;
   /** サーバーから未処理の通報の件数を再取得する（通報の処理後に呼ぶ）。 */
@@ -106,10 +115,13 @@ const StreamingContext = createContext<StreamingValue>({
   registerNotifArrived: () => () => {},
   registerLinkResolved: () => () => {},
   registerDirectMessage: () => () => {},
+  registerScheduledPostsChanged: () => () => {},
   dmUnreadCount: 0,
   refreshDmUnreadCount: () => {},
   followRequestCount: 0,
   refreshFollowRequestCount: () => {},
+  scheduledPostCounts: { pending: 0, failed: 0 },
+  refreshScheduledPostCounts: () => {},
   openReportCount: 0,
   refreshOpenReportCount: () => {},
 });
@@ -135,12 +147,14 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const [unread, setUnread] = useState(0);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const [followRequestCount, setFollowRequestCount] = useState(0);
+  const [scheduledPostCounts, setScheduledPostCounts] = useState({ pending: 0, failed: 0 });
   const [openReportCount, setOpenReportCount] = useState(0);
   const canHandleReports = getAdminTopics(user?.role).includes("reports");
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const linkResolvedListeners = useRef<Set<LinkResolvedListener>>(new Set());
   const dmListeners = useRef<Set<NoteListener>>(new Set());
+  const scheduledListeners = useRef<Set<() => void>>(new Set());
   /** subscription id -> {spec, onNote, onResync}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
   const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener; onResync?: ResyncListener }>>(
     new Map()
@@ -176,6 +190,11 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     api.followRequests.count().then((r) => setFollowRequestCount(r.count)).catch(() => {});
   }, [user]);
 
+  const refreshScheduledPostCounts = useCallback(() => {
+    if (!user) return;
+    api.scheduledPosts.counts().then(setScheduledPostCounts).catch(() => {});
+  }, [user]);
+
   const refreshOpenReportCount = useCallback(() => {
     if (!canHandleReports) return;
     api.admin.openReportCount().then((r) => setOpenReportCount(r.count)).catch(() => {});
@@ -194,6 +213,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     refreshDmUnreadCount();
     refreshFollowRequestCount();
+    refreshScheduledPostCounts();
     refreshUnread();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
@@ -235,6 +255,9 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         // registerReaction と違い NoteCard 側の useState ではなくグローバルストアなため）。
         const update = body as { postId: string; poll: NonNullable<Note["poll"]> };
         updatePollResults(update.postId, update.poll);
+      } else if (type === "scheduledPostsChanged") {
+        refreshScheduledPostCounts();
+        scheduledListeners.current.forEach((cb) => cb());
       } else if (type === "linkResolved") {
         const info = body as LinkResolvedInfo;
         linkResolvedListeners.current.forEach((cb) => cb(info));
@@ -313,6 +336,13 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
+  const registerScheduledPostsChanged = useCallback((cb: () => void) => {
+    scheduledListeners.current.add(cb);
+    return () => {
+      scheduledListeners.current.delete(cb);
+    };
+  }, []);
+
   const registerDirectMessage = useCallback((cb: NoteListener) => {
     dmListeners.current.add(cb);
     return () => {
@@ -351,6 +381,9 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         refreshDmUnreadCount,
         followRequestCount,
         refreshFollowRequestCount,
+        scheduledPostCounts,
+        refreshScheduledPostCounts,
+        registerScheduledPostsChanged,
         openReportCount,
         refreshOpenReportCount,
       }}

@@ -53,6 +53,12 @@
   flex-shrink: 0;
 }
 
+.clock {
+  flex-shrink: 0;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
 .comingSoon {
   font-size: 0.76rem;
   color: var(--text-faint);

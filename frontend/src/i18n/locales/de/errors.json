@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "Der Bestätigungscode ist abgelaufen (er ist 15 Minuten gültig). Fordere mit „Code erneut senden“ einen neuen an",
   "PLC_TOKEN_INVALID": "Der Bestätigungscode ist falsch. Gib den Code aus der neuesten E-Mail deines bisherigen Servers ein",
   "INVALID_OPERATOR_URL": "Die URL des Betreibers muss mit http:// oder https:// beginnen",
-  "INVALID_CONTACT_EMAIL": "Die Kontakt-E-Mail-Adresse ist ungültig"
+  "INVALID_CONTACT_EMAIL": "Die Kontakt-E-Mail-Adresse ist ungültig",
+  "SCHEDULED_AT_TOO_SOON": "Der geplante Zeitpunkt muss mindestens 5 Minuten in der Zukunft liegen.",
+  "SCHEDULED_AT_TOO_FAR": "Der geplante Zeitpunkt muss innerhalb eines Jahres liegen.",
+  "INVALID_SCHEDULED_AT": "Der geplante Zeitpunkt ist ungültig.",
+  "TOO_MANY_SCHEDULED_POSTS": "Du kannst keine weiteren Beiträge planen. Lösche nicht mehr benötigte.",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "Reposts können nicht geplant werden.",
+  "SCHEDULED_POST_NOT_FOUND": "Geplanter Beitrag nicht gefunden. Er wurde möglicherweise bereits veröffentlicht oder gelöscht.",
+  "SCHEDULED_POST_CHANGED": "Dieser geplante Beitrag wurde bereits veröffentlicht oder an anderer Stelle geändert.",
+  "SCHEDULED_POST_TOO_LATE": "Nicht veröffentlicht, da der geplante Zeitpunkt mehr als 24 Stunden zurücklag.",
+  "INVALID_SCHEDULED_REQUEST": "Der geplante Beitrag konnte nicht gelesen werden.",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Entwürfe ohne geplanten Zeitpunkt werden nicht unterstützt.",
+  "POLL_ALREADY_EXPIRED": "Die Umfrage wäre zum Veröffentlichungszeitpunkt bereits beendet."
 }

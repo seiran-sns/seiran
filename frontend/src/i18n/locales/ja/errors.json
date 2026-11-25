@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "確認コードの有効期限（15分）が切れています。「確認コードを送り直す」で新しいコードを受け取ってください",
   "PLC_TOKEN_INVALID": "確認コードが正しくありません。移行元から届いた最新のメールのコードを入力してください",
   "INVALID_OPERATOR_URL": "運営者のURLは http:// または https:// で始まるURLにしてください",
-  "INVALID_CONTACT_EMAIL": "問い合わせ先のメールアドレスの形式が正しくありません"
+  "INVALID_CONTACT_EMAIL": "問い合わせ先のメールアドレスの形式が正しくありません",
+  "SCHEDULED_AT_TOO_SOON": "予約日時は5分後以降にしてください",
+  "SCHEDULED_AT_TOO_FAR": "予約日時は1年以内にしてください",
+  "INVALID_SCHEDULED_AT": "予約日時の形式が正しくありません",
+  "TOO_MANY_SCHEDULED_POSTS": "これ以上予約できません。不要な予約を削除してください",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "リポストは予約できません",
+  "SCHEDULED_POST_NOT_FOUND": "予約が見つかりません。既に投稿または削除された可能性があります",
+  "SCHEDULED_POST_CHANGED": "この予約は既に投稿されたか、別の画面で変更されました",
+  "SCHEDULED_POST_TOO_LATE": "予約日時から24時間以上遅れたため、投稿を見送りました",
+  "INVALID_SCHEDULED_REQUEST": "予約の内容を読み取れませんでした",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "予約日時の無い下書きは保存できません",
+  "POLL_ALREADY_EXPIRED": "アンケートの締め切りが投稿日時より前になっています"
 }

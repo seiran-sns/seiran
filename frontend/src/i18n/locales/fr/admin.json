@@ -370,7 +370,8 @@
       "follow": "Nouveaux abonnements",
       "listCount": "Listes",
       "listMember": "Membres par liste",
-      "search": "Recherches"
+      "search": "Recherches",
+      "scheduledPostCount": "Publications programmées"
     },
     "minutesUnit": "min",
     "hoursUnit": "h",

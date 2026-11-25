@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "The confirmation code has expired (it is valid for 15 minutes). Use “Resend the code” to get a new one",
   "PLC_TOKEN_INVALID": "The confirmation code is incorrect. Enter the code from the latest email sent by your previous server",
   "INVALID_OPERATOR_URL": "The operator URL must start with http:// or https://",
-  "INVALID_CONTACT_EMAIL": "The contact email address is not valid"
+  "INVALID_CONTACT_EMAIL": "The contact email address is not valid",
+  "SCHEDULED_AT_TOO_SOON": "The scheduled time must be at least 5 minutes from now.",
+  "SCHEDULED_AT_TOO_FAR": "The scheduled time must be within one year.",
+  "INVALID_SCHEDULED_AT": "The scheduled time is invalid.",
+  "TOO_MANY_SCHEDULED_POSTS": "You cannot schedule any more posts. Delete ones you no longer need.",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "Reposts cannot be scheduled.",
+  "SCHEDULED_POST_NOT_FOUND": "Scheduled post not found. It may already have been published or deleted.",
+  "SCHEDULED_POST_CHANGED": "This scheduled post has already been published or was changed elsewhere.",
+  "SCHEDULED_POST_TOO_LATE": "It was not published because it was more than 24 hours past the scheduled time.",
+  "INVALID_SCHEDULED_REQUEST": "The scheduled post could not be read.",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Drafts without a scheduled time are not supported.",
+  "POLL_ALREADY_EXPIRED": "The poll would already be closed at the time of posting."
 }

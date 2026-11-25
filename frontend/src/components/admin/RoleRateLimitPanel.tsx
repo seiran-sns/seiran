@@ -15,11 +15,14 @@ type OwnLimitRole = "user" | "moderator" | "quarantine";
 
 type RateLimitKey = Extract<
   keyof SiteSettings,
-  `${string}_rate_limit_${string}` | `list_max_count_${string}` | `list_member_max_${string}`
+  | `${string}_rate_limit_${string}`
+  | `list_max_count_${string}`
+  | `list_member_max_${string}`
+  | `scheduled_post_max_${string}`
 >;
 
 interface LimitRow {
-  id: "post" | "follow" | "listCount" | "listMember" | "search";
+  id: "post" | "follow" | "listCount" | "listMember" | "search" | "scheduledPostCount";
   window?: { key: RateLimitKey; unit: "minutesUnit" | "hoursUnit" };
   keys: Partial<Record<OwnLimitRole, RateLimitKey>> & { user: RateLimitKey };
 }
@@ -42,6 +45,11 @@ const LIMIT_ROWS: LimitRow[] = [
   },
   { id: "listCount", keys: { user: "list_max_count_user", moderator: "list_max_count_moderator" } },
   { id: "listMember", keys: { user: "list_member_max_user", moderator: "list_member_max_moderator" } },
+  // 予約投稿（投稿できなかったものを含む）の保持数。バックエンドの`rate_limit::scheduled_post_max`。
+  {
+    id: "scheduledPostCount",
+    keys: { user: "scheduled_post_max_user", moderator: "scheduled_post_max_moderator" },
+  },
   {
     id: "search",
     window: { key: "search_rate_limit_window_minutes", unit: "minutesUnit" },

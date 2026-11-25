@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "确认码已过期（有效期 15 分钟）。请使用“重新发送验证码”获取新的确认码",
   "PLC_TOKEN_INVALID": "确认码不正确。请输入原服务器最新邮件中的确认码",
   "INVALID_OPERATOR_URL": "运营者的网址必须以 http:// 或 https:// 开头",
-  "INVALID_CONTACT_EMAIL": "联系邮箱地址格式不正确"
+  "INVALID_CONTACT_EMAIL": "联系邮箱地址格式不正确",
+  "SCHEDULED_AT_TOO_SOON": "定时时间必须在5分钟后以后。",
+  "SCHEDULED_AT_TOO_FAR": "定时时间必须在一年以内。",
+  "INVALID_SCHEDULED_AT": "定时时间格式不正确。",
+  "TOO_MANY_SCHEDULED_POSTS": "无法再定时。请删除不需要的定时帖子。",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "转发无法定时。",
+  "SCHEDULED_POST_NOT_FOUND": "找不到定时帖子。可能已发布或删除。",
+  "SCHEDULED_POST_CHANGED": "此定时帖子已发布，或已在其他页面中更改。",
+  "SCHEDULED_POST_TOO_LATE": "已超过定时时间24小时以上，因此未发布。",
+  "INVALID_SCHEDULED_REQUEST": "无法读取定时帖子的内容。",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "不支持没有定时时间的草稿。",
+  "POLL_ALREADY_EXPIRED": "投票的截止时间早于发布时间。"
 }

@@ -332,6 +332,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .await;
             seiran_api::spawn_startup_tasks(&state);
             seiran_api::spawn_gc_tasks(&state);
+            seiran_api::handlers::scheduled_posts::spawn_scheduled_post_task(&state);
             serve(seiran_api::router(state), env_port("PORT", 3000), shutdown).await?;
         }
         Role::Federation => {
@@ -468,6 +469,7 @@ async fn run_all(shared: SharedResources) -> Result<(), Box<dyn std::error::Erro
     .await;
     seiran_api::spawn_startup_tasks(&api_state);
     seiran_api::spawn_gc_tasks(&api_state);
+    seiran_api::handlers::scheduled_posts::spawn_scheduled_post_task(&api_state);
 
     // federation ロール（ストリーミングハブ・ジョブキューを api/worker と共有する）
     let inbox_state = seiran_federation_inbox::init_state(

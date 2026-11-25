@@ -34,6 +34,7 @@ pub mod open_target;
 pub mod passkeys;
 pub mod reports;
 pub mod repost_mutes;
+pub mod scheduled_posts;
 pub mod search;
 pub mod setup;
 pub mod site_icon;

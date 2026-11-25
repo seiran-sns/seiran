@@ -172,6 +172,21 @@ pub async fn list_creation_max(state: &AppState, actor_id: i64) -> Option<i64> {
     .await
 }
 
+/// user/emoji-editorロールが持てる予約投稿（投稿できなかったものを含む）の件数上限を返す
+/// （既定10件、moderatorは既定30件、adminは無制限）。
+pub async fn scheduled_post_max(state: &AppState, actor_id: i64) -> Option<i64> {
+    let role = actor_role(state, actor_id).await;
+    role_limit(
+        state,
+        &role,
+        "scheduled_post_max_user",
+        10,
+        "scheduled_post_max_moderator",
+        30,
+    )
+    .await
+}
+
 /// user/emoji-editorロールが1リストに追加できる最大人数を返す（既定50人、moderatorは既定300人、adminは無制限）。
 pub async fn list_member_max(state: &AppState, actor_id: i64) -> Option<i64> {
     let role = actor_role(state, actor_id).await;

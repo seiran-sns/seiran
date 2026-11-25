@@ -11,6 +11,7 @@
 
 export * from "./core";
 export * from "./types";
+export { createNoteBody } from "./notes";
 
 import { openTarget, reports, meta, about, appTokens, media, emojis } from "./misc";
 import { setup, auth, miauth, oauth, misskeyAppAuth } from "./auth";
@@ -20,6 +21,7 @@ import { admin } from "./admin";
 import { follows, followImport, followRequests, dm } from "./follows";
 import { lists, hashtags } from "./lists";
 import { migration } from "./migration";
+import { scheduledPosts } from "./scheduledPosts";
 
 export const api = {
   openTarget,
@@ -52,4 +54,5 @@ export const api = {
   emojis,
   reactions,
   migration,
+  scheduledPosts,
 };

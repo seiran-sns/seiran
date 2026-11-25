@@ -106,5 +106,16 @@
   "PLC_TOKEN_EXPIRED": "확인 코드의 유효 기간(15분)이 지났습니다. 「코드 다시 보내기」로 새 코드를 받아 주세요",
   "PLC_TOKEN_INVALID": "확인 코드가 올바르지 않습니다. 이전 원본에서 온 최신 메일의 코드를 입력해 주세요",
   "INVALID_OPERATOR_URL": "운영자 URL은 http:// 또는 https://로 시작해야 합니다",
-  "INVALID_CONTACT_EMAIL": "문의용 이메일 주소 형식이 올바르지 않습니다"
+  "INVALID_CONTACT_EMAIL": "문의용 이메일 주소 형식이 올바르지 않습니다",
+  "SCHEDULED_AT_TOO_SOON": "예약 시간은 5분 후 이후로 지정해 주세요.",
+  "SCHEDULED_AT_TOO_FAR": "예약 시간은 1년 이내로 지정해 주세요.",
+  "INVALID_SCHEDULED_AT": "예약 시간 형식이 올바르지 않습니다.",
+  "TOO_MANY_SCHEDULED_POSTS": "더 이상 예약할 수 없습니다. 필요 없는 예약을 삭제해 주세요.",
+  "SCHEDULED_RENOTE_NOT_SUPPORTED": "리포스트는 예약할 수 없습니다.",
+  "SCHEDULED_POST_NOT_FOUND": "예약을 찾을 수 없습니다. 이미 게시되었거나 삭제되었을 수 있습니다.",
+  "SCHEDULED_POST_CHANGED": "이 예약은 이미 게시되었거나 다른 화면에서 변경되었습니다.",
+  "SCHEDULED_POST_TOO_LATE": "예약 시간보다 24시간 이상 늦어져 게시하지 않았습니다.",
+  "INVALID_SCHEDULED_REQUEST": "예약 내용을 읽을 수 없습니다.",
+  "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "예약 시간이 없는 초안은 저장할 수 없습니다.",
+  "POLL_ALREADY_EXPIRED": "설문 마감 시간이 게시 시간보다 이릅니다."
 }

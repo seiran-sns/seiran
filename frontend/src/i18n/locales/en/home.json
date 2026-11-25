@@ -207,7 +207,15 @@
       "modalTitle": "Insert user ID",
       "noResults": "No matching users found"
     },
-    "bskyDeliveryDeferredHint": "Delivery to Bluesky is held until your Bluesky import finishes, and goes out after it completes."
+    "bskyDeliveryDeferredHint": "Delivery to Bluesky is held until your Bluesky import finishes, and goes out after it completes.",
+    "schedule": {
+      "toggleTitle": "Schedule post",
+      "label": "Post at",
+      "hint": "Pressing a post button schedules the post for this time (at least 5 minutes from now).",
+      "editHint": "Turn off 🕒 and press a post button to publish now.",
+      "saved": "Scheduled. You can find it under Features > Scheduled posts.",
+      "buttonMark": "Scheduled"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Click to remove",

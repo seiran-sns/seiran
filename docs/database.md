@@ -59,6 +59,7 @@ ID の採番は2系統:
 | `bookmarks` | Mastodon 互換 API のブックマーク |
 | `auth_attempt_log` / `auth_ip_blocks` / `account_creation_log` / `user_contact_log` / `search_log` | レート制限 |
 | `reports` / `report_comments` | 通報 |
+| `scheduled_posts` | 予約投稿（投稿 API の本文と予約日時） |
 
 ## 3. 主要テーブルの設計判断
 
@@ -71,7 +72,7 @@ ID の採番は2系統:
 - `search_log`: 初回検索の時刻（ページングは記録しない）。
 - `search_log`・`user_contact_log` の「数えて上限未満なら記録」はトランザクション内で actor 単位のアドバイザリロック（`pg_advisory_xact_lock(hashtextextended(<テーブル名>, actor_id))`、`rate_limit::lock_actor_rate_limit`）で直列化する。
 - `users.last_login_success_at`: ブルートフォース判定の窓の起点（パスワードリセット時刻と新しい方）。
-- 投稿数・フォロー数・リスト数/人数の制限は専用ログを持たず、`posts`/`follows`/`lists`/`list_members` を直接数える。
+- 投稿数・フォロー数・リスト数/人数・予約投稿の保持数の制限は専用ログを持たず、`posts`/`follows`/`lists`/`list_members`/`scheduled_posts` を直接数える。
 
 ### `users.role`（ENUM `user_role`）
 
@@ -172,7 +173,17 @@ Jetstream はフォロー中・リストメンバーの DID だけを購読す�
 - `bsky_reply_allow`（JSONB、NULL = 制限なし、`[]` = 投稿者以外は返信不可）/`bsky_quote_disabled`: リモート Bsky 投稿の threadgate の `allow` と、postgate の `#disableRule` の有無（`docs/protocols.md` 3節）。
 - `language`: ISO 639-1。Bsky の `langs` にだけ使う。許可値（`SUPPORTED_LANGUAGES`、7言語）はアプリ層で検証する。NULL なら `langs` を省略する。
 - `poll`/`poll_update_received`/`poll_fetched_at`: 下記「アンケート」。
+- `scheduled_post_id`: 予約投稿から作った投稿の元の予約 ID（部分 UNIQUE `posts_scheduled_post_id_key`）。下記「予約投稿」。
 - `{reply_to,quote_of,repost_of}_ap_uri`/`_ref_status`（ENUM `post_reference_status`: `pending`/`gone`）: 取り込み時に解決できなかった参照（`docs/protocols.md` 1節・4節）。
+
+### 予約投稿（`scheduled_posts`）
+投稿 API の本文（`CreateNoteRequest`）を `request`（JSONB）にそのまま持ち、予約日時（`scheduled_at`）に投稿処理へ流す（`docs/architecture.md` 11節）。`posts` に公開前の行を作らないのは、可視性判定・タイムライン・検索・配送のすべてに「公開前」の状態を持ち込まないため。
+- `failure_code`: NULL なら投稿待ち、値があれば投稿できなかった理由のエラーコード（`failed_at` はその時刻）。投稿できなかった予約は利用者が編集・再予約・削除するまで実行しない。実行対象の抽出は部分インデックス `idx_scheduled_posts_due`（`failure_code IS NULL`）。
+- `revision`: 編集のたびに進める版。実行側は読んだ版の行を投稿の INSERT と同じトランザクションで消し（`scheduled_post::delete_for_publish`）、消せなければ投稿ごと取り消す。実行中に編集された予約を古い内容で投稿しないため。
+- 二重投稿は `posts.scheduled_post_id` の部分 UNIQUE（`posts_scheduled_post_id_key`）で防ぐ: 同じ予約を同時に実行した側のうち、後から INSERT した側が一意制約に拒まれる（`post::is_scheduled_post_already_handled`）。
+- 保持数の上限（ロール別、`site_settings` の `scheduled_post_max_{user,moderator}`）は、数える文と作る文をアクター単位のアドバイザリロックで直列化して守る（`scheduled_post::insert_if_under_limit`）。
+- アクターの削除で消える（`ON DELETE CASCADE`）。凍結では消さない。
+- `request->'attachment_ids'` に入っているメディアはメディア GC の対象外（`maintenance::ORPHANED_MEDIA_FILE_CONDITION`）。
 
 ### ダイレクトメッセージ関連（`post_recipients` / `dm_read_states` / `bsky_convo_links`)
 DM は `visibility='direct'` の投稿として `posts` に格納し、Misskey 互換クライアントからも読み書きできる（フロントはタイムライン取得時に `direct` を除外するパラメータを付ける）。

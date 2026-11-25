@@ -207,7 +207,15 @@
       "modalTitle": "ユーザーIDを挿入",
       "noResults": "該当するユーザーが見つかりません"
     },
-    "bskyDeliveryDeferredHint": "Bluesky からの転入の取り込みが終わるまで、Bluesky への配送は保留され、取り込みが終わってから届きます。"
+    "bskyDeliveryDeferredHint": "Bluesky からの転入の取り込みが終わるまで、Bluesky への配送は保留され、取り込みが終わってから届きます。",
+    "schedule": {
+      "toggleTitle": "予約投稿",
+      "label": "予約日時",
+      "hint": "投稿ボタンを押すと、この日時に投稿する予約になります（5分後以降）。",
+      "editHint": "🕒をオフにして投稿ボタンを押すと、今すぐ投稿します。",
+      "saved": "予約しました。「機能」＞「予約投稿」で確認できます。",
+      "buttonMark": "予約"
+    }
   },
   "reactionChips": {
     "clickToRemove": "クリックで取り消す",

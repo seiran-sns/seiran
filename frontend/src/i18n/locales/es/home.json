@@ -207,7 +207,15 @@
       "modalTitle": "Insertar ID de usuario",
       "noResults": "No se encontraron usuarios coincidentes"
     },
-    "bskyDeliveryDeferredHint": "La entrega a Bluesky queda en espera hasta que termine la importación desde Bluesky y se envía después."
+    "bskyDeliveryDeferredHint": "La entrega a Bluesky queda en espera hasta que termine la importación desde Bluesky y se envía después.",
+    "schedule": {
+      "toggleTitle": "Programar publicación",
+      "label": "Publicar el",
+      "hint": "Al pulsar un botón de publicar, se programará para esta hora (al menos dentro de 5 minutos).",
+      "editHint": "Desactiva 🕒 y pulsa un botón de publicar para publicar ahora.",
+      "saved": "Programada. Puedes verla en Funciones > Publicaciones programadas.",
+      "buttonMark": "Programada"
+    }
   },
   "reactionChips": {
     "clickToRemove": "Haga clic para eliminar",

@@ -75,6 +75,8 @@ pub struct SiteSettingsResponse {
     pub list_max_count_moderator: String,
     pub list_member_max_user: String,
     pub list_member_max_moderator: String,
+    pub scheduled_post_max_user: String,
+    pub scheduled_post_max_moderator: String,
     pub search_rate_limit_window_minutes: String,
     pub search_rate_limit_max_user: String,
     pub search_rate_limit_max_moderator: String,
@@ -218,6 +220,14 @@ fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
             .get("list_member_max_user")
             .cloned()
             .unwrap_or_else(|| "50".to_string()),
+        scheduled_post_max_user: settings
+            .get("scheduled_post_max_user")
+            .cloned()
+            .unwrap_or_else(|| "10".to_string()),
+        scheduled_post_max_moderator: settings
+            .get("scheduled_post_max_moderator")
+            .cloned()
+            .unwrap_or_else(|| "30".to_string()),
         list_member_max_moderator: settings
             .get("list_member_max_moderator")
             .cloned()
@@ -296,6 +306,8 @@ pub struct UpdateSiteSettingsRequest {
     pub list_max_count_moderator: Option<String>,
     pub list_member_max_user: Option<String>,
     pub list_member_max_moderator: Option<String>,
+    pub scheduled_post_max_user: Option<String>,
+    pub scheduled_post_max_moderator: Option<String>,
     pub search_rate_limit_window_minutes: Option<String>,
     pub search_rate_limit_max_user: Option<String>,
     pub search_rate_limit_max_moderator: Option<String>,
@@ -429,6 +441,11 @@ pub async fn update_site_settings(
         ("list_max_count_moderator", &req.list_max_count_moderator),
         ("list_member_max_user", &req.list_member_max_user),
         ("list_member_max_moderator", &req.list_member_max_moderator),
+        ("scheduled_post_max_user", &req.scheduled_post_max_user),
+        (
+            "scheduled_post_max_moderator",
+            &req.scheduled_post_max_moderator,
+        ),
         (
             "search_rate_limit_window_minutes",
             &req.search_rate_limit_window_minutes,
@@ -593,6 +610,12 @@ pub async fn update_site_settings(
         req.list_member_max_moderator
             .as_deref()
             .map(|v| ("list_member_max_moderator", v.to_string())),
+        req.scheduled_post_max_user
+            .as_deref()
+            .map(|v| ("scheduled_post_max_user", v.to_string())),
+        req.scheduled_post_max_moderator
+            .as_deref()
+            .map(|v| ("scheduled_post_max_moderator", v.to_string())),
         req.search_rate_limit_window_minutes
             .as_deref()
             .map(|v| ("search_rate_limit_window_minutes", v.to_string())),

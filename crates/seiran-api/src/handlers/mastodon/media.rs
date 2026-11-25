@@ -68,7 +68,9 @@ fn to_attachment(m: MediaSummary<'_>) -> MastodonMediaAttachment {
     }
 }
 
-fn from_drive_response(r: &DriveFileResponse) -> Result<MastodonMediaAttachment, ApiError> {
+pub(super) fn from_drive_response(
+    r: &DriveFileResponse,
+) -> Result<MastodonMediaAttachment, ApiError> {
     Ok(to_attachment(MediaSummary {
         id: r
             .id

@@ -1,0 +1,25 @@
+{
+  "menu": {
+    "scheduledPosts": "Publicaciones programadas",
+    "scheduledPostsPending": "Tienes publicaciones programadas",
+    "followRequests": "Solicitudes de seguimiento"
+  },
+  "scheduledPosts": {
+    "title": "Publicaciones programadas",
+    "description": "Se publican automáticamente a la hora programada. Las que no se pudieron publicar (por ejemplo, con más de 24 horas de retraso) quedan aquí para editarlas y reprogramarlas, publicarlas ahora o eliminarlas.",
+    "empty": "No hay publicaciones programadas. Usa 🕒 en el editor para programar una.",
+    "failed": "No se pudo publicar: ",
+    "replyTo": "Respuesta a {{acct}}:",
+    "quoteOf": "Citando a {{acct}}:",
+    "edit": "Editar",
+    "editTitle": "Editar publicación programada",
+    "publishNow": "Publicar ahora",
+    "delete": "Eliminar",
+    "published": "Publicado.",
+    "deleted": "Publicación programada eliminada.",
+    "publishConfirmTitle": "¿Publicar ahora?",
+    "publishConfirmBody": "Se publicará ahora sin esperar a la hora programada.",
+    "deleteConfirmTitle": "¿Eliminar la publicación programada?",
+    "deleteConfirmBody": "Esta publicación se descartará sin publicarse."
+  }
+}

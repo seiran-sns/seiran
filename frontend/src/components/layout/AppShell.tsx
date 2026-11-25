@@ -33,11 +33,14 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
   const { t } = useTranslation();
   const { user } = useAuth();
   const location = useLocation();
-  const { dmUnreadCount, followRequestCount, unread, openReportCount } = useStreamingContext();
-  // ☰ のバッジはメニューの中の項目（通知・メッセージ・設定・管理）のバッジの合計。メニューを
+  const { dmUnreadCount, followRequestCount, scheduledPostCounts, unread, openReportCount } =
+    useStreamingContext();
+  // ☰ のバッジはメニューの中の項目（通知・メッセージ・機能・管理）の件数バッジの合計。メニューを
   // 開くまで気づけない件数を、閉じたままでも見えるようにする（通知は🔔にも出すが、メニューの
-  // 中の「通知」にもバッジがあるので合計に含める）。
-  const menuBadgeCount = unread + dmUnreadCount + followRequestCount + openReportCount;
+  // 中の「通知」にもバッジがあるので合計に含める）。「機能」の🕒（投稿待ちの予約）は対応の
+  // 要らない印なので ☰ には出さない。
+  const menuBadgeCount =
+    unread + dmUnreadCount + followRequestCount + scheduledPostCounts.failed + openReportCount;
   // ☰ の明滅ドットも、メニューの中の項目（設定・管理）のドットをまとめたもの。
   const { followImportActive, emojiImportActive } = useBackgroundImports();
   const [composeOpen, setComposeOpen] = useState(false);

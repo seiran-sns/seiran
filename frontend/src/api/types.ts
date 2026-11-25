@@ -156,6 +156,8 @@ export interface SiteSettings {
   follow_rate_limit_max_quarantine: string;
   list_max_count_user: string;
   list_max_count_moderator: string;
+  scheduled_post_max_user: string;
+  scheduled_post_max_moderator: string;
   list_member_max_user: string;
   list_member_max_moderator: string;
   search_rate_limit_window_minutes: string;
@@ -899,6 +901,53 @@ export type BskyEmbedChoice =
   | { kind: "attachment"; id: string }
   | { kind: "url"; url: string }
   | { kind: "poll" };
+
+/** 投稿 API（`POST /api/notes/create`）の本文。バックエンドの`CreateNoteRequest`と対応し、
+ * 予約投稿（`api.scheduledPosts`）はこの形をそのまま保存して予約日時に投稿する。 */
+export interface CreateNoteBody {
+  text?: string | null;
+  deliver_to_fedi?: boolean | null;
+  deliver_to_bsky?: boolean | null;
+  attachment_ids?: string[] | null;
+  sensitive_attachment_ids?: string[] | null;
+  reply_to_id?: string | null;
+  renote_id?: string | null;
+  quote_of_id?: string | null;
+  visibility?: "public" | "unlisted" | "followers_only" | "direct" | null;
+  recipient_actor_ids?: string[] | null;
+  bsky_embed_choice?: BskyEmbedChoice | null;
+  poll?: {
+    choices: string[];
+    multiple?: boolean | null;
+    expiresAtIso?: string | null;
+    expiresInSeconds?: number | null;
+    /** Misskey 互換クライアントが指定した期限（epoch ミリ秒・相対ミリ秒）。 */
+    expiresAt?: number | null;
+    expiredAfter?: number | null;
+  } | null;
+  content_warning?: string | null;
+  link_card_urls?: string[];
+  language?: string | null;
+}
+
+/** 予約投稿（`GET /api/scheduled-posts`）。 */
+export interface RawScheduledPost {
+  id: string;
+  scheduledAt: string;
+  createdAt: string;
+  /** 投稿できなかった予約なら、その理由のエラーコード。 */
+  failureCode: string | null;
+  failedAt: string | null;
+  request: CreateNoteBody;
+  attachments: DriveFile[];
+  replyTo: RawNote | null;
+  quoteOf: RawNote | null;
+}
+
+export interface ScheduledPost extends Omit<RawScheduledPost, "replyTo" | "quoteOf"> {
+  replyTo: Note | null;
+  quoteOf: Note | null;
+}
 
 /** アンケート作成（#228）。`api.notes.create`の`poll`引数、`CreateNoteRequest::poll`と対応。 */
 export interface PollCreateInput {

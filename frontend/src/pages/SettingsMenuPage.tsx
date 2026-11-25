@@ -1,9 +1,6 @@
-import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { api } from "../api/client";
 import AppShell from "../components/layout/AppShell";
-import { useStreamingContext } from "../contexts/StreamingContext";
 import UiIcon from "../components/common/UiIcon";
 import { useMigrationImportActive } from "../hooks/useMigrationImport";
 import styles from "./SettingsMenu.module.css";
@@ -35,31 +32,14 @@ const BASE_ITEMS: SettingsMenuItem[] = [
 export default function SettingsMenuPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { followRequestCount } = useStreamingContext();
-  const [isLocked, setIsLocked] = useState(false);
   const migrationImportActive = useMigrationImportActive();
   const { followImportActive } = useBackgroundImports();
 
-  useEffect(() => {
-    api.account.getLock().then((r) => setIsLocked(r.is_locked)).catch(() => {});
-  }, []);
-
-  // 承認制フォロー（鍵アカウント）中のみ「承認待ちフォロー」項目を表示する。
   // Bluesky からの転入の取り込みが裏で続いている間は、インポートの項目に印を出す。
-  const baseItems = BASE_ITEMS.map((item) =>
+  // 承認待ちフォローは「機能」メニュー（`FeaturesMenuPage`）にある。
+  const items: SettingsMenuItem[] = BASE_ITEMS.map((item) =>
     item.to === "/settings/follow-import" ? { ...item, dot: migrationImportActive || followImportActive } : item,
   );
-  const items: SettingsMenuItem[] = isLocked
-    ? [
-        ...baseItems,
-        {
-          to: "/settings/follow-requests",
-          icon: "👥",
-          labelKey: "menu.followRequests",
-          badge: followRequestCount,
-        },
-      ]
-    : baseItems;
 
   const center = (
     <>
