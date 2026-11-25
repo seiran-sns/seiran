@@ -31,7 +31,7 @@ export default function EmojiImage({ src, alt, blurhash, span = 1, rootRef }: Em
   return (
     <span ref={wrapRef} className={styles.wrap} style={{ width: `${emojiSpanWidthEm(span)}em` }}>
       {visible && !loaded && placeholderUrl && (
-        <img className={styles.layer} src={placeholderUrl} alt="" aria-hidden="true" />
+        <img className={styles.layer} src={placeholderUrl} alt="" aria-hidden="true" data-emoji="" />
       )}
       {visible && (
         <img
@@ -39,6 +39,7 @@ export default function EmojiImage({ src, alt, blurhash, span = 1, rootRef }: Em
           style={{ opacity: loaded ? 1 : 0 }}
           src={src}
           alt={alt}
+          data-emoji=""
           loading="lazy"
           onLoad={() => setLoaded(true)}
         />

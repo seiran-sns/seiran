@@ -6,7 +6,7 @@ import { useSiteMeta } from "../../contexts/SiteMetaContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { canAccessAdminPage } from "../../lib/roles";
 import ServerInfoDialog from "../common/ServerInfoDialog";
-import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import { useMigrationImportActive } from "../../hooks/useMigrationImport";
 import styles from "./AppShell.module.css";
 import { useBackgroundImports } from "../../contexts/BackgroundImportsContext";
@@ -92,7 +92,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                   }
                   onClick={() => onItemClick?.()}
                 >
-                  <TwemojiEmoji emoji={item.icon} className={styles.navIcon} />
+                  <UiIcon emoji={item.icon} className={styles.navIcon} />
                   <span className={styles.navLabel}>{t(`nav:${item.labelKey}`)}</span>
                   <span className={styles.navTooltip}>{t(`nav:${item.labelKey}`)}</span>
                   {!!item.badge && <span className={styles.navBadge}>{item.badge > 99 ? "99+" : item.badge}</span>}
@@ -109,7 +109,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
                       onOpenTarget();
                     }}
                   >
-                    <TwemojiEmoji emoji="🔗" className={styles.navIcon} />
+                    <UiIcon emoji="🔗" className={styles.navIcon} />
                     <span className={styles.navLabel}>{t("nav:leftNav.openTarget")}</span>
                     <span className={styles.navTooltip}>{t("nav:leftNav.openTarget")}</span>
                   </button>
@@ -126,7 +126,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
             onCompose();
           }}
         >
-          <TwemojiEmoji emoji="✏️" className={styles.navIcon} />
+          <UiIcon emoji="✏️" className={styles.navIcon} />
           <span className={styles.navLabel}>{t("nav:leftNav.composeLabel")}</span>
           <span className={styles.navTooltip}>{t("nav:leftNav.composeLabel")}</span>
         </button>
@@ -165,7 +165,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
           >
             {/* 左メニューがアイコンのみ幅（769〜900px）に畳まれた際、ラベルが消えて
                 空ボタンになるのを防ぐアイコン。通常幅・モバイルドロワーでは非表示。 */}
-            <TwemojiEmoji emoji="🔑" className={styles.loginIcon} />
+            <UiIcon emoji="🔑" className={styles.loginIcon} />
             <span className={styles.navLabel}>{t("nav:leftNav.loginLabel")}</span>
           </Link>
         )}
@@ -180,7 +180,7 @@ export default function LeftNav({ onCompose, onOpenTarget, onItemClick }: LeftNa
           onClick={() => onItemClick?.()}
           title={t("nav:leftNav.about")}
         >
-          <TwemojiEmoji emoji="ℹ️" className={styles.aboutIcon} />
+          <UiIcon emoji="ℹ️" className={styles.aboutIcon} />
           <span className={styles.siteLinkLabel}>{t("nav:leftNav.about")}</span>
         </Link>
         <button

@@ -3,6 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useIsTopmostCard } from "../../hooks/useIsTopmostCard";
 import { isSameReaction, QUICK_REACTION_HEART, QuickReaction } from "../../lib/quickReactions";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
+import { formatCount } from "../../lib/format";
 import noteCardStyles from "./NoteCard.module.css";
 import styles from "./QuickReactionButtons.module.css";
 
@@ -28,16 +30,31 @@ interface QuickHeartButtonProps {
   disabled: boolean;
   /** 幅が足りないときに隠す（`useFitCount`）。 */
   hidden: boolean;
+  /** 絵文字リアクションを使わない設定のとき。リアクションの合計数をこのボタンに出し、どの絵文字の
+   * リアクションも❤️として扱う（付けていれば枠で示し、押すと取り消す）。 */
+  heartOnly?: boolean;
+  /** `heartOnly` のときに出すリアクションの合計数。 */
+  count?: number;
   onToggleReaction: (emoji: string) => void;
 }
 
 /**
  * ボタンバーの❤️。押すと❤️で付け、❤️を付けていれば（枠で示す）取り消す。別の絵文字を付けて
- * いれば1投稿1リアクションなので置き換わる。
+ * いれば1投稿1リアクションなので置き換わる。`heartOnly` では、別の端末等で付けた絵文字の
+ * リアクションも見えないため、それを❤️の「付けている」状態として示し、押すと取り消す。
  */
-export function QuickHeartButton({ myReactionEmoji, disabled, hidden, onToggleReaction }: QuickHeartButtonProps) {
+export function QuickHeartButton({
+  myReactionEmoji,
+  disabled,
+  hidden,
+  heartOnly = false,
+  count = 0,
+  onToggleReaction,
+}: QuickHeartButtonProps) {
   const title = useReactionTitle();
-  const active = myReactionEmoji !== undefined && isSameReaction(QUICK_REACTION_HEART, myReactionEmoji);
+  const active =
+    myReactionEmoji !== undefined &&
+    (heartOnly || isSameReaction(QUICK_REACTION_HEART, myReactionEmoji));
   return (
     <button
       type="button"
@@ -51,7 +68,13 @@ export function QuickHeartButton({ myReactionEmoji, disabled, hidden, onToggleRe
       }}
       title={title({ content: QUICK_REACTION_HEART, active })}
     >
-      <TwemojiEmoji emoji={QUICK_REACTION_HEART} />
+      <UiIcon emoji={QUICK_REACTION_HEART} />
+      {heartOnly && count > 0 && (
+        <>
+          {" "}
+          <span className={noteCardStyles.actionCount}>{formatCount(count)}</span>
+        </>
+      )}
     </button>
   );
 }
@@ -131,6 +154,7 @@ export function QuickReactionPopup({
               {q.imageUrl ? (
                 <img
                   className={styles.customEmoji}
+                  data-emoji=""
                   style={customEmojiStyle(q)}
                   src={q.imageUrl}
                   alt={q.content}

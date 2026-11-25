@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useState } from "react";
 import { api } from "../api/client";
 import { setServerVersionHandler } from "../api/versionCompat";
 import { configureInternalMediaOrigins, configureMediaProxy } from "../utils/mediaProxy";
+import { useLowContrast } from "../stores/lowContrastStore";
 import { useTheme } from "./ThemeContext";
 
 /**
@@ -61,8 +62,14 @@ const SiteMetaContext = createContext<SiteMeta>(EMPTY_SITE_META);
  * 使われることが大半（文字色としての使用箇所は無い）のため、`--accent`と同じ値にしてしまうと
  * ダークモードでボタン背景まで一緒に明るくなってしまう。`--accent-strong`は
  * site_colorそのまま・テーマ非依存の値を保つ。 */
-function applyColor(color: string, isDark: boolean) {
+function applyColor(siteColor: string, isDark: boolean, lowContrast: boolean) {
   const root = document.documentElement.style;
+  // 低コントラストモードでは、サイトカラーも灰色へ寄せて彩度を落とす（index.css の低コントラスト
+  // パレットと揃える。インラインで上書きするので CSS 側だけでは効かない）。
+  const color =
+    siteColor && lowContrast
+      ? `color-mix(in oklab, ${siteColor} 60%, ${isDark ? "#8b9099" : "#8e918f"})`
+      : siteColor;
   if (!color) {
     // 既定に戻す（インラインで上書きした分をクリア）
     ["--accent", "--accent-strong", "--accent-hover", "--accent-deep", "--accent-deep-hover"].forEach((v) =>
@@ -70,11 +77,19 @@ function applyColor(color: string, isDark: boolean) {
     );
     return;
   }
-  const deepMixTarget = isDark ? "var(--bg-elev-2)" : "white";
-  const accentColor = isDark ? `color-mix(in srgb, ${color} 60%, white)` : color;
+  const accentColor = isDark ? `color-mix(in srgb, ${color} ${lowContrast ? 70 : 60}%, white)` : color;
   root.setProperty("--accent", accentColor);
   root.setProperty("--accent-strong", color);
   root.setProperty("--accent-hover", `color-mix(in srgb, ${color} 82%, black)`);
+  if (lowContrast) {
+    // 選択中のトグル等の背景。背景側へ混ぜると暗くなってグレーアウトに見えるので、明るさは
+    // ページ背景とほぼ同じ明るさに固定し、サイトカラーの色相だけを控えめに付ける。
+    const [l, hoverL] = isDark ? ["0.34", "0.38"] : ["0.935", "0.91"];
+    root.setProperty("--accent-deep", `oklch(from ${siteColor} ${l} 0.05 h)`);
+    root.setProperty("--accent-deep-hover", `oklch(from ${siteColor} ${hoverL} 0.055 h)`);
+    return;
+  }
+  const deepMixTarget = isDark ? "var(--bg-elev-2)" : "white";
   root.setProperty("--accent-deep", `color-mix(in srgb, ${color} 14%, ${deepMixTarget})`);
   root.setProperty("--accent-deep-hover", `color-mix(in srgb, ${color} 24%, ${deepMixTarget})`);
 }
@@ -92,6 +107,7 @@ function applyFavicon(iconUrl: string) {
 
 export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
   const { effectiveTheme } = useTheme();
+  const lowContrast = useLowContrast();
   const [meta, setMeta] = useState<SiteMeta>(EMPTY_SITE_META);
 
   useEffect(() => {
@@ -136,8 +152,8 @@ export function SiteMetaProvider({ children }: { children: React.ReactNode }) {
 
   // テーマ切替（ライト⇄ダーク）時にも、その時点の実効テーマで再計算して適用し直す。
   useEffect(() => {
-    applyColor(meta.color, effectiveTheme === "dark");
-  }, [meta.color, effectiveTheme]);
+    applyColor(meta.color, effectiveTheme === "dark", lowContrast);
+  }, [meta.color, effectiveTheme, lowContrast]);
 
   return <SiteMetaContext.Provider value={meta}>{children}</SiteMetaContext.Provider>;
 }

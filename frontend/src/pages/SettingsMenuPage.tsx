@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { api } from "../api/client";
 import AppShell from "../components/layout/AppShell";
 import { useStreamingContext } from "../contexts/StreamingContext";
-import TwemojiEmoji from "../components/common/TwemojiEmoji";
+import UiIcon from "../components/common/UiIcon";
 import { useMigrationImportActive } from "../hooks/useMigrationImport";
 import styles from "./SettingsMenu.module.css";
 import { useBackgroundImports } from "../contexts/BackgroundImportsContext";
@@ -72,7 +72,7 @@ export default function SettingsMenuPage() {
               disabled={item.disabled}
               onClick={() => item.to && navigate(item.to)}
             >
-              <TwemojiEmoji emoji={item.icon} className={styles.icon} />
+              <UiIcon emoji={item.icon} className={styles.icon} />
               <span className={styles.label}>{t(`account:${item.labelKey}`)}</span>
               {!!item.badge && <span className={styles.badge}>{item.badge > 99 ? "99+" : item.badge}</span>}
               {!item.badge && item.dot && <span className={styles.dot} aria-hidden="true" />}

@@ -86,6 +86,37 @@ pub async fn update_quick_reactions(
 }
 
 #[derive(Deserialize)]
+pub struct UpdateEmojiReactionsRequest {
+    pub enabled: bool,
+}
+
+/// `POST /api/account/emoji-reactions`
+/// 設定画面「表示」＞「絵文字リアクション」から呼ばれる。
+pub async fn update_emoji_reactions(
+    headers: HeaderMap,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateEmojiReactionsRequest>,
+) -> Result<Json<()>, ApiError> {
+    let auth_user = extract_auth(
+        &headers,
+        &state.local_auth,
+        state.app_tokens.as_ref(),
+        state.users.as_ref(),
+    )
+    .await?;
+
+    state
+        .users
+        .update_use_emoji_reactions(auth_user.user_id, req.enabled)
+        .await
+        .map_err(|e| {
+            ApiError::Internal(format!("[update-emoji-reactions] users UPDATE 失敗: {}", e))
+        })?;
+
+    Ok(Json(()))
+}
+
+#[derive(Deserialize)]
 pub struct UpdateHiddenGuideRequest {
     /// `seiran_common::guides::HIDEABLE_GUIDES` のキー。
     pub guide: String,

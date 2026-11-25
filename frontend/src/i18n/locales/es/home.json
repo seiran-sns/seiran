@@ -71,6 +71,8 @@
     "pollBackToOptions": "Volver a opciones",
     "pollShowResults": "Mostrar resultados",
     "pollClosed": "Encuesta cerrada",
+    "likeButton": "Me gusta",
+    "unlikeButton": "Quitar",
     "reportButton": "Informe",
     "reportSubject": "Publicación de @{{username}}",
     "originalLinkTitle": "Esta publicación es un duplicado entregado a través de un puente/federación. Ir a la publicación original.",

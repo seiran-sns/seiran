@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
@@ -75,6 +75,9 @@ interface NoteCardProps {
  * `MessageContent`（メッセージ画面のDM本文表示）からも引用先カードとして使う。 */
 export function QuoteCard({ note }: { note: Note }) {
   const { t } = useTranslation();
+  const { user } = useAuth();
+  // 絵文字リアクションを使わない設定では、付いたリアクションを出さない（`NoteCardActions` と同じ）。
+  const useEmojiReactions = user?.use_emoji_reactions ?? true;
   const [showContent, setShowContent] = useState(!note.contentWarning);
 
   return (
@@ -156,9 +159,11 @@ export function QuoteCard({ note }: { note: Note }) {
               )}
             </>
           )}
-          <div className={styles.quoteReactions}>
-            <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
-          </div>
+          {useEmojiReactions && (
+            <div className={styles.quoteReactions}>
+              <ReactionChips noteId={note.id} reactions={note.reactions} indent={false} />
+            </div>
+          )}
         </>
       )}
     </section>
@@ -505,7 +510,7 @@ function PostContent({
               {remoteInfo && (
                 <span
                   className={styles.remoteServerBadge}
-                  style={{ background: remoteInfo.bg }}
+                  style={{ "--server-color": remoteInfo.bg } as CSSProperties}
                   title={remoteInfo.label}
                 >
                   {remoteInfo.useBlueskyLogo ? (

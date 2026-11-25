@@ -197,7 +197,7 @@ function escapeHtml(value: string) {
  * 行頭からのBackspaceが効かなくなるため。`<img>`はブラウザが1文字分の置換要素として
  * 扱うので、キャレット移動・描画・削除をネイティブ動作に任せられる。 */
 function emojiImgHtml(value: string, src: string, className: string): string {
-  return `<img class="${className}" data-value="${escapeHtml(value)}" src="${escapeHtml(src)}" alt="${escapeHtml(value)}" title="${escapeHtml(value)}" draggable="false">`;
+  return `<img class="${className}" data-emoji="" data-value="${escapeHtml(value)}" src="${escapeHtml(src)}" alt="${escapeHtml(value)}" title="${escapeHtml(value)}" draggable="false">`;
 }
 
 /** プレーンテキスト片中のUnicode絵文字を、カスタム絵文字ショートコードと同じatomicノード
@@ -626,7 +626,7 @@ const ComposerEditor = forwardRef<ComposerEditorHandle, ComposerEditorProps>(fun
               >
                 {candidate.kind === "emoji" ? (
                   <>
-                    <img src={candidate.emoji.url} alt="" />:
+                    <img src={candidate.emoji.url} alt="" data-emoji="" />:
                     {candidate.emoji.name}:
                   </>
                 ) : (

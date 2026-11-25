@@ -28,6 +28,18 @@
   --card-bg-admin-override: #e4e5e8;
   /* 通知欄で、未読だった（今回初めて表示した）通知を目立たせる背景。 */
   --notif-fresh-bg: #fff3bf;
+  /* リモートサーバー表示（投稿カード・プロフィール）のバッジ。背景はそのサーバーの themeColor
+   * を `--server-badge-mix` の割合で `--bg-elev-2` に混ぜる（通常はそのまま）。文字は背景が任意の色
+   * なのでテーマに関わらず濃色＋縁取りにする。 */
+  --server-badge-mix: 100%;
+  --server-label-color: #3a3a3a;
+  --server-label-halo: #fff;
+  /* 落ち着いたアイコン（UiIcon）の線画のうち、意味を色で示すものの色。 */
+  --line-icon-repost: #2f9e57;
+  --line-icon-heart: #e0445a;
+  /* 低コントラストモードで絵文字（本文・リアクション・投稿エディタ・ピッカー・通知の
+   * `img[data-emoji]`）に掛けるフィルタ。通常は掛けない。 */
+  --emoji-filter: none;
   color-scheme: light;
 }
 
@@ -59,7 +71,85 @@
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #2c2e33;
   --notif-fresh-bg: #4a3f12;
+  --line-icon-repost: #4cc276;
+  --line-icon-heart: #f06478;
   color-scheme: dark;
+}
+
+/* 低コントラストモード（stores/lowContrastStore.ts の <html data-contrast="low">）。刺激を減らす:
+ * 背景は真っ白・真っ黒を避けて少し温かみのある中間寄りの色にし、文字は背景との差を縮め、
+ * アクセント・危険色等は彩度を落とす。ライト/ダークそれぞれの既定パレットを上書きする
+ * （`data-theme` も条件に入れないと、詳細度が同じダークの既定値を後勝ちで潰してしまう）。 */
+:root[data-theme="light"][data-contrast="low"] {
+  --bg: #eceae4;
+  --bg-elev: #e4e2db;
+  --bg-elev-2: #dad7cf;
+  --border: #d0ccc3;
+  --border-strong: #b9b4aa;
+  --text: #50545c;
+  --text-dim: #767a83;
+  --text-faint: #9ea2a9;
+  --accent: #52709f;
+  --accent-strong: #5873a0;
+  --accent-hover: #47618b;
+  /* 選択中のトグル等の背景。背景より暗くするとグレーアウトに見えるので、背景より少し明るく
+   * して色相だけを付ける（サイトカラーがあるときは SiteMetaContext の applyColor が同じ考え方で上書きする）。 */
+  --accent-deep: #e5e9ef;
+  --accent-deep-hover: #dbe1ea;
+  --danger: #b45f58;
+  --warn: #93693a;
+  --bsky: #6a8cbd;
+  --fedi: #7773b0;
+  --shadow-card: 0 1px 2px rgba(60, 50, 30, 0.05), 0 3px 10px rgba(60, 50, 30, 0.09);
+  --shadow-card-hover: 0 2px 4px rgba(60, 50, 30, 0.06), 0 6px 16px rgba(60, 50, 30, 0.08);
+  --card-bg: #f1efea;
+  --card-bg-hover: var(--bg-elev);
+  --card-bg-opaque: var(--card-bg);
+  --card-bg-admin-override: #dbd9d4;
+  --notif-fresh-bg: #ebe0bf;
+  --server-badge-mix: 45%;
+  --server-label-color: #53565d;
+  --server-label-halo: #eeece7;
+  --line-icon-repost: #5d9670;
+  --line-icon-heart: #bf6672;
+  --emoji-filter: saturate(0.5) brightness(0.97);
+}
+
+:root[data-theme="dark"][data-contrast="low"] {
+  --bg: #1d2025;
+  --bg-elev: #24282e;
+  --bg-elev-2: #2c3037;
+  --border: #353a41;
+  --border-strong: #464c54;
+  --text: #b4b8bf;
+  --text-dim: #8f949c;
+  --text-faint: #747982;
+  --accent: #8aa2c4;
+  --accent-strong: #4e6589;
+  --accent-hover: #5b7398;
+  --accent-deep: #262d38;
+  --accent-deep-hover: #2d3644;
+  --danger: #bd6a63;
+  --warn: #c4a564;
+  --bsky: #8aa2c4;
+  --fedi: #9996c6;
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.2), 0 3px 12px rgba(0, 0, 0, 0.22);
+  --shadow-card-hover: 0 2px 4px rgba(0, 0, 0, 0.24), 0 6px 18px rgba(0, 0, 0, 0.26);
+  --card-bg: var(--bg-elev);
+  --card-bg-hover: var(--bg-elev-2);
+  --card-bg-opaque: var(--card-bg);
+  --card-bg-admin-override: #2e2f32;
+  --notif-fresh-bg: #3a3525;
+  --server-badge-mix: 45%;
+  --server-label-color: #c8cbd0;
+  --server-label-halo: #1d2025;
+  --line-icon-repost: #78a886;
+  --line-icon-heart: #c97b86;
+  --emoji-filter: saturate(0.5) brightness(0.88);
+}
+
+img[data-emoji] {
+  filter: var(--emoji-filter);
 }
 
 *, *::before, *::after {

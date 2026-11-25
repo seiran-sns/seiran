@@ -8,14 +8,14 @@ import { useHiddenGuides } from "../../hooks/useHiddenGuides";
 import { useToast } from "../../contexts/ToastContext";
 import { useFitCount } from "../../hooks/useFitCount";
 import { useQuickReactions } from "../../hooks/useQuickReactions";
-import { QUICK_REACTION_HEART } from "../../lib/quickReactions";
+import { isSameReaction, QUICK_REACTION_HEART } from "../../lib/quickReactions";
 import ActionsMenu, { ActionsMenuItem } from "../common/ActionsMenu";
 import Modal from "../common/Modal";
 import ReactionChips from "./ReactionChips";
 import { QuickHeartButton, QuickReactionPopup } from "./QuickReactionButtons";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
-import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import styles from "./NoteCard.module.css";
 
 /** 「削除して編集再投稿」メニュー項目まわりの入力（自分の通常ポストのときだけ渡す）。 */
@@ -129,7 +129,13 @@ export default function NoteCardActions({
   const { user } = useAuth();
   const quickReactions = useQuickReactions();
   // 設定画面「表示」で消せる。この項目を返さない版のサーバーでは従来どおり出す。
-  const showQuickReactions = user?.show_quick_reactions ?? true;
+  // 絵文字リアクションを使わない設定（設定画面「表示」）では、付いたリアクション・リアクション
+  // ピッカー・ワンタッチリアクションバーを出さず、❤️だけで反応する。リアクション数は❤️に出す。
+  const useEmojiReactions = user?.use_emoji_reactions ?? true;
+  const showQuickReactions = useEmojiReactions && (user?.show_quick_reactions ?? true);
+  const heartActive =
+    myReaction !== undefined &&
+    (!useEmojiReactions || isSameReaction(QUICK_REACTION_HEART, myReaction.emoji));
   const actionsRef = useRef<HTMLDivElement>(null);
   // ❤️ボタンは幅が足りなければ隠し、ケバブメニューのボタンを行からはみ出させない
   // （メニューにしか無い操作があるため）。
@@ -189,12 +195,21 @@ export default function NoteCardActions({
       onClick: () => onRepost(),
       disabled: repostDisabled,
     },
-    {
-      key: "reaction",
-      label: `🙂 ${t("home:reactionPicker.addReactionButton")}`,
-      onClick: () => setReactionPickerOpen(true),
-      disabled: reactionDisabled,
-    },
+    // ❤️ボタンは幅が足りないと隠れるので、メニューからも反応できるようにする。
+    useEmojiReactions
+      ? {
+          key: "reaction",
+          label: `🙂 ${t("home:reactionPicker.addReactionButton")}`,
+          onClick: () => setReactionPickerOpen(true),
+          disabled: reactionDisabled,
+        }
+      : {
+          key: "reaction",
+          label: `${QUICK_REACTION_HEART} ${t(heartActive ? "home:noteCard.unlikeButton" : "home:noteCard.likeButton")}`,
+          onClick: () =>
+            onToggleReaction(heartActive && myReaction ? myReaction.emoji : QUICK_REACTION_HEART),
+          disabled: reactionDisabled,
+        },
   ];
   if (isSelf) {
     menuItems.push({
@@ -233,14 +248,16 @@ export default function NoteCardActions({
 
   return (
     <>
-      <ReactionChips
-        noteId={noteId}
-        viaRepostId={viaRepostId}
-        reactions={reactions}
-        onToggle={onToggleReaction}
-        disabled={reactionDisabled}
-        indent={indent}
-      />
+      {useEmojiReactions && (
+        <ReactionChips
+          noteId={noteId}
+          viaRepostId={viaRepostId}
+          reactions={reactions}
+          onToggle={onToggleReaction}
+          disabled={reactionDisabled}
+          indent={indent}
+        />
+      )}
 
       <div className={styles.actionsArea}>
         <div className={styles.actions} ref={actionsRef}>
@@ -254,7 +271,7 @@ export default function NoteCardActions({
                 : t("home:noteCard.replyButton")
             }
           >
-            <TwemojiEmoji emoji="💬" />{" "}
+            <UiIcon emoji="💬" />{" "}
             {replyCount > 0 && (
               <span className={styles.actionCount}>{formatCount(replyCount)}</span>
             )}
@@ -290,23 +307,27 @@ export default function NoteCardActions({
                     : t("home:noteCard.repostTitle")
             }
           >
-            <TwemojiEmoji emoji="🔁" />{" "}
+            <UiIcon emoji="🔁" />{" "}
             {repostCount > 0 && (
               <span className={styles.actionCount}>{formatCount(repostCount)}</span>
             )}
           </button>
-          <ReactionPicker
-            onPick={onToggleReaction}
-            disabled={reactionDisabled}
-            open={reactionPickerOpen}
-            onOpenChange={setReactionPickerOpen}
-            count={totalReactionCount}
-            active={myReaction !== undefined}
-          />
+          {useEmojiReactions && (
+            <ReactionPicker
+              onPick={onToggleReaction}
+              disabled={reactionDisabled}
+              open={reactionPickerOpen}
+              onOpenChange={setReactionPickerOpen}
+              count={totalReactionCount}
+              active={myReaction !== undefined}
+            />
+          )}
           <QuickHeartButton
             myReactionEmoji={myReaction?.emoji}
             disabled={reactionDisabled}
             hidden={!heartVisible}
+            heartOnly={!useEmojiReactions}
+            count={totalReactionCount}
             onToggleReaction={onToggleReaction}
           />
           <ActionsMenu

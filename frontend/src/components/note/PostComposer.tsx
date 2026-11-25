@@ -49,7 +49,9 @@ import i18n, {
 import styles from "./PostComposer.module.css";
 import ComposerEditor, { ComposerEditorHandle } from "./ComposerEditor";
 import Modal from "../common/Modal";
+import { useCalmIcons } from "../../stores/calmIconsStore";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
 import DisplayName from "../common/DisplayName";
@@ -240,6 +242,7 @@ export default function PostComposer({
   initialText,
 }: PostComposerProps) {
   const { t } = useTranslation();
+  const calmIcons = useCalmIcons();
   const { user } = useAuth();
   const bskyDeliveryDeferred = useBskyDeliveryDeferred();
   const publicAllowed = canPostPublic(user?.role);
@@ -970,7 +973,7 @@ export default function PostComposer({
       {replyTo?.visibility === "followers_only" && (
         <div className={styles.visibilityRow}>
           <span className={styles.replyScopeNote}>
-            <TwemojiEmoji emoji="🔒️" /> {t("home:postComposer.forcedPrivateNote")}
+            <UiIcon emoji="🔒️" /> {t("home:postComposer.forcedPrivateNote")}
           </span>
         </div>
       )}
@@ -1024,7 +1027,7 @@ export default function PostComposer({
             title={t("home:postComposer.deliverFediHint")}
             aria-label={t("home:postComposer.deliverFediHint")}
           >
-            <img className={styles.fediverseIcon} src={fediverseLogo} alt="" />
+            <img className={`${styles.fediverseIcon} ${calmIcons ? styles.calmLogoFedi : ""}`} src={fediverseLogo} alt="" />
           </button>
         )}
         {bskyReplyAllowed && (
@@ -1041,10 +1044,10 @@ export default function PostComposer({
             ].join("\n")}
             aria-label={t("home:postComposer.deliverBskyHint")}
           >
-            <img className={styles.blueskyIcon} src={blueskyLogo} alt="" />
+            <img className={`${styles.blueskyIcon} ${calmIcons ? styles.calmLogoBsky : ""}`} src={blueskyLogo} alt="" />
             {(hasBskyIncompatibleEmoji || bskyDeliveryDeferred) && (
               <span className={styles.bskyEmojiWarnBadge} aria-hidden="true">
-                <TwemojiEmoji emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} />
+                <TwemojiEmoji emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} keepColor />
               </span>
             )}
           </button>
@@ -1087,7 +1090,7 @@ export default function PostComposer({
           title={t("home:postComposer.poll.toggleTitle")}
           aria-label={t("home:postComposer.poll.toggleTitle")}
         >
-          <TwemojiEmoji emoji="📊" />
+          <UiIcon emoji="📊" />
         </button>
         <button
           ref={cwBtnRef}
@@ -1105,7 +1108,7 @@ export default function PostComposer({
           title={t("home:postComposer.cw.toggleTitle")}
           aria-label={t("home:postComposer.cw.toggleTitle")}
         >
-          <TwemojiEmoji emoji="⚠️" />
+          <UiIcon emoji="⚠️" />
         </button>
         <button
           ref={emojiBtnRef}
@@ -1116,7 +1119,7 @@ export default function PostComposer({
           title={t("home:postComposer.insertEmoji.buttonTitle")}
           aria-label={t("home:postComposer.insertEmoji.buttonTitle")}
         >
-          <TwemojiEmoji emoji="😀" />
+          <UiIcon emoji="😀" />
         </button>
         <button
           ref={userIdBtnRef}
@@ -1329,7 +1332,7 @@ export default function PostComposer({
                     aria-pressed={!!attached.isSensitive}
                     title={t("home:postComposer.nsfwTooltip")}
                   >
-                    <TwemojiEmoji emoji="🙈" />
+                    <UiIcon emoji="🙈" />
                     NSFW
                   </button>
                 )}
@@ -1418,7 +1421,7 @@ export default function PostComposer({
                   onKeyDown={(e) => handlePostBtnKeyDown(e, "public")}
                 >
                   <span aria-hidden="true">
-                    <TwemojiEmoji emoji="🌐" />
+                    <UiIcon emoji="🌐" />
                   </span>
                   {t("home:postComposer.postButtonPublic")}
                 </button>
@@ -1435,7 +1438,7 @@ export default function PostComposer({
                   onKeyDown={(e) => handlePostBtnKeyDown(e, "unlisted")}
                 >
                   <span aria-hidden="true">
-                    <TwemojiEmoji emoji="🌙" />
+                    <UiIcon emoji="🌙" />
                   </span>
                   {t("home:postComposer.postButtonUnlisted")}
                 </button>
@@ -1452,7 +1455,7 @@ export default function PostComposer({
                   onKeyDown={(e) => handlePostBtnKeyDown(e, "followers_only")}
                 >
                   <span aria-hidden="true">
-                    <TwemojiEmoji emoji="🔒️" />
+                    <UiIcon emoji="🔒️" />
                   </span>
                   {t("home:postComposer.postButtonPrivate")}
                 </button>
@@ -1487,7 +1490,7 @@ export default function PostComposer({
                 onKeyDown={(e) => handlePostBtnKeyDown(e, "public")}
               >
                 <span aria-hidden="true">
-                  <TwemojiEmoji emoji="🌐" />
+                  <UiIcon emoji="🌐" />
                 </span>
                 {t("home:postComposer.postButtonPublic")}
               </button>
@@ -1502,7 +1505,7 @@ export default function PostComposer({
                 onKeyDown={(e) => handlePostBtnKeyDown(e, "unlisted")}
               >
                 <span aria-hidden="true">
-                  <TwemojiEmoji emoji="🌙" />
+                  <UiIcon emoji="🌙" />
                 </span>
                 {t("home:postComposer.postButtonUnlisted")}
               </button>
@@ -1523,7 +1526,7 @@ export default function PostComposer({
                   onKeyDown={(e) => handlePostBtnKeyDown(e, "followers_only")}
                 >
                   <span aria-hidden="true">
-                    <TwemojiEmoji emoji="🔒️" />
+                    <UiIcon emoji="🔒️" />
                   </span>
                   {t("home:postComposer.postButtonPrivate")}
                 </button>

@@ -6,6 +6,8 @@ interface TwemojiEmojiProps {
   /** 単一のUnicode絵文字文字列（サロゲートペア込み）。 */
   emoji: string;
   className?: string;
+  /** 低コントラストモードでも色を落とさない（`TwemojiImg` の `keepColor`）。 */
+  keepColor?: boolean;
 }
 
 /**
@@ -14,13 +16,14 @@ interface TwemojiEmojiProps {
  * Unicode絵文字として認識できない文字列（カスタム絵文字ショートコード等）はそのままテキスト表示する。
  * SVG読み込み失敗時はネイティブ絵文字へフォールバックする（`TwemojiImg`参照）。
  */
-export default function TwemojiEmoji({ emoji, className }: TwemojiEmojiProps) {
+export default function TwemojiEmoji({ emoji, className, keepColor }: TwemojiEmojiProps) {
   const url = singleEmojiToTwemojiUrl(emoji);
   if (!url) return <>{emoji}</>;
   return (
     <TwemojiImg
       emoji={emoji}
       url={url}
+      keepColor={keepColor}
       className={className ? `${styles.emoji} ${className}` : styles.emoji}
     />
   );
