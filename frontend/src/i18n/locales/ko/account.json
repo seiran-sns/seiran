@@ -37,9 +37,7 @@
     "quickReactionsLabel": "자주 쓰는 이모지의 원터치 리액션 바 표시",
     "deviceGroupTitle": "이 기기 전용 설정",
     "lowContrastTitle": "낮은 대비",
-    "lowContrastLabel": "화면 색상의 자극을 줄이기",
-    "calmIconsTitle": "차분한 아이콘",
-    "calmIconsLabel": "메뉴와 버튼 아이콘을 흑백 선화로 표시",
+    "lowContrastLabel": "자극이 적은 색상과 아이콘 디자인 사용",
     "dataSaverTitle": "데이터 절약 모드",
     "dataSaverLabel": "게시물의 이미지·동영상을 탭하기 전까지 불러오지 않음"
   },

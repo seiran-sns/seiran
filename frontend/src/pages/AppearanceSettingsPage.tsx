@@ -9,7 +9,6 @@ import i18n, {
   isDisplayLanguage,
   type DisplayLanguage,
 } from "../i18n";
-import { setCalmIcons, useCalmIcons } from "../stores/calmIconsStore";
 import { setDataSaver, useDataSaver } from "../stores/dataSaverStore";
 import { setLowContrast, useLowContrast } from "../stores/lowContrastStore";
 import styles from "./AppearanceSettings.module.css";
@@ -50,7 +49,7 @@ function detectAutoLanguage(): string {
 }
 
 /** 設定画面「表示」（#55, #127）。アカウントに保存する言語・絵文字リアクション・ワンタッチリアクションバーの表示と、
- * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・低コントラスト・落ち着いたアイコン・ギガ節約モードを選択する。 */
+ * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・低コントラスト・ギガ節約モードを選択する。 */
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
@@ -58,7 +57,6 @@ export default function AppearanceSettingsPage() {
     useTheme();
   const dataSaver = useDataSaver();
   const lowContrast = useLowContrast();
-  const calmIcons = useCalmIcons();
 
   const [selected, setSelected] = useState<LanguageOption>(
     isDisplayLanguage(user?.language_preference ?? "")
@@ -227,22 +225,6 @@ export default function AppearanceSettingsPage() {
             onChange={(e) => setLowContrast(e.target.checked)}
           />
           {t("account:appearanceSettings.lowContrastLabel")}
-        </label>
-      </div>
-
-      <div className={styles.section}>
-        <h3 className={styles.sectionTitle}>
-          {t("account:appearanceSettings.calmIconsTitle")}
-        </h3>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            role="switch"
-            className={styles.switch}
-            checked={calmIcons}
-            onChange={(e) => setCalmIcons(e.target.checked)}
-          />
-          {t("account:appearanceSettings.calmIconsLabel")}
         </label>
       </div>
 

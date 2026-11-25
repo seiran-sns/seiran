@@ -1,5 +1,5 @@
 import { ReactNode } from "react";
-import { useCalmIcons } from "../../stores/calmIconsStore";
+import { useLowContrast } from "../../stores/lowContrastStore";
 import TwemojiEmoji from "./TwemojiEmoji";
 import styles from "./UiIcon.module.css";
 
@@ -221,11 +221,12 @@ interface UiIconProps {
 
 /**
  * メニュー・設定メニュー・投稿カード/投稿フォームのボタンバーに置く、操作を表すアイコン。通常は
- * Twemoji、「落ち着いたアイコン」（`stores/calmIconsStore.ts`）がオンの端末ではモノクロの線画で描く。
+ * Twemoji、低コントラストモード（`stores/lowContrastStore.ts`）がオンの端末ではモノクロの線画で描く
+ * （カラフルなアイコンも刺激になるので、色づかいと一緒に落ち着かせる）。
  * 投稿本文やリアクションの絵文字（利用者が選んだ内容そのもの）には使わない。
  */
 export default function UiIcon({ emoji, className }: UiIconProps) {
-  const calm = useCalmIcons();
+  const calm = useLowContrast();
   const key = lineIconKey(emoji);
   const shape = calm ? LINE_ICONS[key] : undefined;
   if (!shape) return <TwemojiEmoji emoji={emoji} className={className} />;

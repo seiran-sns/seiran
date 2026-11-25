@@ -37,9 +37,7 @@
     "quickReactionsLabel": "Schnellreaktionsleiste mit häufig verwendeten Emojis anzeigen",
     "deviceGroupTitle": "Einstellungen nur für dieses Gerät",
     "lowContrastTitle": "Geringer Kontrast",
-    "lowContrastLabel": "Bildschirmfarben abmildern",
-    "calmIconsTitle": "Ruhige Symbole",
-    "calmIconsLabel": "Menü- und Schaltflächensymbole als einfarbige Strichzeichnungen anzeigen",
+    "lowContrastLabel": "Reizarme Farben und Symbolgestaltung verwenden",
     "dataSaverTitle": "Datensparmodus",
     "dataSaverLabel": "Bilder und Videos in Beiträgen erst beim Antippen laden"
   },

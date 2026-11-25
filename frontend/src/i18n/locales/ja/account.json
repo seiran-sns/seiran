@@ -37,9 +37,7 @@
     "quickReactionsLabel": "よく使う絵文字のワンタッチリアクションバーを表示する",
     "deviceGroupTitle": "この端末だけの設定",
     "lowContrastTitle": "低コントラスト",
-    "lowContrastLabel": "画面の色の刺激を抑える",
-    "calmIconsTitle": "落ち着いたアイコン",
-    "calmIconsLabel": "メニューやボタンのアイコンをモノクロの線画にする",
+    "lowContrastLabel": "刺激の少ない色づかいとアイコンデザイン",
     "dataSaverTitle": "ギガ節約モード",
     "dataSaverLabel": "投稿の画像・動画をタップするまで読み込まない"
   },
