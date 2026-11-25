@@ -2,7 +2,7 @@ name: Dependency audit
 
 # 依存の勧告はコードを変えなくても後から出るので、push 時の CI とは別に8時間ごとに検査する。
 # 修正版のある勧告は Dependabot のセキュリティ更新が PR にし、dependabot-auto-merge.yml・
-# security-release.yml がリリースまで進める。ここでは、自動では直せなかったもの（修正版が
+# bump.yml がリリースまで進める。ここでは、自動では直せなかったもの（修正版が
 # 無い、最小限の更新では届かない、人の判断待ちの PR、Dependabot が扱えない勧告）を集めて
 # seiran の DM で知らせる（.github/scripts/audit-notify.sh）。そうしたものが残っている間、
 # このワークフローは失敗になる（通知の成否と分けるため、最後の Check findings ステップで失敗させる）。

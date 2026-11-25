@@ -1,6 +1,6 @@
 #!/bin/bash
 # セキュリティ修正（Dependabot のマージコミット）を出すために、main のリビジョン桁を上げて
-# push する（.github/workflows/security-release.yml）。次の場合は何もしない:
+# push する（.github/workflows/bump.yml）。次の場合は何もしない:
 #
 #   - 修正がイメージの中身を変えない（Cargo.lock と、フロントの本番依存が変わっていない。
 #     開発用依存・E2E の依存だけの修正）

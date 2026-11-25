@@ -1,6 +1,6 @@
 #!/bin/bash
-# 人の確認を経た版上げ（.github/workflows/security-release.yml。Environment
-# security-release-review の承認後に動く）。main のリビジョン桁を上げて push し、その push の
+# 人の確認を経た版上げ（.github/workflows/bump.yml。Environment
+# bump-review の承認後に動く）。main のリビジョン桁を上げて push し、その push の
 # CI が公開イメージを出す。次の場合は何もしない:
 #
 #   - main の今の版がまだリリースされていない（タグ v<版> が無い）。その版の CI が出す

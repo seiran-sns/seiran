@@ -74,7 +74,7 @@ frontend/backendで単一のシステムバージョン（`Cargo.toml`の`[works
     再起動自体はマイケルへの確認不要）、およびフロントエンドを `cd frontend && npm run build`
     で明示的にビルドし直す（`npm run build:watch` はファイル変更検知を静かに見失うことがあるため
     バージョンbump時のような単発の変更では自動反映を信用せず明示的にビルドする）の両方を指す。
-  - (1)(2) は GitHub 上でもできる: main の CI が通ると、Security release ワークフローの
+  - (1)(2) は GitHub 上でもできる: main の CI が通ると、Bump ワークフローの
     「Bump revision」ジョブが承認待ちになり、マイケルが承認すると版を上げて main へ push する
     （`docs/architecture.md` 3.1節「版上げの承認」）。この場合も (3) は自動では行われないので、
     `git pull` してデプロイし直す。
