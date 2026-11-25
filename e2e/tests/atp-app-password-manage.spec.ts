@@ -3,7 +3,12 @@
 // 更新できなくなることを確かめる。
 
 import { test, expect, type APIRequestContext } from "@playwright/test";
-import { getOwnDid, registerUserViaApi, seedAuth } from "../fixtures/api-helpers";
+import {
+  getOwnDid,
+  registerUserViaApi,
+  registerUserWithPasswordViaApi,
+  seedAuth,
+} from "../fixtures/api-helpers";
 import { BACKEND_URL } from "../ports.ts";
 
 async function createSession(request: APIRequestContext, identifier: string, password: string) {
@@ -59,11 +64,14 @@ test("設定画面でアプリパスワードを発行してログインでき�
 test("アプリパスワードはメインパスワードの ATP セッションで管理でき、アプリパスワードのセッションでは管理できない", async ({
   request,
 }) => {
-  const user = await registerUserViaApi(request, "e2eapppwxrpc");
+  // 全テスト共通のパスワードで createSession すると、「同じパスワードを別々のユーザーで試した
+  // 数」のログイン総当たり対策に他のテストと合算で引っかかるので、このテストだけのパスワードにする。
+  const mainPassword = `e2eapppw-${Date.now()}`;
+  const user = await registerUserWithPasswordViaApi(request, "e2eapppwxrpc", mainPassword);
   const did = await getOwnDid(request, user.token, user.username);
 
   // bsky.app の設定画面と同じく、メインパスワードの ATP セッションで発行する。
-  const main = await createSession(request, did, "seiranda-e2e");
+  const main = await createSession(request, did, mainPassword);
   const createRes = await request.post(`${BACKEND_URL}/xrpc/com.atproto.server.createAppPassword`, {
     headers: bearer(main.accessJwt),
     data: { name: "client-a" },
