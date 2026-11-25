@@ -7,7 +7,7 @@ import { useAuth } from "../../contexts/AuthContext";
 import { useStreamingContext } from "../../contexts/StreamingContext";
 import { refreshComposerDraft } from "../../lib/composerDraft";
 import Modal from "../common/Modal";
-import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import PostComposer from "../note/PostComposer";
 import OpenTargetDialog from "../open/OpenTargetDialog";
 import LeftNav from "./LeftNav";
@@ -94,7 +94,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
           aria-label={t("nav:leftNav.openMenu")}
           title={t("nav:leftNav.openMenu")}
         >
-          <TwemojiEmoji emoji="☰" className={styles.floatingMenuIcon} />
+          <UiIcon emoji="☰" className={styles.floatingMenuIcon} />
           {menuBadgeCount > 0 && (
             <span className={styles.floatingMenuBadge}>
               {menuBadgeCount > 99 ? "99+" : menuBadgeCount}
@@ -117,7 +117,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               aria-label={t("nav:leftNav.home")}
               title={t("nav:leftNav.home")}
             >
-              <TwemojiEmoji emoji="🏠" className={styles.floatingHomeIcon} />
+              <UiIcon emoji="🏠" className={styles.floatingHomeIcon} />
             </Link>
 
             {/* #75 */}
@@ -128,7 +128,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               aria-label={t("nav:leftNav.notifications")}
               title={t("nav:leftNav.notifications")}
             >
-              <TwemojiEmoji emoji="🔔" className={styles.floatingNotifIcon} />
+              <UiIcon emoji="🔔" className={styles.floatingNotifIcon} />
               {unread > 0 && (
                 <span className={styles.floatingMenuBadge}>{unread > 99 ? "99+" : unread}</span>
               )}
@@ -141,7 +141,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               aria-label={t("nav:leftNav.search")}
               title={t("nav:leftNav.search")}
             >
-              <TwemojiEmoji emoji="🔍" className={styles.floatingSearchIcon} />
+              <UiIcon emoji="🔍" className={styles.floatingSearchIcon} />
             </Link>
 
             <button
@@ -150,7 +150,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
               aria-label={t("nav:appShell.composeModalTitle")}
               title={t("nav:appShell.composeModalTitle")}
             >
-              <TwemojiEmoji emoji="✏️" className={styles.floatingComposeIcon} />
+              <UiIcon emoji="✏️" className={styles.floatingComposeIcon} />
             </button>
           </>
         )}

@@ -121,7 +121,7 @@ export default function RichText({ text, emojis }: RichTextProps) {
       if (match.index > lastIndex) parts.push(text.slice(lastIndex, match.index));
       parts.push(
         <EmojiContextMenu key={key++} shortcode={shortcode.slice(1, -1)} imageUrl={url}>
-          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
+          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" data-emoji="" />
         </EmojiContextMenu>
       );
     }

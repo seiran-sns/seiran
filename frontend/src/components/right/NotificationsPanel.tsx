@@ -27,6 +27,7 @@ import NotificationFilterBar, {
 } from "./NotificationFilterBar";
 import styles from "./NotificationsPanel.module.css";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import CardStack from "../common/CardStack";
 import { groupNotifications } from "../../lib/notificationGroups";
 
@@ -436,7 +437,7 @@ export default function NotificationsPanel({
       <>
         {filterBar}
         <div className={panel.placeholder}>
-          <TwemojiEmoji emoji="🔔" className={panel.placeholderIcon} />
+          <UiIcon emoji="🔔" className={panel.placeholderIcon} />
           {filterActive ? (
             t("notifications:notificationsPanel.noMatchingNotifications")
           ) : (
@@ -491,9 +492,13 @@ export default function NotificationsPanel({
     const content = (
       <>
         {iconUrl ? (
-          <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" />
+          <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" data-emoji="" />
         ) : (
-          <TwemojiEmoji emoji={icon} className={styles.icon} />
+          n.type === "reaction" ? (
+            <TwemojiEmoji emoji={icon} className={styles.icon} />
+          ) : (
+            <UiIcon emoji={icon} className={styles.icon} />
+          )
         )}
         {n.user?.username ? (
           <UserHoverArea

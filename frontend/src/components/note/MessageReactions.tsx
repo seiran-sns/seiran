@@ -13,7 +13,7 @@ export default function MessageReactions({ reactions }: { reactions?: ReactionSu
         Array.from({ length: r.count }, (_, i) => (
           <span className={styles.icon} key={`${r.emoji}-${i}`}>
             {r.emojiUrl ? (
-              <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
+              <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" data-emoji="" />
             ) : (
               <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
             )}

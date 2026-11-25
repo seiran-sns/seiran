@@ -8,6 +8,8 @@ interface TwemojiImgProps {
   /** 呼び出し側が組み立て済みの最終クラス名をそのまま渡すこと（このコンポーネント自身は
    * 既定クラスを補わない。呼び出し元ごとにサイズ指定クラスの組み立て方が異なるため）。 */
   className?: string;
+  /** 低コントラストモードでも色を落とさない（警告バッジ等、色そのものが意味を持つもの）。 */
+  keepColor?: boolean;
 }
 
 /**
@@ -16,7 +18,7 @@ interface TwemojiImgProps {
  * カバレッジのズレにより発生し得る）OSネイティブの絵文字グリフへフォールバックする。
  * `TwemojiEmoji`・`renderTextWithTwemoji`（`lib/twemoji.tsx`）の両方から共用する。
  */
-export default function TwemojiImg({ emoji, url, className }: TwemojiImgProps) {
+export default function TwemojiImg({ emoji, url, className, keepColor = false }: TwemojiImgProps) {
   const [failed, setFailed] = useState(false);
 
   if (failed) return <>{emoji}</>;
@@ -27,6 +29,7 @@ export default function TwemojiImg({ emoji, url, className }: TwemojiImgProps) {
       src={url}
       alt={emoji}
       draggable={false}
+      data-emoji={keepColor ? undefined : ""}
       loading="lazy"
       onError={() => setFailed(true)}
     />

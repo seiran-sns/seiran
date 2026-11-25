@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import {
   Link,
   useParams,
@@ -424,7 +424,7 @@ export default function ProfilePage() {
           {remoteInfo && (
             <span
               className={styles.remoteServerBadge}
-              style={{ background: remoteInfo.bg }}
+              style={{ "--server-color": remoteInfo.bg } as CSSProperties}
               title={remoteInfo.label}
             >
               {remoteInfo.useBlueskyLogo ? (

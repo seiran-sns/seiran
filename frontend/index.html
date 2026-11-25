@@ -8,7 +8,7 @@
     <!-- PWA Web App Manifest。backend がサイト設定から動的生成する。 -->
     <link rel="manifest" href="/manifest.webmanifest" />
     <title>seiran</title>
-    <!-- ダークモード（#127）。React マウント前に data-theme を確定させ、初期表示のちらつきを防ぐ。 -->
+    <!-- ダークモード（#127）・低コントラスト。React マウント前に data-theme / data-contrast を確定させ、初期表示のちらつきを防ぐ。 -->
     <script>
       (function () {
         try {
@@ -20,6 +20,10 @@
                 ? "dark"
                 : "light";
           document.documentElement.setAttribute("data-theme", theme);
+          // 低コントラストモード（stores/lowContrastStore.ts）も同じ理由でマウント前に付ける。
+          if (localStorage.getItem("seiran_low_contrast") === "1") {
+            document.documentElement.setAttribute("data-contrast", "low");
+          }
         } catch (e) {}
       })();
     </script>

@@ -231,6 +231,9 @@
   border-radius: 999px;
   padding: 1px 8px 1px 6px;
   line-height: 1.5;
+  /* 背景はリモートが宣言した themeColor（`--server-color`）。低コントラストモードでは
+   * 輝度と彩度が際立ちすぎないよう、ページの背景色へ寄せて混ぜる（混ぜる割合は index.css）。 */
+  background: color-mix(in oklab, var(--server-color) var(--server-badge-mix), var(--bg-elev-2));
 }
 
 .remoteServerIcon {
@@ -253,19 +256,19 @@
   /* 背景はリモートが宣言した任意のthemeColor（暗色もありうる）なので、サイトの
    * ダーク/ライトテーマに関わらず常に濃色固定にし（テーマ変数は不使用）、
    * さらに白いドロップシャドウで縁取ることで暗い背景色でも文字が沈まないようにする。 */
-  color: #3a3a3a;
+  color: var(--server-label-color);
   /* ぼかしのハローではなく縁取りにする。斜め4方向だけ・blur無しだと上下左右に
    * 隙間ができて輪郭がカクつくため、上下左右4方向も足し、1pxだけblurして
    * 継ぎ目を滑らかにする。 */
   text-shadow:
-    -1px -1px 1px #fff,
-    1px -1px 1px #fff,
-    -1px 1px 1px #fff,
-    1px 1px 1px #fff,
-    0 -1px 1px #fff,
-    0 1px 1px #fff,
-    -1px 0 1px #fff,
-    1px 0 1px #fff;
+    -1px -1px 1px var(--server-label-halo),
+    1px -1px 1px var(--server-label-halo),
+    -1px 1px 1px var(--server-label-halo),
+    1px 1px 1px var(--server-label-halo),
+    0 -1px 1px var(--server-label-halo),
+    0 1px 1px var(--server-label-halo),
+    -1px 0 1px var(--server-label-halo),
+    1px 0 1px var(--server-label-halo);
 }
 
 .time {

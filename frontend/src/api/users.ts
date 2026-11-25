@@ -234,6 +234,10 @@ export const account = {
   updateQuickReactions(show: boolean) {
     return request<void>("POST", "/account/quick-reactions", { show });
   },
+  /** 設定画面「表示」から絵文字リアクションを使うかを切り替える。 */
+  updateEmojiReactions(enabled: boolean) {
+    return request<void>("POST", "/account/emoji-reactions", { enabled });
+  },
   /** 設定画面「プライバシー」の現在値を取得する。Bsky Discoverフィード等からの除外要求。 */
   getContentVisibility() {
     return request<{ hide_from_algorithmic_recommendations: boolean }>(

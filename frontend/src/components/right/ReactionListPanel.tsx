@@ -68,10 +68,10 @@ export default function ReactionListPanel({ note, viaRepost }: ReactionListPanel
             <div className={styles.groupHeader}>
               {r.emojiUrl && shortcode ? (
                 <EmojiContextMenu shortcode={shortcode} imageUrl={r.emojiUrl}>
-                  <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
+                  <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" data-emoji="" />
                 </EmojiContextMenu>
               ) : r.emojiUrl ? (
-                <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" />
+                <RemoteImg className={styles.emojiImg} src={r.emojiUrl} alt={r.emoji} loading="lazy" data-emoji="" />
               ) : (
                 <TwemojiEmoji emoji={r.emoji} className={styles.emojiImg} />
               )}

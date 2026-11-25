@@ -1,0 +1,7 @@
+/* Twemoji（TwemojiEmoji.module.css の .emoji）と同じ大きさ・位置にそろえ、切り替えても行の高さを変えない。 */
+.icon {
+  height: 1.2em;
+  width: 1.2em;
+  vertical-align: -0.2em;
+  flex-shrink: 0;
+}

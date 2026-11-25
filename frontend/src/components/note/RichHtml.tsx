@@ -160,7 +160,7 @@ function renderTextNode(
       flushPlainText(match.index);
       parts.push(
         <EmojiContextMenu key={`${keyPrefix}-e${key++}`} shortcode={shortcode.slice(1, -1)} imageUrl={url}>
-          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" />
+          <RemoteImg className={styles.emojiImg} src={url} alt={shortcode} title={shortcode} loading="lazy" data-emoji="" />
         </EmojiContextMenu>
       );
       lastIndex = endIndex;

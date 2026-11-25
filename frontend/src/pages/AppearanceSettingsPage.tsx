@@ -9,7 +9,9 @@ import i18n, {
   isDisplayLanguage,
   type DisplayLanguage,
 } from "../i18n";
+import { setCalmIcons, useCalmIcons } from "../stores/calmIconsStore";
 import { setDataSaver, useDataSaver } from "../stores/dataSaverStore";
+import { setLowContrast, useLowContrast } from "../stores/lowContrastStore";
 import styles from "./AppearanceSettings.module.css";
 
 type LanguageOption = "auto" | DisplayLanguage;
@@ -47,14 +49,16 @@ function detectAutoLanguage(): string {
   return "en";
 }
 
-/** 設定画面「表示」（#55, #127）。アカウントに保存する言語・ワンタッチリアクションバーの表示と、
- * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・ギガ節約モードを選択する。 */
+/** 設定画面「表示」（#55, #127）。アカウントに保存する言語・絵文字リアクション・ワンタッチリアクションバーの表示と、
+ * 「この端末だけの設定」としてこの端末の `localStorage` に保存するテーマ・低コントラスト・落ち着いたアイコン・ギガ節約モードを選択する。 */
 export default function AppearanceSettingsPage() {
   const { t } = useTranslation();
   const { user, updateUser } = useAuth();
   const { preference: themePreference, setPreference: setThemePreference } =
     useTheme();
   const dataSaver = useDataSaver();
+  const lowContrast = useLowContrast();
+  const calmIcons = useCalmIcons();
 
   const [selected, setSelected] = useState<LanguageOption>(
     isDisplayLanguage(user?.language_preference ?? "")
@@ -68,6 +72,22 @@ export default function AppearanceSettingsPage() {
   const [quickReactionsError, setQuickReactionsError] = useState("");
   // この項目を返さない版のサーバーでは、従来どおり表示されている。
   const showQuickReactions = user?.show_quick_reactions ?? true;
+  const [emojiReactionsSaving, setEmojiReactionsSaving] = useState(false);
+  const [emojiReactionsError, setEmojiReactionsError] = useState("");
+  const useEmojiReactions = user?.use_emoji_reactions ?? true;
+
+  async function toggleEmojiReactions(enabled: boolean) {
+    setEmojiReactionsSaving(true);
+    setEmojiReactionsError("");
+    try {
+      await api.account.updateEmojiReactions(enabled);
+      updateUser({ use_emoji_reactions: enabled });
+    } catch (err) {
+      setEmojiReactionsError(getErrorMessage(err));
+    } finally {
+      setEmojiReactionsSaving(false);
+    }
+  }
 
   async function toggleQuickReactions(show: boolean) {
     setQuickReactionsSaving(true);
@@ -133,14 +153,38 @@ export default function AppearanceSettingsPage() {
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.emojiReactionsTitle")}
+        </h3>
+        {emojiReactionsError && <p className={styles.error}>{emojiReactionsError}</p>}
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            role="switch"
+            className={styles.switch}
+            checked={useEmojiReactions}
+            disabled={emojiReactionsSaving}
+            onChange={(e) => toggleEmojiReactions(e.target.checked)}
+          />
+          {t("account:appearanceSettings.emojiReactionsLabel")}
+        </label>
+      </div>
+
+      {/* 絵文字リアクションを使わない間はワンタッチリアクションバーも出ないので、選べないことを示す。 */}
+      <div
+        className={`${styles.section} ${useEmojiReactions ? "" : styles.sectionDisabled}`}
+        aria-disabled={!useEmojiReactions}
+      >
+        <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.quickReactionsTitle")}
         </h3>
         {quickReactionsError && <p className={styles.error}>{quickReactionsError}</p>}
         <label className={styles.checkboxLabel}>
           <input
             type="checkbox"
+            role="switch"
+            className={styles.switch}
             checked={showQuickReactions}
-            disabled={quickReactionsSaving}
+            disabled={quickReactionsSaving || !useEmojiReactions}
             onChange={(e) => toggleQuickReactions(e.target.checked)}
           />
           {t("account:appearanceSettings.quickReactionsLabel")}
@@ -172,11 +216,45 @@ export default function AppearanceSettingsPage() {
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.lowContrastTitle")}
+        </h3>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            role="switch"
+            className={styles.switch}
+            checked={lowContrast}
+            onChange={(e) => setLowContrast(e.target.checked)}
+          />
+          {t("account:appearanceSettings.lowContrastLabel")}
+        </label>
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
+          {t("account:appearanceSettings.calmIconsTitle")}
+        </h3>
+        <label className={styles.checkboxLabel}>
+          <input
+            type="checkbox"
+            role="switch"
+            className={styles.switch}
+            checked={calmIcons}
+            onChange={(e) => setCalmIcons(e.target.checked)}
+          />
+          {t("account:appearanceSettings.calmIconsLabel")}
+        </label>
+      </div>
+
+      <div className={styles.section}>
+        <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.dataSaverTitle")}
         </h3>
         <label className={styles.checkboxLabel}>
           <input
             type="checkbox"
+            role="switch"
+            className={styles.switch}
             checked={dataSaver}
             onChange={(e) => setDataSaver(e.target.checked)}
           />
