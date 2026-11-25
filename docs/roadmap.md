@@ -94,6 +94,7 @@
 - [x] **CW（#229）・アンケート（#228）・リモートアンケートの生存監視** — `docs/protocols.md` 3節
 - [x] **ポストの言語プロパティ** — `docs/protocols.md` 3節
 - [x] **引用（#116, #134）・リポストのURLカード化（#132）** — `docs/protocols.md` 4節
+- [x] **Bskyポストを引用したFedi向け本文の末尾に引用元本文を `<blockquote>` で付ける（#344）** — `docs/protocols.md` 4節
 - [x] **返信・引用・リポスト・リアクション件数表示** — `docs/database.md`
 - [x] **リポストラッパー宛てのリアクションを元投稿のリアクションと合算表示** — `docs/ui_spec.md` 6.4節、`docs/protocols.md` 7節
 - [x] **リポスト・リアクションの連打対策（送信元10秒クールダウン・受信側5分の通知抑制）とリポスト通知の元ポスト参照** — `docs/architecture.md` 4節、`docs/protocols.md` 8節

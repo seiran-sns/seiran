@@ -11,7 +11,9 @@ use super::activity::{
     html_and_tags_for_body, NoteActivityParams,
 };
 use super::infra::{fetch_post_reference_ids, local_actor_address};
-use super::text::{at_uri_to_bsky_app_url, plain_to_html};
+use super::text::{
+    at_uri_to_bsky_app_url, at_uri_to_bsky_profile_url, bsky_quote_block_html, plain_to_html,
+};
 use super::*;
 use crate::repository::post::PostDeliveryMeta;
 use crate::repository::{PgPostRepository, PostRepository};
@@ -132,6 +134,21 @@ pub fn ap_quote_from_meta(meta: &PostDeliveryMeta) -> Option<ApQuote> {
     }
 }
 
+/// Bsky にしか実体が無い引用先の、Fedi 向け本文末尾に付ける引用ブロック（`bsky_quote_block_html`）。
+/// AP 実体のある引用先は受信側が quoteUrl から引用元を表示できるので付けない。
+pub fn bsky_quote_block_for_meta(meta: &PostDeliveryMeta) -> Option<String> {
+    if meta.ap_object_id.is_some() {
+        return None;
+    }
+    let profile_url = at_uri_to_bsky_profile_url(meta.at_uri.as_deref()?)?;
+    bsky_quote_block_html(
+        meta.display_name.as_deref(),
+        &meta.username,
+        &profile_url,
+        &meta.body,
+    )
+}
+
 /// Fedi 配送する本文（平文）を決める。Bsky にしか実体が無い引用先は bsky.app URL を追記し、
 /// リンクカード（`post_link_cards`）の URL のうち本文に無いものを末尾へ追記する。
 /// 返り値は（本文, quoteUrl）。
@@ -227,12 +244,14 @@ pub async fn build_local_note(
         // 「投稿の完全再現」（seiranPost）もしない。
         Some(text) => (plain_to_html(&text), Vec::new(), Vec::new(), None, None),
         None => {
-            let quote = match refs.quote_of_post_id {
+            let quote_meta = match refs.quote_of_post_id {
                 Some(id) => find_delivery_meta_with_bridge(&posts, id)
                     .await
-                    .and_then(|(meta, _)| ap_quote_from_meta(&meta)),
+                    .map(|(meta, _)| meta),
                 None => None,
             };
+            let quote = quote_meta.as_ref().and_then(ap_quote_from_meta);
+            let quote_block = quote_meta.as_ref().and_then(bsky_quote_block_for_meta);
             let link_card_urls: Vec<String> =
                 crate::seiran_post::fetch_attachments_and_link_cards(db, post_id)
                     .await
@@ -242,8 +261,13 @@ pub async fn build_local_note(
                     .map(|c| c.url)
                     .collect();
             let (body, quote_url) = fedi_body_and_quote_url(&basis.body, quote, &link_card_urls);
-            let (content_html, mut tag, mention_uris, converted_body) =
+            let (mut content_html, mut tag, mention_uris, converted_body) =
                 html_and_tags_for_body(&body, local_domain, db, ap_client).await;
+            // 引用元の本文はリンクカードにしない表示環境向けの補足なので、メンション・絵文字の
+            // 変換や seiranPost（投稿の完全再現）には含めず、組み立て済みの HTML に足すだけにする。
+            if let Some(block) = quote_block {
+                content_html.push_str(&block);
+            }
             append_emoji_tags(&body, &basis.emoji_map, &mut tag, local_domain);
             // DM（`chat.bsky.convo`経由、`commit_post`を通らない）は`posts.at_uri`が
             // 設定されないためcounterpartPostIdを埋める見込みが無く、対象外とする。
