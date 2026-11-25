@@ -749,7 +749,7 @@
   flex-shrink: 0;
 }
 
-/* 落ち着いたアイコン（stores/calmIconsStore.ts）の間、配送先トグルのロゴも他の線画アイコンに
+/* 低コントラストモード（stores/lowContrastStore.ts）の間、配送先トグルのロゴも他の線画アイコンに
  * 合わせて色を抑える（ロゴの形は変えない）。どちらの配送先か色でも見分けられるよう、Bluesky は
  * 青み、Fediverse は紫みを残す。 */
 .calmLogoBsky {

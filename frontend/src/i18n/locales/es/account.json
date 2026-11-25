@@ -37,9 +37,7 @@
     "quickReactionsLabel": "Mostrar la barra de reacciones rápidas con tus emojis más usados",
     "deviceGroupTitle": "Ajustes solo para este dispositivo",
     "lowContrastTitle": "Contraste bajo",
-    "lowContrastLabel": "Suavizar los colores de la pantalla",
-    "calmIconsTitle": "Iconos sobrios",
-    "calmIconsLabel": "Mostrar los iconos de menús y botones como dibujos de línea monocromos",
+    "lowContrastLabel": "Usar colores y diseños de iconos menos estimulantes",
     "dataSaverTitle": "Modo ahorro de datos",
     "dataSaverLabel": "No cargar imágenes ni vídeos de las publicaciones hasta tocarlos"
   },
