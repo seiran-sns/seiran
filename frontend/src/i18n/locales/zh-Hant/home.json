@@ -72,7 +72,7 @@
     "pollShowResults": "顯示結果",
     "pollClosed": "投票已結束",
     "likeButton": "喜歡",
-    "unlikeButton": "取消喜歡",
+    "unlikeButton": "取消",
     "reportButton": "檢舉",
     "reportSubject": "@{{username}} 的貼文",
     "originalLinkTitle": "這則貼文是透過橋接／聯邦傳遞的副本。前往原始貼文。",

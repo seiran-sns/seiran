@@ -15,7 +15,7 @@ import ReactionChips from "./ReactionChips";
 import { QuickHeartButton, QuickReactionPopup } from "./QuickReactionButtons";
 import ReactionPicker from "./ReactionPicker";
 import ReportModal from "../report/ReportModal";
-import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import styles from "./NoteCard.module.css";
 
 /** 「削除して編集再投稿」メニュー項目まわりの入力（自分の通常ポストのときだけ渡す）。 */
@@ -271,7 +271,7 @@ export default function NoteCardActions({
                 : t("home:noteCard.replyButton")
             }
           >
-            <TwemojiEmoji emoji="💬" />{" "}
+            <UiIcon emoji="💬" />{" "}
             {replyCount > 0 && (
               <span className={styles.actionCount}>{formatCount(replyCount)}</span>
             )}
@@ -307,7 +307,7 @@ export default function NoteCardActions({
                     : t("home:noteCard.repostTitle")
             }
           >
-            <TwemojiEmoji emoji="🔁" />{" "}
+            <UiIcon emoji="🔁" />{" "}
             {repostCount > 0 && (
               <span className={styles.actionCount}>{formatCount(repostCount)}</span>
             )}

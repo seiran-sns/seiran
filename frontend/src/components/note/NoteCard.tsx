@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, Note } from "../../api/client";
@@ -510,7 +510,7 @@ function PostContent({
               {remoteInfo && (
                 <span
                   className={styles.remoteServerBadge}
-                  style={{ background: remoteInfo.bg }}
+                  style={{ "--server-color": remoteInfo.bg } as CSSProperties}
                   title={remoteInfo.label}
                 >
                   {remoteInfo.useBlueskyLogo ? (

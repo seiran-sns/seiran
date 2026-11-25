@@ -36,6 +36,10 @@
     "quickReactionsTitle": "一鍵回應列",
     "quickReactionsLabel": "顯示常用表情符號的一鍵回應列",
     "deviceGroupTitle": "僅限此裝置的設定",
+    "lowContrastTitle": "低對比",
+    "lowContrastLabel": "降低畫面色彩的刺激",
+    "calmIconsTitle": "沉穩圖示",
+    "calmIconsLabel": "以單色線條繪製選單與按鈕圖示",
     "dataSaverTitle": "流量節省模式",
     "dataSaverLabel": "貼文中的圖片和影片在點擊前不載入"
   },

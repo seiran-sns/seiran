@@ -72,7 +72,7 @@
     "pollShowResults": "結果を見る",
     "pollClosed": "投票終了",
     "likeButton": "いいね",
-    "unlikeButton": "いいねを取り消す",
+    "unlikeButton": "取消",
     "reportButton": "通報",
     "reportSubject": "@{{username}} の投稿",
     "originalLinkTitle": "この投稿はブリッジ/連合を経由した重複です。オリジナル投稿へ移動します。",

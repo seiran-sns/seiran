@@ -36,6 +36,10 @@
     "quickReactionsTitle": "One-tap reaction bar",
     "quickReactionsLabel": "Show the one-tap reaction bar with your frequently used emoji",
     "deviceGroupTitle": "Settings for this device only",
+    "lowContrastTitle": "Low contrast",
+    "lowContrastLabel": "Soften the colors on screen",
+    "calmIconsTitle": "Calm icons",
+    "calmIconsLabel": "Draw menu and button icons as monochrome line art",
     "dataSaverTitle": "Data saver mode",
     "dataSaverLabel": "Don't load images and videos in posts until tapped"
   },

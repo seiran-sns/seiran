@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { useIsTopmostCard } from "../../hooks/useIsTopmostCard";
 import { isSameReaction, QUICK_REACTION_HEART, QuickReaction } from "../../lib/quickReactions";
 import TwemojiEmoji from "../common/TwemojiEmoji";
+import UiIcon from "../common/UiIcon";
 import { formatCount } from "../../lib/format";
 import noteCardStyles from "./NoteCard.module.css";
 import styles from "./QuickReactionButtons.module.css";
@@ -67,7 +68,7 @@ export function QuickHeartButton({
       }}
       title={title({ content: QUICK_REACTION_HEART, active })}
     >
-      <TwemojiEmoji emoji={QUICK_REACTION_HEART} />
+      <UiIcon emoji={QUICK_REACTION_HEART} />
       {heartOnly && count > 0 && (
         <>
           {" "}

@@ -99,6 +99,9 @@
   padding: 2px 10px 2px 7px;
   margin-bottom: 12px;
   line-height: 1.5;
+  /* 背景はリモートが宣言した themeColor（`--server-color`）。低コントラストモードでは
+   * 輝度と彩度が際立ちすぎないよう、ページの背景色へ寄せて混ぜる（混ぜる割合は index.css）。 */
+  background: color-mix(in oklab, var(--server-color) var(--server-badge-mix), var(--bg-elev-2));
 }
 
 .remoteServerIcon {
@@ -117,16 +120,16 @@
   padding-right: 1px;
   /* NoteCard.module.cssの.remoteServerLabelと同じ理由（背景は任意のthemeColorのため
      常に濃色固定＋白縁取りで暗い背景色でも文字が沈まないようにする）。 */
-  color: #3a3a3a;
+  color: var(--server-label-color);
   text-shadow:
-    -1px -1px 1px #fff,
-    1px -1px 1px #fff,
-    -1px 1px 1px #fff,
-    1px 1px 1px #fff,
-    0 -1px 1px #fff,
-    0 1px 1px #fff,
-    -1px 0 1px #fff,
-    1px 0 1px #fff;
+    -1px -1px 1px var(--server-label-halo),
+    1px -1px 1px var(--server-label-halo),
+    -1px 1px 1px var(--server-label-halo),
+    1px 1px 1px var(--server-label-halo),
+    0 -1px 1px var(--server-label-halo),
+    0 1px 1px var(--server-label-halo),
+    -1px 0 1px var(--server-label-halo),
+    1px 0 1px var(--server-label-halo);
 }
 
 .suspendedBadge {

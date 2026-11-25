@@ -72,7 +72,7 @@
     "pollShowResults": "Ergebnisse anzeigen",
     "pollClosed": "Umfrage beendet",
     "likeButton": "Gefällt mir",
-    "unlikeButton": "Gefällt mir nicht mehr",
+    "unlikeButton": "Entfernen",
     "reportButton": "Bericht",
     "reportSubject": "@{{username}}s Beitrag",
     "originalLinkTitle": "Dieser Beitrag ist ein Duplikat, das über eine Brücke/Föderation übermittelt wurde. Gehen Sie zum ursprünglichen Beitrag.",
