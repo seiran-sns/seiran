@@ -5,6 +5,7 @@
   "notificationsPanel": {
     "unknownUser": "Quelqu'un",
     "reactionText": "<userLink><emojiName/></userLink> a réagi",
+    "likeText": "<userLink><emojiName/></userLink> a aimé votre publication",
     "followText": "<userLink><emojiName/></userLink> vous a suivi",
     "followRequestText": "<userLink><emojiName/></userLink> a demandé à vous suivre",
     "followAcceptedText": "<userLink><emojiName/></userLink> a accepté votre demande de suivi",
@@ -26,6 +27,7 @@
     "userPlaceholder": "Utilisateur",
     "types": {
       "reaction": "Réaction",
+      "like": "J'aime",
       "mention": "Mention",
       "reply": "Réponse",
       "renote": "Repost",

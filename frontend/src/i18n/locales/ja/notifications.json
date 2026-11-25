@@ -5,6 +5,7 @@
   "notificationsPanel": {
     "unknownUser": "だれか",
     "reactionText": "<userLink><emojiName/></userLink> がリアクションしました",
+    "likeText": "<userLink><emojiName/></userLink> がいいねしました",
     "followText": "<userLink><emojiName/></userLink> にフォローされました",
     "followRequestText": "<userLink><emojiName/></userLink> からフォローリクエストが届きました",
     "followAcceptedText": "<userLink><emojiName/></userLink> がフォローを承認しました",
@@ -26,6 +27,7 @@
     "userPlaceholder": "ユーザー",
     "types": {
       "reaction": "リアクション",
+      "like": "いいね",
       "mention": "メンション",
       "reply": "返信",
       "renote": "リポスト",

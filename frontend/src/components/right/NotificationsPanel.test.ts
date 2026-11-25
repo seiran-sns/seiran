@@ -170,3 +170,16 @@ describe("resolveClickTargetNoteId（クリック遷移先はリポストラッ�
     expect(resolveClickTargetNoteId(n)).toBeUndefined();
   });
 });
+
+describe("describeNotification（絵文字リアクションを使わない設定）", () => {
+  it("リアクション通知は絵文字を問わず ❤️ のいいね通知になる", () => {
+    const n = makeReactionNotification({
+      reaction: ":blob_cat:",
+      reactionEmojiUrl: "https://example.com/blob_cat.png",
+    });
+    const d = describeNotification(n, false);
+    expect(d.icon).toBe("❤️");
+    expect(d.iconUrl).toBeUndefined();
+    expect(d.i18nKey).toBe("notifications:notificationsPanel.likeText");
+  });
+});

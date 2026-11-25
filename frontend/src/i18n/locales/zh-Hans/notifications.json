@@ -5,6 +5,7 @@
   "notificationsPanel": {
     "unknownUser": "有人",
     "reactionText": "<userLink><emojiName/></userLink> 做出了反应",
+    "likeText": "<userLink><emojiName/></userLink> 赞了你的帖子",
     "followText": "<userLink><emojiName/></userLink> 关注了您",
     "followRequestText": "<userLink><emojiName/></userLink> 请求关注您",
     "followAcceptedText": "<userLink><emojiName/></userLink> 已接受您的关注请求",
@@ -26,6 +27,7 @@
     "userPlaceholder": "用户",
     "types": {
       "reaction": "回应",
+      "like": "赞",
       "mention": "提及",
       "reply": "回复",
       "renote": "转发",
