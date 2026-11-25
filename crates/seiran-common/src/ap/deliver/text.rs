@@ -24,9 +24,11 @@ pub fn at_uri_to_bsky_profile_url(at_uri: &str) -> Option<String> {
 /// URL をカードにしない表示環境でも引用元の内容が読めるようにする。1行目は引用元の投稿者
 /// （表示名をプロフィールへのリンクにし、ハンドルを添える）、続けて引用元の本文。
 ///
-/// 受け取る側の言語は分からないので、「〜の投稿」のような文言は付けない。ハンドルに `@` を
-/// 付けないのは、Misskey が受信 HTML の `@名前` をメンション構文として読み、
-/// `@alice.bsky.social` を自サーバーのユーザー `@alice` へのメンションにしてしまうため。
+/// 受け取る側の言語は分からないので、「〜の投稿」のような文言は付けない。ハンドル（1行目と、
+/// 本文中のメンション）は `<code>` で囲む。Misskey は受信 HTML の `@名前` をメンション構文として
+/// 読み、`@alice.bsky.social` を自サーバーのユーザー `@alice` へのメンションにしてしまうが、
+/// インラインコードの中はメンションとして読まないため。同じ理由で、`@` で始まる文字列を
+/// `<a>` の中に置かない（Misskey は `@` で始まるリンクもメンションに変換する）。
 /// 本文が空（画像だけの投稿等）なら、何を引用したかはリンクで分かるので付けない。
 pub fn bsky_quote_block_html(
     display_name: Option<&str>,
@@ -40,18 +42,17 @@ pub fn bsky_quote_block_html(
     let name = display_name
         .map(str::trim)
         .filter(|n| !n.is_empty() && *n != handle);
+    let handle_code = format!("<code>@{}</code>", escape_html(handle));
     let author = match name {
         Some(name) => format!(
-            r#"<a href="{}" rel="nofollow noopener">{}</a> ({})"#,
+            r#"<a href="{}" rel="nofollow noopener">{}</a> {}"#,
             escape_html(profile_url),
             escape_html(name),
-            escape_html(handle)
+            handle_code
         ),
-        None => format!(
-            r#"<a href="{}" rel="nofollow noopener">{}</a>"#,
-            escape_html(profile_url),
-            escape_html(handle)
-        ),
+        // 表示名が無ければハンドルだけ。ハンドルをリンクにすると `@` で始まるリンクになる
+        // ので付けない（プロフィールへは直前の投稿 URL から辿れる）。
+        None => handle_code,
     };
     Some(format!(
         "<blockquote><p>{}</p>{}</blockquote>",
@@ -81,7 +82,7 @@ fn markdown_links_to_html(text: &str) -> String {
         });
         match link {
             Some((label, url, consumed)) => {
-                linked.push_str(&escape_html(&rest[..open]));
+                linked.push_str(&escape_with_handle_code(&rest[..open]));
                 linked.push_str(&format!(
                     r#"<a href="{}" rel="nofollow noopener">{}</a>"#,
                     escape_html(url),
@@ -90,16 +91,54 @@ fn markdown_links_to_html(text: &str) -> String {
                 rest = &rest[consumed..];
             }
             None => {
-                linked.push_str(&escape_html(&rest[..=open]));
+                linked.push_str(&escape_with_handle_code(&rest[..=open]));
                 rest = &rest[open + 1..];
             }
         }
     }
-    linked.push_str(&escape_html(rest));
+    linked.push_str(&escape_with_handle_code(rest));
     linked
         .split("\n\n")
         .map(|para| format!("<p>{}</p>", para.replace('\n', "<br>")))
         .collect()
+}
+
+/// HTML エスケープしつつ、本文中の Bsky ハンドルのメンション（`@` の後にドットを含むドメイン
+/// 形式の名前）を `<code>` で囲む（理由は `bsky_quote_block_html`）。メールアドレス等の途中の
+/// `@`（直前が英数字等）は対象にしない。
+fn escape_with_handle_code(text: &str) -> String {
+    let is_handle_char = |c: char| c.is_ascii_alphanumeric() || c == '.' || c == '-';
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut plain_start = 0;
+    let mut prev: Option<char> = None;
+    let mut iter = text.char_indices().peekable();
+    while let Some((i, c)) = iter.next() {
+        let starts_mention = c == '@'
+            && !prev.is_some_and(|p| p.is_alphanumeric() || matches!(p, '_' | '.' | '@' | '-'));
+        if starts_mention {
+            let rest = &text[i + 1..];
+            let len = rest
+                .find(|ch: char| !is_handle_char(ch))
+                .unwrap_or(rest.len());
+            let handle = rest[..len].trim_end_matches(['.', '-']);
+            let valid =
+                handle.contains('.') && !handle.starts_with(['.', '-']) && !handle.contains("..");
+            if valid {
+                out.push_str(&escape_html(&text[plain_start..i]));
+                out.push_str(&format!("<code>@{}</code>", escape_html(handle)));
+                let end = i + 1 + handle.len();
+                plain_start = end;
+                while iter.peek().is_some_and(|(j, _)| *j < end) {
+                    iter.next();
+                }
+                prev = handle.chars().last();
+                continue;
+            }
+        }
+        prev = Some(c);
+    }
+    out.push_str(&escape_html(&text[plain_start..]));
+    out
 }
 
 /// HTML の特殊文字をエスケープする（`plain_to_html`／`plain_to_html_with_mentions` 共通）。
@@ -182,7 +221,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             html,
-            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">Alice &lt;A&gt;</a> (alice.bsky.social)</p><p>line1<br>line2</p><p>para2</p></blockquote>"
+            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">Alice &lt;A&gt;</a> <code>@alice.bsky.social</code></p><p>line1<br>line2</p><p>para2</p></blockquote>"
         );
     }
 
@@ -195,10 +234,7 @@ mod tests {
             "hi",
         )
         .unwrap();
-        assert!(html.starts_with(
-            "<blockquote><p><a href=\"https://bsky.app/profile/did:plc:abc\" rel=\"nofollow noopener\">alice.bsky.social</a></p>"
-        ));
-        assert!(!html.contains('@'));
+        assert!(html.starts_with("<blockquote><p><code>@alice.bsky.social</code></p>"));
     }
 
     #[test]
@@ -212,6 +248,20 @@ mod tests {
         .unwrap();
         assert!(html.contains(
             r#"see <a href="https://bsky.app/settings/privacy" rel="nofollow noopener">bsky.app/settings/pri...</a> and [not a link] (x) [y](javascript:z) [a] b <a href="https://c.example" rel="nofollow noopener">c</a>"#
+        ));
+    }
+
+    #[test]
+    fn bsky_quote_block_html_wraps_handle_mentions_in_code() {
+        let html = bsky_quote_block_html(
+            None,
+            "a.bsky.social",
+            "https://bsky.app/profile/x",
+            "hi @bob.bsky.social. mail me@example.com or @carol (@dave.example.jp)",
+        )
+        .unwrap();
+        assert!(html.contains(
+            "hi <code>@bob.bsky.social</code>. mail me@example.com or @carol (<code>@dave.example.jp</code>)"
         ));
     }
 
