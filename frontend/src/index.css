@@ -34,6 +34,12 @@
   --server-badge-mix: 100%;
   --server-label-color: #3a3a3a;
   --server-label-halo: #fff;
+  /* 落ち着いたアイコン（UiIcon）の線画のうち、意味を色で示すものの色。 */
+  --line-icon-repost: #2f9e57;
+  --line-icon-heart: #e0445a;
+  /* 低コントラストモードで絵文字（本文・リアクション・投稿エディタ・ピッカー・通知の
+   * `img[data-emoji]`）に掛けるフィルタ。通常は掛けない。 */
+  --emoji-filter: none;
   color-scheme: light;
 }
 
@@ -65,6 +71,8 @@
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #2c2e33;
   --notif-fresh-bg: #4a3f12;
+  --line-icon-repost: #4cc276;
+  --line-icon-heart: #f06478;
   color-scheme: dark;
 }
 
@@ -78,9 +86,9 @@
   --bg-elev-2: #dad7cf;
   --border: #d0ccc3;
   --border-strong: #b9b4aa;
-  --text: #3d414a;
-  --text-dim: #686d77;
-  --text-faint: #959aa2;
+  --text: #50545c;
+  --text-dim: #767a83;
+  --text-faint: #9ea2a9;
   --accent: #52709f;
   --accent-strong: #5873a0;
   --accent-hover: #47618b;
@@ -98,8 +106,11 @@
   --card-bg-admin-override: #dbd9d4;
   --notif-fresh-bg: #ebe0bf;
   --server-badge-mix: 45%;
-  --server-label-color: #464950;
+  --server-label-color: #53565d;
   --server-label-halo: #eeece7;
+  --line-icon-repost: #5d9670;
+  --line-icon-heart: #bf6672;
+  --emoji-filter: saturate(0.5) brightness(0.97);
 }
 
 :root[data-theme="dark"][data-contrast="low"] {
@@ -108,8 +119,8 @@
   --bg-elev-2: #2c3037;
   --border: #353a41;
   --border-strong: #464c54;
-  --text: #c3c7cd;
-  --text-dim: #969ba3;
+  --text: #b4b8bf;
+  --text-dim: #8f949c;
   --text-faint: #747982;
   --accent: #8aa2c4;
   --accent-strong: #4e6589;
@@ -130,6 +141,13 @@
   --server-badge-mix: 45%;
   --server-label-color: #c8cbd0;
   --server-label-halo: #1d2025;
+  --line-icon-repost: #78a886;
+  --line-icon-heart: #c97b86;
+  --emoji-filter: saturate(0.5) brightness(0.88);
+}
+
+img[data-emoji] {
+  filter: var(--emoji-filter);
 }
 
 *, *::before, *::after {

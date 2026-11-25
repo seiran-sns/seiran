@@ -50,6 +50,7 @@ import styles from "./PostComposer.module.css";
 import ComposerEditor, { ComposerEditorHandle } from "./ComposerEditor";
 import Modal from "../common/Modal";
 import { useCalmIcons } from "../../stores/calmIconsStore";
+import TwemojiEmoji from "../common/TwemojiEmoji";
 import UiIcon from "../common/UiIcon";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
 import fediverseLogo from "../../assets/fediverse-logo.svg";
@@ -1026,7 +1027,7 @@ export default function PostComposer({
             title={t("home:postComposer.deliverFediHint")}
             aria-label={t("home:postComposer.deliverFediHint")}
           >
-            <img className={`${styles.fediverseIcon} ${calmIcons ? styles.calmLogo : ""}`} src={fediverseLogo} alt="" />
+            <img className={`${styles.fediverseIcon} ${calmIcons ? styles.calmLogoFedi : ""}`} src={fediverseLogo} alt="" />
           </button>
         )}
         {bskyReplyAllowed && (
@@ -1043,10 +1044,10 @@ export default function PostComposer({
             ].join("\n")}
             aria-label={t("home:postComposer.deliverBskyHint")}
           >
-            <img className={`${styles.blueskyIcon} ${calmIcons ? styles.calmLogo : ""}`} src={blueskyLogo} alt="" />
+            <img className={`${styles.blueskyIcon} ${calmIcons ? styles.calmLogoBsky : ""}`} src={blueskyLogo} alt="" />
             {(hasBskyIncompatibleEmoji || bskyDeliveryDeferred) && (
               <span className={styles.bskyEmojiWarnBadge} aria-hidden="true">
-                <UiIcon emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} />
+                <TwemojiEmoji emoji="⚠️" className={styles.bskyEmojiWarnBadgeIcon} keepColor />
               </span>
             )}
           </button>

@@ -154,6 +154,7 @@ export function QuickReactionPopup({
               {q.imageUrl ? (
                 <img
                   className={styles.customEmoji}
+                  data-emoji=""
                   style={customEmojiStyle(q)}
                   src={q.imageUrl}
                   alt={q.content}

@@ -72,6 +72,26 @@ const LINE_ICONS: Record<string, ReactNode> = {
     </>
   ),
   "☰": <path d="M4 6.5h16M4 12h16M4 17.5h16" />,
+  // 通知欄の種別
+  "➕": <path d="M12 4.5v15M4.5 12h15" />,
+  "🙋": (
+    <>
+      <circle cx="10" cy="8" r="3.2" />
+      <path d="M4 20.5c.4-3.6 2.8-6 6-6 1.6 0 3 .6 4 1.6M17.5 3.5v9M15 6l2.5-2.5L20 6" />
+    </>
+  ),
+  "🤝": (
+    <>
+      <path d="M2.5 9.5 6 6.5l3.5 1.5L12 6.5l3 0 3.5 3" />
+      <path d="M21.5 9.5 18.5 12.5l-6.5 6-1.5-1.5M9.5 8l3.5 4M6 6.5 2.5 9.5l3 3 5 5M8 15l1.5 1.5M10 13l2 2" />
+    </>
+  ),
+  "📣": (
+    <>
+      <path d="M3.5 10v4h3l9 5V5l-9 5z" />
+      <path d="M6.5 14l1.5 5.5h2.5L9.5 14.5M18.5 9.5a3 3 0 0 1 0 5" />
+    </>
+  ),
   // 設定メニュー
   "🔐": (
     <>
@@ -183,6 +203,12 @@ const LINE_ICONS: Record<string, ReactNode> = {
   "🌙": <path d="M19.5 14.5A8 8 0 1 1 9.5 4.5a6.5 6.5 0 0 0 10 10z" />,
 };
 
+/** 線画のうち、意味を色で示すもの（リポスト＝緑、いいね＝赤）。色は `index.css` のトークン。 */
+const LINE_ICON_COLORS: Record<string, string> = {
+  "🔁": "var(--line-icon-repost)",
+  "❤": "var(--line-icon-heart)",
+};
+
 function lineIconKey(emoji: string): string {
   return emoji.replace(/️/g, "");
 }
@@ -200,7 +226,8 @@ interface UiIconProps {
  */
 export default function UiIcon({ emoji, className }: UiIconProps) {
   const calm = useCalmIcons();
-  const shape = calm ? LINE_ICONS[lineIconKey(emoji)] : undefined;
+  const key = lineIconKey(emoji);
+  const shape = calm ? LINE_ICONS[key] : undefined;
   if (!shape) return <TwemojiEmoji emoji={emoji} className={className} />;
   return (
     <svg
@@ -211,6 +238,7 @@ export default function UiIcon({ emoji, className }: UiIconProps) {
       strokeWidth={1.7}
       strokeLinecap="round"
       strokeLinejoin="round"
+      style={LINE_ICON_COLORS[key] ? { color: LINE_ICON_COLORS[key] } : undefined}
       aria-hidden="true"
     >
       {shape}
