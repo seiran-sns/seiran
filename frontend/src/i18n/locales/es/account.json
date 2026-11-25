@@ -9,6 +9,7 @@
     "lists": "Liza",
     "appearance": "Apariencia",
     "appTokens": "Fichas de aplicación",
+    "appPasswords": "Contraseñas de aplicación",
     "followImport": "Importar y exportar",
     "followRequests": "Solicitudes de seguimiento",
     "comingSoon": "Muy pronto"
@@ -132,6 +133,13 @@
     "copyButton": "Copiar",
     "copiedButton": "Copiado",
     "dismissButton": "Cerrar"
+  },
+  "appPasswordsSettings": {
+    "description": "Contraseñas que se usan en lugar de tu contraseña principal para iniciar sesión en clientes de Bluesky (como TOKIMEKI). Escribe tu identificador de Bluesky (p. ej., name.seiran.org) como nombre de usuario. Crea una por cliente para poder revocar solo las que ya no uses.",
+    "nameLabel": "Uso (p. ej., TOKIMEKI)",
+    "issuedWarning": "Contraseña de aplicación para «{{name}}». Solo se muestra ahora y no podrá volver a verse al cerrarla.",
+    "empty": "No hay contraseñas de aplicación.",
+    "revokeConfirm": "¿Revocar «{{name}}»? Los clientes que hayan iniciado sesión con esta contraseña cerrarán sesión en breve."
   },
   "importExport": {
     "title": "Importar y exportar",

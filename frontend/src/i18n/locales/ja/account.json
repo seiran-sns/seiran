@@ -9,6 +9,7 @@
     "lists": "リスト",
     "appearance": "表示",
     "appTokens": "アプリトークン",
+    "appPasswords": "アプリパスワード",
     "followImport": "インポート・エクスポート",
     "followRequests": "承認待ちフォロー",
     "comingSoon": "近日公開"
@@ -132,6 +133,13 @@
     "copyButton": "コピー",
     "copiedButton": "コピーしました",
     "dismissButton": "閉じる"
+  },
+  "appPasswordsSettings": {
+    "description": "Bluesky クライアント（TOKIMEKI など）にログインするとき、メインパスワードの代わりに使うパスワードです。ユーザー名には Bluesky のハンドル（例: name.seiran.org）を入れてください。クライアントごとに発行しておけば、使わなくなったものだけを無効化できます。",
+    "nameLabel": "用途（例: TOKIMEKI）",
+    "issuedWarning": "「{{name}}」のアプリパスワードです。今だけ表示されます。閉じると二度と表示できません。",
+    "empty": "発行済みのアプリパスワードはありません。",
+    "revokeConfirm": "「{{name}}」を無効化しますか？このパスワードでログインしているクライアントは、しばらくするとログアウトされます。"
   },
   "importExport": {
     "title": "インポート・エクスポート",

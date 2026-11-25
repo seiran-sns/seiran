@@ -269,10 +269,12 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 ### セッション認証（外部ATプロトコルクライアント）
 公式 Bluesky アプリ等が seiran アカウントへ直接ログインするための認証系。Misskey 互換ログイン（`sub: "local|{user_id}"`）とは別で、`LocalAuthProvider` の `generate_atp_session`/`verify_atp_access_token`/`verify_atp_refresh_token`（`auth/local.rs`）が同じ secret で HS256 署名する（`sub` が DID なので衝突しない）。
 
-- `createSession` はメインパスワードと専用アプリパスワード（`xxxx-xxxx-xxxx-xxxx`、`atp_app_passwords` に argon2 ハッシュ）の両方を受け付ける（公式 PDS と同じ。bsky.app 自身がメインパスワードで呼ぶ）。`createAppPassword`/`listAppPasswords`/`revokeAppPassword` は seiran の通常トークンで保護する。
+- `createSession` はメインパスワードと専用アプリパスワード（`xxxx-xxxx-xxxx-xxxx`、`atp_app_passwords` に argon2 ハッシュ）の両方を受け付ける（公式 PDS と同じ。bsky.app 自身がメインパスワードで呼ぶ）。`createAppPassword`/`listAppPasswords`/`revokeAppPassword` は seiran の通常トークンか、メインパスワードの ATP セッション（bsky.app の設定画面）で呼べる。アプリパスワードのセッションは 403 `APP_PASSWORD_NOT_PERMITTED`（渡した相手が自分で新しいアプリパスワードを作り、無効化をすり抜けられないようにする。公式 PDS と同じ）。発行・無効化の処理は設定画面（`/api/account/app-passwords`）と共通の `handlers::app_passwords`。名前は有効なものの中で一意（重複は 409 `APP_PASSWORD_NAME_TAKEN`）。
 - どちらで認証したかをセッション JWT の `privileged` クレームに記録する（メインパスワードなら真、`refreshSession` は引き継ぐ、クレームの無い旧トークンは偽）。アプリパスワードはサードパーティに渡すものなので、偽のセッションには PLC 操作（`requestPlcOperationSignature`/`signPlcOperation`/`submitPlcOperation`）と `deactivateAccount` を許さず 403 `APP_PASSWORD_NOT_PERMITTED` を返す（`xrpc::require_privileged_session`。公式 PDS と同じ制限）。
 - `createSession` は accessJwt（2時間）と refreshJwt（90日）を発行する。identifier 解決失敗やパスワード未設定でもダミーハッシュ照合をしてから同じ 401 を返し、アカウントの存否を漏らさない。応答の `email`/`emailConfirmed` は、メール登録済みなら常に confirmed（seiran は確認済みフラグを持たない）。転入元が seiran の DID 転入はこの値を使う。
-- `refreshSession` — 新しいペアを発行し、古い refreshJwt の `jti` を失効させる（`atp_refresh_tokens`）。
+- メール2FA（`authFactorToken`）はメインパスワードでのログインにだけ求める（公式 PDS と同じ）。アプリパスワードは本人が seiran にログインして発行したランダムな値で、確認コードの入力欄を持たないアプリパスワード前提のクライアントでも使えるようにするためのもの。
+- refreshJwt の `jti` には、どのアプリパスワードで始めたセッションか（`atp_refresh_tokens.app_password_id`、メインパスワードなら NULL）を記録し、更新後も引き継ぐ。アプリパスワードを無効化すると、同じ文でそのセッションの refreshJwt も失効させる。accessJwt は署名だけで検証するので、無効化後も期限（最長2時間）までは通る（公式 PDS と同じ）。
+- `refreshSession` — 新しいペアを発行し、古い refreshJwt の `jti` を失効させる（`atp_refresh_tokens`）。有効性の確認と失効は1文（`consume_refresh_token`）で、同じ refreshJwt での同時更新でも新しいセッションは1つしかできない。アプリパスワード由来なら、そのパスワードが無効化されていれば拒否する。
 - `deleteSession` — refreshJwt の `jti` を失効させる。
 - `getSession` — did/handle を返す。
 - `jsonwebtoken` の `Validation::default()` は `aud` クレームがあるだけで拒否するため、`AtpSessionClaims` の検証では `set_audience` を必ず呼ぶ。

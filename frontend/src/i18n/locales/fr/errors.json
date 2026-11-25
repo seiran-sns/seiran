@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "Non publiée car l'heure prévue était dépassée de plus de 24 heures.",
   "INVALID_SCHEDULED_REQUEST": "Impossible de lire la publication programmée.",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Les brouillons sans heure prévue ne sont pas pris en charge.",
-  "POLL_ALREADY_EXPIRED": "Le sondage serait déjà clos au moment de la publication."
+  "POLL_ALREADY_EXPIRED": "Le sondage serait déjà clos au moment de la publication.",
+  "APP_PASSWORD_NAME_REQUIRED": "Saisissez un usage",
+  "APP_PASSWORD_NAME_TOO_LONG": "L’usage doit contenir 100 caractères au maximum",
+  "APP_PASSWORD_NAME_TAKEN": "Un mot de passe d’application avec cet usage existe déjà",
+  "APP_PASSWORD_NOT_FOUND": "Mot de passe d’application introuvable",
+  "ATP_ACCOUNT_REQUIRED": "Ce compte n’a pas de compte Bluesky",
+  "APP_PASSWORD_NOT_PERMITTED": "Cette action n’est pas autorisée avec une connexion par mot de passe d’application"
 }

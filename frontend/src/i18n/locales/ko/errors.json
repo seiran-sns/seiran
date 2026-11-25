@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "예약 시간보다 24시간 이상 늦어져 게시하지 않았습니다.",
   "INVALID_SCHEDULED_REQUEST": "예약 내용을 읽을 수 없습니다.",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "예약 시간이 없는 초안은 저장할 수 없습니다.",
-  "POLL_ALREADY_EXPIRED": "설문 마감 시간이 게시 시간보다 이릅니다."
+  "POLL_ALREADY_EXPIRED": "설문 마감 시간이 게시 시간보다 이릅니다.",
+  "APP_PASSWORD_NAME_REQUIRED": "용도를 입력하세요",
+  "APP_PASSWORD_NAME_TOO_LONG": "용도는 100자 이내로 입력하세요",
+  "APP_PASSWORD_NAME_TAKEN": "같은 용도의 앱 비밀번호가 이미 있습니다",
+  "APP_PASSWORD_NOT_FOUND": "앱 비밀번호를 찾을 수 없습니다",
+  "ATP_ACCOUNT_REQUIRED": "이 계정에는 Bluesky 계정이 없습니다",
+  "APP_PASSWORD_NOT_PERMITTED": "앱 비밀번호로 로그인한 상태에서는 이 작업을 할 수 없습니다"
 }

@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "It was not published because it was more than 24 hours past the scheduled time.",
   "INVALID_SCHEDULED_REQUEST": "The scheduled post could not be read.",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Drafts without a scheduled time are not supported.",
-  "POLL_ALREADY_EXPIRED": "The poll would already be closed at the time of posting."
+  "POLL_ALREADY_EXPIRED": "The poll would already be closed at the time of posting.",
+  "APP_PASSWORD_NAME_REQUIRED": "Enter a purpose",
+  "APP_PASSWORD_NAME_TOO_LONG": "The purpose must be 100 characters or fewer",
+  "APP_PASSWORD_NAME_TAKEN": "An app password with the same purpose already exists",
+  "APP_PASSWORD_NOT_FOUND": "App password not found",
+  "ATP_ACCOUNT_REQUIRED": "This account has no Bluesky account",
+  "APP_PASSWORD_NOT_PERMITTED": "This action is not allowed when signed in with an app password"
 }

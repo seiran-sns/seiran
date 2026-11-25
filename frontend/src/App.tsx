@@ -42,6 +42,7 @@ const SearchPage = lazy(() => import("./pages/SearchPage"));
 const SettingsMenuPage = lazy(() => import("./pages/SettingsMenuPage"));
 const SuspendedAccountPage = lazy(() => import("./pages/SuspendedAccountPage"));
 const AppTokensSettingsPage = lazy(() => import("./pages/AppTokensSettingsPage"));
+const AppPasswordsSettingsPage = lazy(() => import("./pages/AppPasswordsSettingsPage"));
 const Setup = lazy(() => import("./pages/Setup"));
 const VerifyEmail = lazy(() => import("./pages/VerifyEmail"));
 const VerifyEmailChange = lazy(() => import("./pages/VerifyEmailChange"));
@@ -220,6 +221,14 @@ function AppRoutes() {
           element={
             <RequireAuth>
               <AppTokensSettingsPage />
+            </RequireAuth>
+          }
+        />
+        <Route
+          path="/settings/app-passwords"
+          element={
+            <RequireAuth>
+              <AppPasswordsSettingsPage />
             </RequireAuth>
           }
         />

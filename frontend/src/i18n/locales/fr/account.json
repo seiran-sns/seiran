@@ -9,6 +9,7 @@
     "lists": "Listes",
     "appearance": "Apparence",
     "appTokens": "Jetons d'application",
+    "appPasswords": "Mots de passe d’application",
     "followImport": "Import & export",
     "followRequests": "Demandes d'abonnement",
     "comingSoon": "À venir"
@@ -132,6 +133,13 @@
     "copyButton": "Copier",
     "copiedButton": "Copié",
     "dismissButton": "Fermer"
+  },
+  "appPasswordsSettings": {
+    "description": "Mots de passe à utiliser à la place de votre mot de passe principal pour vous connecter à des clients Bluesky (comme TOKIMEKI). Saisissez votre identifiant Bluesky (ex. name.seiran.org) comme nom d’utilisateur. Créez-en un par client pour pouvoir révoquer uniquement ceux que vous n’utilisez plus.",
+    "nameLabel": "Usage (ex. TOKIMEKI)",
+    "issuedWarning": "Mot de passe d’application pour « {{name}} ». Il n’est affiché que maintenant et ne pourra plus l’être une fois fermé.",
+    "empty": "Aucun mot de passe d’application créé.",
+    "revokeConfirm": "Révoquer « {{name}} » ? Les clients connectés avec ce mot de passe seront bientôt déconnectés."
   },
   "importExport": {
     "title": "Import & export",

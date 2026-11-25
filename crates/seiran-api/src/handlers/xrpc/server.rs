@@ -8,11 +8,12 @@ use serde::Deserialize;
 use sha2::Digest;
 
 use seiran_common::atp::resolve_external_handle;
-use seiran_common::{generate_snowflake_id, LocalAuthProvider};
+use seiran_common::LocalAuthProvider;
 
 use super::{extract_bearer, require_privileged_session, service_did};
 use crate::error::ApiError;
-use crate::middleware::{extract_auth, ClientIp};
+use crate::handlers::app_passwords;
+use crate::middleware::ClientIp;
 use crate::rate_limit::{self, AttemptKind};
 use crate::AppState;
 
@@ -234,19 +235,18 @@ pub async fn xrpc_create_session(
         return e.into_response();
     }
 
-    let hashes = match state
-        .atp_sessions
-        .find_active_password_hashes(actor.id)
-        .await
-    {
-        Ok(h) => h,
+    let app_passwords = match state.atp_sessions.find_active_app_passwords(actor.id).await {
+        Ok(rows) => rows,
         Err(e) => {
             return ApiError::Internal(format!("[createSession] DB エラー: {}", e)).into_response()
         }
     };
-    let app_password_ok = hashes
+    let matched_app_password_id = app_passwords
         .iter()
-        .any(|h| LocalAuthProvider::verify_password(&req.password, h).unwrap_or(false));
+        .find(|p| {
+            LocalAuthProvider::verify_password(&req.password, &p.password_hash).unwrap_or(false)
+        })
+        .map(|p| p.id);
 
     // 本アカウントのメインパスワードでもログインできる（公式Bluesky PDS準拠。bsky.app自身も
     // メインパスワードでcreateSessionを呼ぶ）。どちらで認証したかはセッションの`privileged`に
@@ -266,17 +266,25 @@ pub async fn xrpc_create_session(
             false
         }
     };
-    let password_ok = main_password_ok || app_password_ok;
-
-    if !password_ok {
+    if !main_password_ok && matched_app_password_id.is_none() {
         return auth_required_error();
     }
+    // メインパスワードと一致したならメインパスワードでのログインとして扱う（アプリパスワードの
+    // 失効に巻き込まない）。
+    let app_password_id = if main_password_ok {
+        None
+    } else {
+        matched_app_password_id
+    };
 
     // メール2FA。SMTP設定済みインスタンスのみ有効（コード送信自体が不可能なインスタンスでは
     // 常にスキップする）。標準ATPクライアント（Bluesky公式アプリ等）の`authFactorToken`UIは
     // 「メールを確認してください」という文言のため、TOTPではなくメール送信コードで統一する。
+    // アプリパスワードでのログインには求めない（公式PDSと同じ）。アプリパスワードは本人が
+    // seiranにログインして発行したランダムな値で、確認コードの入力欄を持たないクライアント
+    // （アプリパスワード前提のサードパーティクライアント）でも使えるようにするためのもの。
     let smtp_settings = state.site_settings.get_all().await.unwrap_or_default();
-    if crate::mailer::is_smtp_configured(&smtp_settings) {
+    if main_password_ok && crate::mailer::is_smtp_configured(&smtp_settings) {
         const PURPOSE: &str = "atp_session_2fa";
         // bsky.app はコード入力欄を出す前の初回ログインでも `authFactorToken: ""` を送る。
         // 空文字を「コード入力あり」と扱うと照合に失敗して AuthenticationRequired になり、
@@ -359,7 +367,7 @@ pub async fn xrpc_create_session(
         };
     if let Err(e) = state
         .atp_sessions
-        .insert_refresh_token(jti, actor.id, refresh_exp)
+        .insert_refresh_token(jti, actor.id, app_password_id, refresh_exp)
         .await
     {
         return ApiError::Internal(format!(
@@ -401,20 +409,14 @@ pub async fn xrpc_refresh_session(
         Ok(v) => v,
         Err(_) => return ApiError::Unauthorized("トークンが無効です").into_response(),
     };
-    let actor_id = match state
-        .atp_sessions
-        .find_valid_refresh_token_actor(verified.jti)
-        .await
-    {
-        Ok(Some(id)) => id,
+    let owner = match state.atp_sessions.consume_refresh_token(verified.jti).await {
+        Ok(Some(owner)) => owner,
         Ok(None) => return ApiError::Unauthorized("トークンが無効です").into_response(),
         Err(e) => {
             return ApiError::Internal(format!("[refreshSession] DB エラー: {}", e)).into_response()
         }
     };
-    if let Err(e) = state.atp_sessions.revoke_refresh_token(verified.jti).await {
-        return ApiError::Internal(format!("[refreshSession] 失効処理失敗: {}", e)).into_response();
-    }
+    let actor_id = owner.actor_id;
 
     let actor = match state.actors.find_by_id(actor_id).await {
         Ok(Some(a)) => a,
@@ -436,7 +438,7 @@ pub async fn xrpc_refresh_session(
     };
     if let Err(e) = state
         .atp_sessions
-        .insert_refresh_token(new_jti, actor_id, refresh_exp)
+        .insert_refresh_token(new_jti, actor_id, owner.app_password_id, refresh_exp)
         .await
     {
         return ApiError::Internal(format!(
@@ -605,94 +607,38 @@ pub struct CreateAppPasswordRequest {
     pub name: String,
 }
 
-/// `com.atproto.server.createAppPassword` — 既存のseiranログイン（設定画面のアプリトークンと
-/// 同様、`Authorization: Bearer` の自社トークン）で認証したユーザーが、自分のATPアプリ
-/// パスワードを新規発行する。平文パスワードはこのレスポンス以外では二度と取得できない。
+/// `com.atproto.server.createAppPassword` — 新しいアプリパスワードを発行する。認証は seiran の
+/// 通常ログインか、メインパスワードの ATP セッション（`app_passwords::authenticate_manager`）。
+/// 平文パスワードはこのレスポンス以外では二度と取得できない。
 pub async fn xrpc_create_app_password(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<CreateAppPasswordRequest>,
-) -> impl IntoResponse {
-    let auth_user = match extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await
-    {
-        Ok(u) => u,
-        Err(e) => return e.into_response(),
-    };
-    let actor = match state.actors.find_local_by_user_id(auth_user.user_id).await {
-        Ok(Some(a)) => a,
-        _ => return ApiError::NotFound("アクターが見つかりません").into_response(),
-    };
-    if actor.at_did.is_none() {
-        return ApiError::BadRequest("ATPアカウントが未設定です".to_string()).into_response();
-    }
-    let name = req.name.trim();
-    if name.is_empty() {
-        return ApiError::BadRequest("name が必要です".to_string()).into_response();
-    }
-
-    let password = LocalAuthProvider::generate_app_password();
-    let hash = match LocalAuthProvider::hash_password(&password) {
-        Ok(h) => h,
-        Err(e) => {
-            return ApiError::Internal(format!("[createAppPassword] ハッシュ化失敗: {}", e))
-                .into_response()
-        }
-    };
-    let id = generate_snowflake_id(chrono::Utc::now());
-    if let Err(e) = state
-        .atp_sessions
-        .insert_app_password(id, actor.id, name, &hash)
-        .await
-    {
-        return ApiError::Internal(format!("[createAppPassword] DB エラー: {}", e)).into_response();
-    }
-
-    Json(serde_json::json!({
-        "name": name,
-        "password": password,
-        "createdAt": chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-    }))
-    .into_response()
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = app_passwords::authenticate_manager(&state, &headers).await?;
+    let created = app_passwords::create(&state, &actor, &req.name).await?;
+    Ok(Json(serde_json::json!({
+        "name": created.name,
+        "password": created.password,
+        "createdAt": created.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+        "privileged": false,
+    })))
 }
 
 /// `com.atproto.server.listAppPasswords` — 発行済みアプリパスワード一覧（名前・作成日時のみ）。
 pub async fn xrpc_list_app_passwords(
     headers: HeaderMap,
     State(state): State<AppState>,
-) -> impl IntoResponse {
-    let auth_user = match extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await
-    {
-        Ok(u) => u,
-        Err(e) => return e.into_response(),
-    };
-    let actor = match state.actors.find_local_by_user_id(auth_user.user_id).await {
-        Ok(Some(a)) => a,
-        _ => return ApiError::NotFound("アクターが見つかりません").into_response(),
-    };
-    match state.atp_sessions.list_app_passwords(actor.id).await {
-        Ok(rows) => Json(serde_json::json!({
-            "passwords": rows.into_iter().map(|r| serde_json::json!({
-                "name": r.name,
-                "createdAt": r.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
-            })).collect::<Vec<_>>()
-        }))
-        .into_response(),
-        Err(e) => {
-            ApiError::Internal(format!("[listAppPasswords] DB エラー: {}", e)).into_response()
-        }
-    }
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = app_passwords::authenticate_manager(&state, &headers).await?;
+    let rows = app_passwords::list(&state, &actor).await?;
+    Ok(Json(serde_json::json!({
+        "passwords": rows.into_iter().map(|r| serde_json::json!({
+            "name": r.name,
+            "createdAt": r.created_at.to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            "privileged": false,
+        })).collect::<Vec<_>>()
+    })))
 }
 
 #[derive(Deserialize)]
@@ -705,31 +651,8 @@ pub async fn xrpc_revoke_app_password(
     headers: HeaderMap,
     State(state): State<AppState>,
     Json(req): Json<RevokeAppPasswordRequest>,
-) -> impl IntoResponse {
-    let auth_user = match extract_auth(
-        &headers,
-        &state.local_auth,
-        state.app_tokens.as_ref(),
-        state.users.as_ref(),
-    )
-    .await
-    {
-        Ok(u) => u,
-        Err(e) => return e.into_response(),
-    };
-    let actor = match state.actors.find_local_by_user_id(auth_user.user_id).await {
-        Ok(Some(a)) => a,
-        _ => return ApiError::NotFound("アクターが見つかりません").into_response(),
-    };
-    match state
-        .atp_sessions
-        .revoke_app_password(actor.id, &req.name)
-        .await
-    {
-        Ok(true) => Json(serde_json::json!({})).into_response(),
-        Ok(false) => ApiError::NotFound("アプリパスワードが見つかりません").into_response(),
-        Err(e) => {
-            ApiError::Internal(format!("[revokeAppPassword] DB エラー: {}", e)).into_response()
-        }
-    }
+) -> Result<Json<serde_json::Value>, ApiError> {
+    let actor = app_passwords::authenticate_manager(&state, &headers).await?;
+    app_passwords::revoke_by_name(&state, &actor, &req.name).await?;
+    Ok(Json(serde_json::json!({})))
 }

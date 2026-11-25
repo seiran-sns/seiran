@@ -9,6 +9,7 @@
     "lists": "Listen",
     "appearance": "Aussehen",
     "appTokens": "App-Tokens",
+    "appPasswords": "App-Passwörter",
     "followImport": "Import & Export",
     "followRequests": "Follow-Anfragen",
     "comingSoon": "Kommt bald"
@@ -132,6 +133,13 @@
     "copyButton": "Kopieren",
     "copiedButton": "Kopiert",
     "dismissButton": "Schließen"
+  },
+  "appPasswordsSettings": {
+    "description": "Passwörter, die du statt deines Hauptpassworts verwendest, um dich bei Bluesky-Clients (z. B. TOKIMEKI) anzumelden. Gib als Benutzernamen dein Bluesky-Handle ein (z. B. name.seiran.org). Erstelle für jeden Client ein eigenes, damit du nur nicht mehr genutzte widerrufen kannst.",
+    "nameLabel": "Zweck (z. B. TOKIMEKI)",
+    "issuedWarning": "App-Passwort für „{{name}}“. Es wird nur jetzt angezeigt und kann nach dem Schließen nicht erneut angezeigt werden.",
+    "empty": "Keine App-Passwörter erstellt.",
+    "revokeConfirm": "„{{name}}“ widerrufen? Clients, die mit diesem Passwort angemeldet sind, werden in Kürze abgemeldet."
   },
   "importExport": {
     "title": "Import & Export",

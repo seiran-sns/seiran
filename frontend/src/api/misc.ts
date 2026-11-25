@@ -1,5 +1,14 @@
 import { request, uploadFormData } from "./core";
-import type { AboutResponse, AppTokenRow, CreateAppTokenResponse, DriveFile, MetaResponse, PublicEmoji } from "./types";
+import type {
+  AboutResponse,
+  AppPasswordRow,
+  AppTokenRow,
+  CreateAppPasswordResponse,
+  CreateAppTokenResponse,
+  DriveFile,
+  MetaResponse,
+  PublicEmoji,
+} from "./types";
 
 export function openTarget(target: string) {
   return request<{ path: string; kind: "actor" | "post" }>("POST", "/open", {
@@ -43,6 +52,19 @@ export const appTokens = {
       "DELETE",
       `/account/app-tokens/${encodeURIComponent(id)}`,
     );
+  },
+};
+
+/** Bluesky クライアント（AT Protocol）用アプリパスワード。 */
+export const appPasswords = {
+  list() {
+    return request<AppPasswordRow[]>("GET", "/account/app-passwords");
+  },
+  create(name: string) {
+    return request<CreateAppPasswordResponse>("POST", "/account/app-passwords", { name });
+  },
+  revoke(id: string) {
+    return request<void>("DELETE", `/account/app-passwords/${encodeURIComponent(id)}`);
   },
 };
 

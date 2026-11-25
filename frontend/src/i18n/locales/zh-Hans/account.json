@@ -9,6 +9,7 @@
     "lists": "列表",
     "appearance": "外观",
     "appTokens": "应用令牌",
+    "appPasswords": "应用专用密码",
     "followImport": "导入与导出",
     "followRequests": "关注请求",
     "comingSoon": "即将推出"
@@ -132,6 +133,13 @@
     "copyButton": "复制",
     "copiedButton": "已复制",
     "dismissButton": "关闭"
+  },
+  "appPasswordsSettings": {
+    "description": "登录 Bluesky 客户端（如 TOKIMEKI）时代替主密码使用的密码。用户名请填写 Bluesky 账号（例：name.seiran.org）。为每个客户端分别创建，就可以只吊销不再使用的那个。",
+    "nameLabel": "用途（例：TOKIMEKI）",
+    "issuedWarning": "“{{name}}”的应用专用密码。仅此时显示，关闭后将无法再次查看。",
+    "empty": "尚未创建应用专用密码。",
+    "revokeConfirm": "要吊销“{{name}}”吗？使用此密码登录的客户端将在不久后退出登录。"
   },
   "importExport": {
     "title": "导入与导出",

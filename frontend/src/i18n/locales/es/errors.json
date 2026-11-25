@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "No se publicó porque habían pasado más de 24 horas desde la hora programada.",
   "INVALID_SCHEDULED_REQUEST": "No se pudo leer la publicación programada.",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "No se admiten borradores sin hora programada.",
-  "POLL_ALREADY_EXPIRED": "La encuesta ya estaría cerrada en el momento de publicar."
+  "POLL_ALREADY_EXPIRED": "La encuesta ya estaría cerrada en el momento de publicar.",
+  "APP_PASSWORD_NAME_REQUIRED": "Escribe un uso",
+  "APP_PASSWORD_NAME_TOO_LONG": "El uso debe tener 100 caracteres como máximo",
+  "APP_PASSWORD_NAME_TAKEN": "Ya existe una contraseña de aplicación con ese uso",
+  "APP_PASSWORD_NOT_FOUND": "No se encontró la contraseña de aplicación",
+  "ATP_ACCOUNT_REQUIRED": "Esta cuenta no tiene cuenta de Bluesky",
+  "APP_PASSWORD_NOT_PERMITTED": "No se permite esta acción con una sesión iniciada con contraseña de aplicación"
 }
