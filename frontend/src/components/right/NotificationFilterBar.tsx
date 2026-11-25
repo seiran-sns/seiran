@@ -1,5 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { ActorSuggestion } from "../../api/client";
+import { useAuth } from "../../contexts/AuthContext";
 import Avatar from "../note/Avatar";
 import UserIdPickerPanel from "../note/UserIdPickerPanel";
 import FilterField, { FilterBar, FilterCheckList } from "../common/FilterField";
@@ -48,7 +49,11 @@ interface NotificationFilterBarProps {
  * 指定した条件は AND で作用する。 */
 export default function NotificationFilterBar({ filter, onChange }: NotificationFilterBarProps) {
   const { t } = useTranslation();
-  const typeLabel = (type: string) => t(`notifications:filter.types.${type}`);
+  const { user } = useAuth();
+  // 絵文字リアクションを使わない設定では、リアクション通知を「いいね」として出すので種別名も合わせる。
+  const likeOnly = user?.use_emoji_reactions === false;
+  const typeLabel = (type: string) =>
+    t(`notifications:filter.types.${likeOnly && type === "reaction" ? "like" : type}`);
 
   const toggleType = (type: string) =>
     onChange({

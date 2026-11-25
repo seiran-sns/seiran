@@ -86,8 +86,13 @@ export function notificationUserAcct(u: NotificationUser | undefined): string | 
 }
 
 /** 通知1件を人間可読な文言に整形する。`iconUrl` があれば絵文字は画像（カスタム絵文字）。
- * `who`（表示名部分）は呼び出し側で `DisplayName` を通す前提でプレーンテキストのまま返す。 */
-export function describeNotification(n: NotificationItem): {
+ * `who`（表示名部分）は呼び出し側で `DisplayName` を通す前提でプレーンテキストのまま返す。
+ * `useEmojiReactions` が偽（アカウント設定で絵文字リアクションを使わない）なら、リアクション通知は
+ * 絵文字を問わず「❤️ いいねしました」にする（投稿カード側でもリアクションを ♥️ だけで扱うため）。 */
+export function describeNotification(
+  n: NotificationItem,
+  useEmojiReactions = true,
+): {
   icon: string;
   iconUrl?: string;
   i18nKey: string;
@@ -107,6 +112,9 @@ export function describeNotification(n: NotificationItem): {
       : n.relatedUser?.name || n.relatedUser?.username;
   switch (n.type) {
     case "reaction": {
+      if (!useEmojiReactions) {
+        return { icon: "❤️", i18nKey: "notifications:notificationsPanel.likeText", who, whoEmojis, whoAcct };
+      }
       // `reactionEmojis` のキーは Misskey 本家仕様に合わせコロンなし shortcode
       // （ローカルは `shortcode@.`、リモートは `shortcode@host`。バックエンド側 `convert.rs`）。
       // `reaction` は `:shortcode:`/`:shortcode@host:` 形式なので分解してから引く。
@@ -205,6 +213,7 @@ export default function NotificationsPanel({
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
+  const useEmojiReactions = currentUser?.use_emoji_reactions ?? true;
   const { registerNotifArrived, markRead, registerNotifViewer } = useStreamingContext();
   const { showError } = useToast();
   // キャッシュがあれば初回レンダーの時点から復元済みの内容を表示する（`useEffect`経由で
@@ -454,7 +463,7 @@ export default function NotificationsPanel({
 
   // 通知1件のカード。重ねるまとまりの中では li ではなく div にする（li は CardStack が持つ）。
   const renderCard = (n: NotificationItem, stacked: boolean) => {
-    const { icon, iconUrl, i18nKey, who, whoEmojis, whoAcct, newHandle } = describeNotification(n);
+    const { icon, iconUrl, i18nKey, who, whoEmojis, whoAcct, newHandle } = describeNotification(n, useEmojiReactions);
     const noteId = resolveTargetNoteId(n);
     const clickNoteId = resolveClickTargetNoteId(n);
     const userLink = n.user?.username ? (
@@ -494,7 +503,7 @@ export default function NotificationsPanel({
         {iconUrl ? (
           <RemoteImg className={styles.iconImg} src={iconUrl} alt={icon} title={icon} loading="lazy" data-emoji="" />
         ) : (
-          n.type === "reaction" ? (
+          n.type === "reaction" && useEmojiReactions ? (
             <TwemojiEmoji emoji={icon} className={styles.icon} />
           ) : (
             <UiIcon emoji={icon} className={styles.icon} />

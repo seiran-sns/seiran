@@ -5,6 +5,7 @@
   "notificationsPanel": {
     "unknownUser": "누구",
     "reactionText": "<userLink><emojiName/></userLink>이(가) 반응했습니다.",
+    "likeText": "<userLink><emojiName/></userLink>이(가) 좋아요를 눌렀습니다.",
     "followText": "<userLink><emojiName/></userLink>님이 나를 팔로우했습니다.",
     "followRequestText": "<userLink><emojiName/></userLink>님이 팔로우를 요청했습니다.",
     "followAcceptedText": "<userLink><emojiName/></userLink>님이 팔로우 요청을 수락했습니다.",
@@ -26,6 +27,7 @@
     "userPlaceholder": "사용자",
     "types": {
       "reaction": "리액션",
+      "like": "좋아요",
       "mention": "멘션",
       "reply": "답글",
       "renote": "리포스트",
