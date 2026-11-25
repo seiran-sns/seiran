@@ -871,6 +871,22 @@ export interface CreateAppTokenResponse {
   created_at: string;
 }
 
+/** 発行済みアプリパスワードの1件（`GET /account/app-passwords`）。 */
+export interface AppPasswordRow {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+/** アプリパスワード発行直後のレスポンス（`POST /account/app-passwords`）。`password`はこの
+ * レスポンスでしか返らない（DBにはハッシュしか保存しないため）。 */
+export interface CreateAppPasswordResponse {
+  id: string;
+  name: string;
+  password: string;
+  created_at: string;
+}
+
 export interface DriveFile {
   id: string;
   url: string;

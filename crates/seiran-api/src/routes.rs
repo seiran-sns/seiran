@@ -438,6 +438,15 @@ fn auth_account_routes() -> Router<AppState> {
             "/api/account/app-tokens/:id",
             delete(handlers::account::revoke_app_token),
         )
+        .route(
+            "/api/account/app-passwords",
+            get(handlers::app_passwords::list_handler)
+                .post(handlers::app_passwords::create_handler),
+        )
+        .route(
+            "/api/account/app-passwords/:id",
+            delete(handlers::app_passwords::revoke_handler),
+        )
         // TOTP（二段階認証、#65）: 設定画面での有効化・無効化
         .route("/api/account/totp/status", get(handlers::totp::totp_status))
         .route("/api/account/totp/setup", post(handlers::totp::totp_setup))

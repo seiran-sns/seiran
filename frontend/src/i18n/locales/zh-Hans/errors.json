@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "已超过定时时间24小时以上，因此未发布。",
   "INVALID_SCHEDULED_REQUEST": "无法读取定时帖子的内容。",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "不支持没有定时时间的草稿。",
-  "POLL_ALREADY_EXPIRED": "投票的截止时间早于发布时间。"
+  "POLL_ALREADY_EXPIRED": "投票的截止时间早于发布时间。",
+  "APP_PASSWORD_NAME_REQUIRED": "请输入用途",
+  "APP_PASSWORD_NAME_TOO_LONG": "用途不能超过 100 个字符",
+  "APP_PASSWORD_NAME_TAKEN": "已存在相同用途的应用专用密码",
+  "APP_PASSWORD_NOT_FOUND": "找不到该应用专用密码",
+  "ATP_ACCOUNT_REQUIRED": "此账号没有 Bluesky 账号",
+  "APP_PASSWORD_NOT_PERMITTED": "使用应用专用密码登录时无法执行此操作"
 }

@@ -9,6 +9,7 @@
     "lists": "列表",
     "appearance": "外觀",
     "appTokens": "應用程式權杖",
+    "appPasswords": "應用程式密碼",
     "followImport": "匯入與匯出",
     "followRequests": "追蹤請求",
     "comingSoon": "即將推出"
@@ -132,6 +133,13 @@
     "copyButton": "複製",
     "copiedButton": "已複製",
     "dismissButton": "關閉"
+  },
+  "appPasswordsSettings": {
+    "description": "登入 Bluesky 用戶端（如 TOKIMEKI）時代替主密碼使用的密碼。使用者名稱請填寫 Bluesky 帳號（例：name.seiran.org）。為每個用戶端分別建立，就能只撤銷不再使用的那個。",
+    "nameLabel": "用途（例：TOKIMEKI）",
+    "issuedWarning": "「{{name}}」的應用程式密碼。僅此時顯示，關閉後將無法再次查看。",
+    "empty": "尚未建立應用程式密碼。",
+    "revokeConfirm": "要撤銷「{{name}}」嗎？使用此密碼登入的用戶端將在不久後登出。"
   },
   "importExport": {
     "title": "匯入與匯出",

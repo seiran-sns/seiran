@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "Nicht veröffentlicht, da der geplante Zeitpunkt mehr als 24 Stunden zurücklag.",
   "INVALID_SCHEDULED_REQUEST": "Der geplante Beitrag konnte nicht gelesen werden.",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "Entwürfe ohne geplanten Zeitpunkt werden nicht unterstützt.",
-  "POLL_ALREADY_EXPIRED": "Die Umfrage wäre zum Veröffentlichungszeitpunkt bereits beendet."
+  "POLL_ALREADY_EXPIRED": "Die Umfrage wäre zum Veröffentlichungszeitpunkt bereits beendet.",
+  "APP_PASSWORD_NAME_REQUIRED": "Gib einen Zweck ein",
+  "APP_PASSWORD_NAME_TOO_LONG": "Der Zweck darf höchstens 100 Zeichen lang sein",
+  "APP_PASSWORD_NAME_TAKEN": "Es gibt bereits ein App-Passwort mit diesem Zweck",
+  "APP_PASSWORD_NOT_FOUND": "App-Passwort nicht gefunden",
+  "ATP_ACCOUNT_REQUIRED": "Dieses Konto hat kein Bluesky-Konto",
+  "APP_PASSWORD_NOT_PERMITTED": "Mit einem App-Passwort angemeldet ist diese Aktion nicht erlaubt"
 }

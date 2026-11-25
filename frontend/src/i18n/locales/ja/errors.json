@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "予約日時から24時間以上遅れたため、投稿を見送りました",
   "INVALID_SCHEDULED_REQUEST": "予約の内容を読み取れませんでした",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "予約日時の無い下書きは保存できません",
-  "POLL_ALREADY_EXPIRED": "アンケートの締め切りが投稿日時より前になっています"
+  "POLL_ALREADY_EXPIRED": "アンケートの締め切りが投稿日時より前になっています",
+  "APP_PASSWORD_NAME_REQUIRED": "用途を入力してください",
+  "APP_PASSWORD_NAME_TOO_LONG": "用途は100文字以内で入力してください",
+  "APP_PASSWORD_NAME_TAKEN": "同じ用途のアプリパスワードが既にあります",
+  "APP_PASSWORD_NOT_FOUND": "アプリパスワードが見つかりません",
+  "ATP_ACCOUNT_REQUIRED": "このアカウントには Bluesky 側のアカウントがありません",
+  "APP_PASSWORD_NOT_PERMITTED": "アプリパスワードでログインしているため、この操作はできません"
 }

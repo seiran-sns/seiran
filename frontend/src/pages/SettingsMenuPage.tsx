@@ -25,6 +25,7 @@ const BASE_ITEMS: SettingsMenuItem[] = [
   { to: "/settings/lists", icon: "📋", labelKey: "menu.lists" },
   { to: "/settings/appearance", icon: "🎨", labelKey: "menu.appearance" },
   { to: "/settings/app-tokens", icon: "🔑", labelKey: "menu.appTokens" },
+  { to: "/settings/app-passwords", icon: "🗝️", labelKey: "menu.appPasswords" },
   { to: "/settings/follow-import", icon: "🚚", labelKey: "menu.followImport" },
 ];
 

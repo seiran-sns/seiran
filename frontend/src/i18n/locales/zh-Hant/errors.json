@@ -117,5 +117,11 @@
   "SCHEDULED_POST_TOO_LATE": "已超過預約時間24小時以上，因此未發佈。",
   "INVALID_SCHEDULED_REQUEST": "無法讀取預約內容。",
   "UNSCHEDULED_DRAFT_NOT_SUPPORTED": "不支援沒有預約時間的草稿。",
-  "POLL_ALREADY_EXPIRED": "投票的截止時間早於發佈時間。"
+  "POLL_ALREADY_EXPIRED": "投票的截止時間早於發佈時間。",
+  "APP_PASSWORD_NAME_REQUIRED": "請輸入用途",
+  "APP_PASSWORD_NAME_TOO_LONG": "用途不能超過 100 個字元",
+  "APP_PASSWORD_NAME_TAKEN": "已有相同用途的應用程式密碼",
+  "APP_PASSWORD_NOT_FOUND": "找不到該應用程式密碼",
+  "ATP_ACCOUNT_REQUIRED": "此帳號沒有 Bluesky 帳號",
+  "APP_PASSWORD_NOT_PERMITTED": "以應用程式密碼登入時無法執行此操作"
 }

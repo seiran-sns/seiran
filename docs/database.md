@@ -321,8 +321,8 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 - `post_record_blobs_backfill`: 導入前の既存ローカル投稿（`at_cid` あり・未削除）の `post_id`。レコードの CBOR は `atp_blocks` にしか無く SQL で読めないので、起動時の `backfill_post_record_blobs` がデコードして `post_record_blobs` を埋め、行を消す。1行でも残っている間は孤立ファイル GC が1件も消さない（参照を数え漏らすため）。
 
 ### ATP セッション認証関連（`atp_app_passwords` / `atp_refresh_tokens`）
-- `atp_app_passwords`: `createAppPassword` のアプリパスワードの argon2 ハッシュと `revoked_at`。
-- `atp_refresh_tokens`: refreshJwt の `jti` の `expires_at`/`revoked_at`。更新のたびに古い `jti` を失効させる（ワンタイム）。
+- `atp_app_passwords`: `createAppPassword` のアプリパスワードの argon2 ハッシュと `revoked_at`。`revokeAppPassword` が名前で無効化するので、有効なもの（`revoked_at IS NULL`）の中で `(actor_id, name)` を一意にする部分ユニークインデックスを持つ（発行は `ON CONFLICT DO NOTHING` で重複を判定）。
+- `atp_refresh_tokens`: refreshJwt の `jti` の `expires_at`/`revoked_at`。更新のたびに古い `jti` を失効させる（ワンタイム）。`app_password_id` はそのセッションを始めたアプリパスワード（メインパスワードなら NULL）で、アプリパスワードの無効化時にそのセッションもまとめて失効させるために使う。
 - JWT 自体は保存しない。メインパスワードかアプリパスワードかは JWT の `privileged` クレームに持つ（`docs/protocols.md` 3節）。
 
 ### `atp_preferences`

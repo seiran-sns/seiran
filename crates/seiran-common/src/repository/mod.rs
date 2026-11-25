@@ -84,7 +84,10 @@ pub use at_migration::{
 };
 pub use atp::{AtpReadRepository, PgAtpReadRepository, RepoEvent};
 pub use atp_preferences::{AtpPreferencesRepository, PgAtpPreferencesRepository};
-pub use atp_session::{AppPasswordRow, AtpSessionRepository, PgAtpSessionRepository};
+pub use atp_session::{
+    ActiveAppPassword, AppPasswordRow, AtpSessionRepository, PgAtpSessionRepository,
+    RefreshTokenOwner,
+};
 pub use auth_rate_limit::{AuthRateLimitRepository, IpBlockRow, PgAuthRateLimitRepository};
 pub use block::{BlockRepository, BlockedActorRow, PgBlockRepository};
 pub use dm::{DmPeerSummary, DmRepository, PgDmRepository};
