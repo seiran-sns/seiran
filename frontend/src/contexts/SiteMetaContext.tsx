@@ -83,9 +83,9 @@ function applyColor(siteColor: string, isDark: boolean, lowContrast: boolean) {
   root.setProperty("--accent-hover", `color-mix(in srgb, ${color} 82%, black)`);
   if (lowContrast) {
     // 選択中のトグル等の背景。背景側へ混ぜると暗くなってグレーアウトに見えるので、明るさは
-    // ページ背景より少し明るい値に固定し、サイトカラーの色相だけを控えめに付ける。
-    const [l, hoverL] = isDark ? ["0.34", "0.38"] : ["0.955", "0.925"];
-    root.setProperty("--accent-deep", `oklch(from ${siteColor} ${l} 0.045 h)`);
+    // ページ背景とほぼ同じ明るさに固定し、サイトカラーの色相だけを控えめに付ける。
+    const [l, hoverL] = isDark ? ["0.34", "0.38"] : ["0.935", "0.91"];
+    root.setProperty("--accent-deep", `oklch(from ${siteColor} ${l} 0.05 h)`);
     root.setProperty("--accent-deep-hover", `oklch(from ${siteColor} ${hoverL} 0.055 h)`);
     return;
   }

@@ -94,8 +94,8 @@
   --accent-hover: #47618b;
   /* 選択中のトグル等の背景。背景より暗くするとグレーアウトに見えるので、背景より少し明るく
    * して色相だけを付ける（サイトカラーがあるときは SiteMetaContext の applyColor が同じ考え方で上書きする）。 */
-  --accent-deep: #edf1f7;
-  --accent-deep-hover: #e2e8f1;
+  --accent-deep: #e5e9ef;
+  --accent-deep-hover: #dbe1ea;
   --danger: #b45f58;
   --warn: #93693a;
   --bsky: #6a8cbd;
