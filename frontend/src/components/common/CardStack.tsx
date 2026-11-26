@@ -39,15 +39,39 @@ function scrollTopOf(scroller: HTMLElement | null): number {
 }
 
 /**
- * 広げる・畳むときに画面上の位置を動かさない基準。`measure` が今の画面内の位置を返す。`docTop` は
- * 前のフレームでのスクロール内容の中での位置（画面内の位置＋スクロール量）。広げる・畳むことで
- * この位置がずれた分だけスクロールする。画面内の位置そのものを元へ戻すと、広げている間にユーザーが
- * スクロールした分（スマホでは線を越えるのはスクロールの最中）まで打ち消してしまう。
+ * 広げる・畳むときに画面上の位置を動かさない基準。基準が無ければまとまりの上端を動かさない
+ * （何もしなくても上端は動かない）。
+ * - `card`: マウスが乗ったカード（マウス環境）。`measure` が今の画面内の位置を返し、`docTop` は前の
+ *   フレームでのスクロール内容の中での位置（画面内の位置＋スクロール量）。広げる・畳むことでこの位置が
+ *   ずれた分だけスクロールする（画面内の位置そのものを元へ戻すと、その間のユーザーのスクロールまで
+ *   打ち消す）。
+ * - `bottom`: まとまりの下端（一番下のカード）。測らずに、自分の高さが変わった分だけスクロールする。
+ *   測ると、上の別のまとまりが同時に広がる・畳むことによるずれまで拾い、そちらの位置合わせと二重に
+ *   動かしてしまう。
  */
-interface SpreadAnchor {
-  measure: () => number | undefined;
-  scroller: HTMLElement | null;
-  docTop: number;
+type SpreadAnchor =
+  | { kind: "card"; measure: () => number | undefined; scroller: HTMLElement | null; docTop: number }
+  | { kind: "bottom"; scroller: HTMLElement | null; pending: number };
+
+/**
+ * ブラウザのスクロールアンカーを止めているまとまりの数（スクロールする要素ごと）。複数のまとまりが
+ * 同時に動くと、それぞれが元の値を覚えて戻すやり方では、後から戻した方が止めたままにしてしまう。
+ */
+const overflowAnchorHolds = new Map<HTMLElement, number>();
+
+function holdOverflowAnchor(host: HTMLElement): () => void {
+  const count = overflowAnchorHolds.get(host) ?? 0;
+  if (count === 0) host.style.overflowAnchor = "none";
+  overflowAnchorHolds.set(host, count + 1);
+  return () => {
+    const rest = (overflowAnchorHolds.get(host) ?? 1) - 1;
+    if (rest > 0) {
+      overflowAnchorHolds.set(host, rest);
+      return;
+    }
+    overflowAnchorHolds.delete(host);
+    host.style.overflowAnchor = "";
+  };
 }
 
 /**
@@ -161,18 +185,21 @@ export default function CardStack({
     onSpreadChange?.(next);
   };
 
-  // 広げる・畳む間の基準（乗ったカード・線にかかったカードの上端、まとまりの下端）。広げる・畳む
-  // 状態を変える直前に置き、アニメーションの間ずっとこれが元の画面内の位置に来るようスクロールで戻す。
+  // 広げる・畳む間の基準（SpreadAnchor）。広げる・畳む状態を変える直前に置く。
   const anchorRef = useRef<SpreadAnchor | null>(null);
-  const setAnchor = (measure: () => number | undefined) => {
+  const setCardAnchor = (card: HTMLElement) => {
     const el = ref.current;
-    const value = measure();
-    if (!el || value === undefined) {
-      anchorRef.current = null;
-      return;
-    }
+    if (!el) return;
     const scroller = scrollParentOf(el);
-    anchorRef.current = { measure, scroller, docTop: value + scrollTopOf(scroller) };
+    const measure = () => card.getBoundingClientRect().top;
+    anchorRef.current = { kind: "card", measure, scroller, docTop: measure() + scrollTopOf(scroller) };
+  };
+  const setBottomAnchor = () => {
+    const el = ref.current;
+    anchorRef.current = el ? { kind: "bottom", scroller: scrollParentOf(el), pending: 0 } : null;
+  };
+  const clearAnchor = () => {
+    anchorRef.current = null;
   };
 
   // ずらし幅を目標へアニメーションさせる（top と padding-bottom を毎フレーム変える。CSS の
@@ -193,9 +220,7 @@ export default function CardStack({
     // 動かしている間はブラウザのスクロールアンカーを止める（こちらの位置合わせと二重に動かさないため）。
     const el = ref.current;
     const scroller = el ? scrollParentOf(el) : null;
-    const anchorHost = scroller ?? document.documentElement;
-    const previousOverflowAnchor = anchorHost.style.overflowAnchor;
-    anchorHost.style.overflowAnchor = "none";
+    const releaseOverflowAnchor = holdOverflowAnchor(scroller ?? document.documentElement);
     const start = performance.now();
     let frame = window.requestAnimationFrame(function step(now) {
       const t = Math.min(1, (now - start) / SPREAD_ANIMATION_MS);
@@ -206,21 +231,32 @@ export default function CardStack({
     });
     return () => {
       window.cancelAnimationFrame(frame);
-      anchorHost.style.overflowAnchor = previousOverflowAnchor;
+      releaseOverflowAnchor();
     };
   }, [targetOffset]);
 
-  // ずらし幅を変えたフレームで、基準がスクロール内容の中でずれた分だけスクロールする。
+  // ずらし幅を変えたフレームで、基準がずれた分だけスクロールする。1px 未満のずれは動かさず次の
+  // フレームへ持ち越す（捨てると積もってずれる）。
+  const appliedOffsetRef = useRef(offset);
   useLayoutEffect(() => {
+    const grown = (count - 1) * (offset - appliedOffsetRef.current);
+    appliedOffsetRef.current = offset;
     const anchor = anchorRef.current;
     if (!anchor) return;
-    const now = anchor.measure();
-    if (now !== undefined) {
-      const docTop = now + scrollTopOf(anchor.scroller);
-      // 1px 未満のずれは動かさず次のフレームへ持ち越す（捨てると積もってずれる）。
-      if (Math.abs(docTop - anchor.docTop) >= 1) {
-        scrollByPx(anchor.scroller, docTop - anchor.docTop);
-        anchor.docTop = docTop;
+    if (anchor.kind === "bottom") {
+      anchor.pending += grown;
+      if (Math.abs(anchor.pending) >= 1) {
+        scrollByPx(anchor.scroller, anchor.pending);
+        anchor.pending = 0;
+      }
+    } else {
+      const now = anchor.measure();
+      if (now !== undefined) {
+        const docTop = now + scrollTopOf(anchor.scroller);
+        if (Math.abs(docTop - anchor.docTop) >= 1) {
+          scrollByPx(anchor.scroller, docTop - anchor.docTop);
+          anchor.docTop = docTop;
+        }
       }
     }
     if (offset === targetOffset) anchorRef.current = null;
@@ -242,7 +278,8 @@ export default function CardStack({
       }
       if (!seen) return;
       const rootTop = entry.rootBounds?.top ?? 0;
-      if (entry.boundingClientRect.bottom <= rootTop) setAnchor(() => ref.current?.getBoundingClientRect().bottom);
+      if (entry.boundingClientRect.bottom <= rootTop) setBottomAnchor();
+      else clearAnchor();
       setPinned(false);
       onSpreadChange?.(false);
     });
@@ -257,6 +294,8 @@ export default function CardStack({
     // 広げた形で戻ってきたときは、スクロール位置を合わせる前で線がかかっていないことがあるので、
     // 一度線がかかるまでは畳まない。
     let seen = !touchSpreadRef.current;
+    // 前回見たときの線の位置（まとまりより上・中・下）。開くときの基準を決める。
+    let lastLine: "above" | "inside" | "below" | null = null;
     const changeTouchSpread = (next: boolean) => {
       touchSpreadRef.current = next;
       setTouchSpread(next);
@@ -293,14 +332,19 @@ export default function CardStack({
       if (focused !== null || !touchSpreadRef.current || line < rect.top) setTouchFocused(focused);
       if (!canSpread) return;
       const inside = rect.height > 0 && rect.top <= line && line < rect.bottom;
+      const previousLine = lastLine;
+      lastLine = inside ? "inside" : line < rect.top ? "above" : "below";
       if (inside) seen = true;
       if (inside === touchSpreadRef.current || (!inside && !seen)) return;
-      if (inside && focused !== null) {
-        const card = el.querySelector<HTMLElement>(`[data-stack-index="${focused}"]`);
-        setAnchor(() => card?.getBoundingClientRect().top);
-      } else if (!inside && line >= rect.bottom) {
-        setAnchor(() => ref.current?.getBoundingClientRect().bottom);
-      }
+      // 開閉の基準はまとまりの上端か下端（一番上か一番下のカード）にする。線が来た側・抜けた側の
+      // 端を動かさないので、開いても線はまとまりの中、閉じても外に残り、開閉が繰り返されない。
+      // 隣り合うまとまりが同時に開閉しても、それぞれ自分の高さの変化だけで位置を合わせるので
+      // 干渉しない。開いた後の前面は、線の位置に見えているカード（上の update）。
+      // - 開く: 線が下から来た（直前はまとまりより下）なら一番下のカード、そうでなければ一番上のカード。
+      // - 閉じる: 線がまとまりより上へ抜けたなら一番上のカード、下へ抜けたなら一番下のカード。
+      const fromBelow = inside ? previousLine === "below" : lastLine === "below";
+      if (fromBelow) setBottomAnchor();
+      else clearAnchor();
       changeTouchSpread(inside);
     };
     const schedule = () => {
@@ -357,10 +401,7 @@ export default function CardStack({
             setHoveredKey(key);
             onFrontChange?.(key);
             if (!hoverSpreadable) return;
-            if (!spread) {
-              const card = e.currentTarget;
-              setAnchor(() => card.getBoundingClientRect().top);
-            }
+            if (!spread) setCardAnchor(e.currentTarget);
             setMouseInside(true);
           }}
         >
