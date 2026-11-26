@@ -5,16 +5,16 @@ import { useRightPane } from "../contexts/RightPaneContext";
 
 export default function NotificationsPage() {
   const {
-    notificationsPageScrollY,
-    setNotificationsPageScrollY,
+    notificationsPageScroll,
+    setNotificationsPageScroll,
     notificationsPageCache,
     setNotificationsPageCache,
   } = useRightPane();
   const center = (
     <>
       <NotificationsPanel
-        scrollY={notificationsPageScrollY}
-        onScrollYChange={setNotificationsPageScrollY}
+        scroll={notificationsPageScroll}
+        onScrollChange={setNotificationsPageScroll}
         cache={notificationsPageCache}
         onCacheChange={setNotificationsPageCache}
       />

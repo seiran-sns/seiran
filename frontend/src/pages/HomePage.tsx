@@ -129,7 +129,7 @@ export default function HomePage() {
   const [composerCollapsed, setComposerCollapsed] = useState(
     () => localStorage.getItem(COMPOSER_COLLAPSED_KEY) === "1"
   );
-  const { timelineTab, setTimelineTab, notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
+  const { timelineTab, setTimelineTab, notifPanelScroll, setNotifPanelScroll, notifPanelCache, setNotifPanelCache } =
     useRightPane();
   const rightPaneRef = useRef<HTMLDivElement>(null);
   // クイック通知欄の実際のスクロールコンテナは`.rightScroll`（AppShell側、この直下div=
@@ -677,8 +677,8 @@ export default function HomePage() {
       />
       {timelineTab === 0 ? (
         <NotificationsPanel
-          scrollY={notifPanelScrollY}
-          onScrollYChange={setNotifPanelScrollY}
+          scroll={notifPanelScroll}
+          onScrollChange={setNotifPanelScroll}
           getScrollContainer={getNotifScrollContainer}
           cache={notifPanelCache}
           onCacheChange={setNotifPanelCache}

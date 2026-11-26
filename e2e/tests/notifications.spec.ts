@@ -117,13 +117,18 @@ test("同じポストへの連続したリアクション通知は重ねて出�
   await page.mouse.move(0, 0);
   await expect.poll(frontTop).toBe("0px");
 
-  // 一番下の帯（一番古いカードの下端）にマウスを乗せると、そのカードが前面に出る。
+  // 一番下の帯（一番古いカードの下端）にマウスを乗せると、そのカードが前面に出て、まとまりが
+  // 32px ずつに広がる。乗せたカードは画面上で動かない（上へ広がる分はスクロールで送る）。
   const box = await stack.boundingBox();
   if (!box) throw new Error("stack not laid out");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height - 2);
-  await expect.poll(frontTop).toBe("16px");
+  const pointerY = box.y + box.height - 2;
+  const frontScreenTop = () => cards.last().evaluate((el) => Math.round(el.getBoundingClientRect().top));
+  await page.mouse.move(box.x + box.width / 2, pointerY);
+  await expect.poll(frontTop).toBe("64px");
+  const spreadTop = await frontScreenTop();
+  expect(spreadTop).toBeLessThanOrEqual(pointerY);
 
-  // マウスが離れても前面のまま残る。
+  // マウスが離れると 8px ずつへ戻り、前面のカードはそのまま残る。
   await page.mouse.move(0, 0);
   await expect.poll(frontTop).toBe("16px");
 });

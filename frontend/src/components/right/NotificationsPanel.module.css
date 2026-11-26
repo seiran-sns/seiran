@@ -103,6 +103,14 @@
   margin: 12px 12px 0;
 }
 
+/* 広げたまま固定したまとまり（CardStack）。まとまり全体を黄色い枠で囲む。マウスを乗せると固定が
+   解けて枠が消えるので、乗せれば解けることがわかる。 */
+.stackPinned {
+  outline: 2px solid var(--deck-pinned-outline);
+  outline-offset: 3px;
+  border-radius: 16px;
+}
+
 /* 重ねたカード。高さは CardStack が一番高いカードにそろえ、余白は .stack が持つ。 */
 .stackItem {
   margin: 0;

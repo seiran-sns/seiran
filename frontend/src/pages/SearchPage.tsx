@@ -15,7 +15,7 @@ export default function SearchPage() {
   const { t } = useTranslation();
   const [searchParams, setSearchParams] = useSearchParams();
   const initialQ = searchParams.get("q") ?? "";
-  const { notifPanelScrollY, setNotifPanelScrollY, notifPanelCache, setNotifPanelCache } =
+  const { notifPanelScroll, setNotifPanelScroll, notifPanelCache, setNotifPanelCache } =
     useRightPane();
   const rightPaneRef = useRef<HTMLDivElement>(null);
   // Home画面と同じ`.rightScroll`独立スクロールコンテナのscrollTopを保存・復元する。
@@ -126,8 +126,8 @@ export default function SearchPage() {
     <div ref={rightPaneRef}>
       <Tabs tabs={[t("search:searchPage.tabs.quickNotifications")]} active={0} onChange={() => {}} />
       <NotificationsPanel
-        scrollY={notifPanelScrollY}
-        onScrollYChange={setNotifPanelScrollY}
+        scroll={notifPanelScroll}
+        onScrollChange={setNotifPanelScroll}
         getScrollContainer={getNotifScrollContainer}
         cache={notifPanelCache}
         onCacheChange={setNotifPanelCache}
