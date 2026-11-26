@@ -1,7 +1,7 @@
 import { act } from "react";
 import { createRoot, Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import CardStack from "./CardStack";
+import CardStack, { collapsedStackIndexAt } from "./CardStack";
 
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -162,5 +162,32 @@ describe("CardStack の広げる（タッチ環境）", () => {
     touchEnv(400, 600);
     render({ initialSpread: true });
     expect(tops()).toEqual(["0px", "32px", "64px"]);
+  });
+});
+
+describe("collapsedStackIndexAt", () => {
+  // カード1枚の高さ 60px、畳んだずらし幅 8px。
+  const height = (count: number) => 60 + (count - 1) * 8;
+
+  it("少ない件数では中ほどのカードにかからず、先頭と末尾で半分ずつ", () => {
+    const h = height(3); // 76px、先頭・末尾に 38px ずつ
+    expect(collapsedStackIndexAt(0, h, 60, 3)).toBe(0);
+    expect(collapsedStackIndexAt(37, h, 60, 3)).toBe(0);
+    expect(collapsedStackIndexAt(38, h, 60, 3)).toBe(2);
+    expect(collapsedStackIndexAt(75, h, 60, 3)).toBe(2);
+  });
+
+  it("多い件数では先頭と末尾はカード1枚の高さまでで、残りを中ほどのカードで等分する", () => {
+    const h = height(12); // 148px、先頭・末尾に 60px ずつ、中ほどの10枚で 28px を等分
+    expect(collapsedStackIndexAt(59, h, 60, 12)).toBe(0);
+    expect(collapsedStackIndexAt(60, h, 60, 12)).toBe(1);
+    expect(collapsedStackIndexAt(60 + 2.8 * 5, h, 60, 12)).toBe(6);
+    expect(collapsedStackIndexAt(87.9, h, 60, 12)).toBe(10);
+    expect(collapsedStackIndexAt(88, h, 60, 12)).toBe(11);
+  });
+
+  it("2件なら半分ずつ", () => {
+    expect(collapsedStackIndexAt(33, height(2), 60, 2)).toBe(0);
+    expect(collapsedStackIndexAt(34, height(2), 60, 2)).toBe(1);
   });
 });

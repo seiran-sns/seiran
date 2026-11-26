@@ -14,11 +14,16 @@ function prefersReducedMotion(): boolean {
   return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
 }
 
-/** `el` をスクロールさせている一番近い祖先（右ペインの `.rightScroll` 等）。無ければ null（window）。 */
+/**
+ * `el` をスクロールさせている一番近い祖先（右ペインの `.rightScroll` 等）。無ければ null（window）。
+ * body まで来たら window とする: body は `overflow-x: hidden`（index.css）のため computed の
+ * `overflow-y` が `auto` になるが、実際にスクロールするのは window で、body の scrollTop は動かない。
+ * 狭い画面の `.rightScroll` のように overflow-y が auto でも伸びるだけでスクロールしない要素も飛ばす。
+ */
 function scrollParentOf(el: HTMLElement): HTMLElement | null {
-  for (let p = el.parentElement; p; p = p.parentElement) {
+  for (let p = el.parentElement; p && p !== document.body && p !== document.documentElement; p = p.parentElement) {
     const { overflowY } = getComputedStyle(p);
-    if (overflowY === "auto" || overflowY === "scroll") return p;
+    if ((overflowY === "auto" || overflowY === "scroll") && p.scrollHeight > p.clientHeight) return p;
   }
   return null;
 }
@@ -33,6 +38,23 @@ function scrollByPx(scroller: HTMLElement | null, delta: number) {
 interface SpreadAnchor {
   measure: () => number | undefined;
   value: number;
+}
+
+/**
+ * 畳んだまとまりのどのカードに線がかかっているか（`y` はまとまりの上端からの線の位置、`height` は
+ * まとまりの高さ、`cardHeight` はカード1枚の高さ）。先頭と末尾のカードにまとまりの高さの半分
+ * （ただしカード1枚の高さまで）ずつを割り当て、残りを中ほどのカードで等分する（残りが無ければ
+ * 中ほどのカードにはかからない）。畳んだまとまりは帯が細いので、等分すると先頭・末尾に線が
+ * かかる幅が狭すぎる。
+ */
+export function collapsedStackIndexAt(y: number, height: number, cardHeight: number, count: number): number {
+  if (count <= 1) return 0;
+  const end = Math.min(height / 2, Math.max(0, cardHeight));
+  if (y < end) return 0;
+  if (y >= height - end || count === 2) return count - 1;
+  const middle = count - 2;
+  const share = (height - 2 * end) / middle;
+  return Math.min(count - 2, 1 + Math.floor((y - end) / share));
 }
 
 function useNoHover(): boolean {
@@ -52,9 +74,10 @@ function useNoHover(): boolean {
  * 縦に `STACK_OFFSET_PX` ずつずらして重ねる。`keys` は上（新しい）から順。
  *
  * 前面に出すカード: マウス環境は最後にマウスが乗ったカード（離れても前面のまま残す）、タッチ環境は画面の上から
- * `TOUCH_FOCUS_LINE` の線にかかっているカード（まとまりの高さを件数で等分し、線の位置に
- * 当たるカード）で、まとまり全体が線より上にあれば一番古いカード。どちらでもなければ
- * 一番新しいカード。
+ * `TOUCH_FOCUS_LINE` の線にかかっているカードで、まとまり全体が線より上にあれば一番古いカード。
+ * どちらでもなければ一番新しいカード。タッチ環境で線にかかっているカードは、広げないまとまり
+ * （タイムライン）ではまとまりの高さを件数で等分して決める。広げるまとまり（`spreadOffsetPx`）では
+ * 畳んでいれば `collapsedStackIndexAt`、広げていればマウス環境と同じく線の位置に見えているカード。
  *
  * 上下関係は前面のカードに近いほど上にする（1〜5 で 3 が前面なら 3 > 2 = 4 > 1 = 5）。前面より
  * 上のカードは上端の帯、下のカードは下端の帯が見えるので、全部のカードの帯が見える。
@@ -229,10 +252,22 @@ export default function CardStack({
         // 線より上へ通り過ぎたまとまりは一番古いカードを前面にする。線を下から上へ通る間に
         // 新しい順から古い順へ前面が移っていくので、通り過ぎた後もその続きの状態にしておく。
         focused = count - 1;
+      } else if (touchSpreadRef.current) {
+        // 広げている間はマウス環境と同じく、線の位置に見えているカード（重なりの一番上）。
+        const hit = document
+          .elementFromPoint(rect.left + rect.width / 2, line)
+          ?.closest<HTMLElement>("[data-stack-index]");
+        const index = hit && el.contains(hit) ? Number(hit.dataset.stackIndex) : NaN;
+        focused = Number.isNaN(index) ? null : index;
+      } else if (canSpread) {
+        const cardHeight = rect.height - (count - 1) * offsetRef.current;
+        focused = collapsedStackIndexAt(line - rect.top, rect.height, cardHeight, count);
       } else {
+        // 広げないまとまり（タイムライン）は高さを件数で等分する。
         focused = Math.min(count - 1, Math.floor(((line - rect.top) / rect.height) * count));
       }
-      setTouchFocused(focused);
+      // 広げている間に線の位置のカードが取れない（隙間・描き直し中）ときは前面を変えない。
+      if (focused !== null || !touchSpreadRef.current || line < rect.top) setTouchFocused(focused);
       if (!canSpread) return;
       const inside = rect.height > 0 && rect.top <= line && line < rect.bottom;
       if (inside) seen = true;
