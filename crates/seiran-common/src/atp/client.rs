@@ -9,6 +9,9 @@ use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::queue::worker::priority;
+use crate::repository::post_extras::{
+    apply_post_extras, attachments_from_parsed, BskyGates, NewLinkCardInput, PostExtras,
+};
 use crate::traits::{Job, JobQueue};
 
 /// Bsky AppView のベース URL。未設定時は本番の公開AppView。
@@ -619,6 +622,60 @@ async fn upsert_bsky_post_with(
         None => None,
     };
 
+    // 返信許可（threadgate）・引用可否（postgate）（#返信/引用グレーアウト）。HTTP 呼び出しなので
+    // トランザクションの前に取得する。取得失敗時は両方とも「制限なし」（デフォルト値:
+    // bsky_reply_allow=NULL, bsky_quote_disabled=false）のままにしておくのが安全（誤ってボタンを
+    // グレーアウトしない）。`Deferred` ではここでは取得せず、コミット後に取得ジョブを積む。
+    let gates = match gate_fetch {
+        GateFetch::Inline => {
+            let (reply_allow, quote_disabled) =
+                fetch_bsky_gates(http, &post.author_did, &post.uri).await;
+            Some(BskyGates {
+                reply_allow,
+                quote_disabled,
+            })
+        }
+        GateFetch::Deferred => post.threadgate_allow.clone().map(|allow| BskyGates {
+            reply_allow: Some(allow),
+            quote_disabled: false,
+        }),
+    };
+    let attachments = match &post.seiran_attachments {
+        Some(attachments) => attachments.clone(),
+        None => post
+            .embed
+            .as_ref()
+            .map(|embed| crate::atp::parse_bsky_embed_attachments(embed, &post.author_did))
+            .unwrap_or_default()
+            .into_iter()
+            .map(|att| (att, post.is_sensitive))
+            .collect(),
+    };
+    let link_card = post
+        .embed
+        .as_ref()
+        .and_then(|embed| crate::atp::parse_bsky_embed_link_card(embed, &post.author_did));
+    let extras = PostExtras {
+        content_metadata: None,
+        hashtag_text: None,
+        attachments: attachments_from_parsed(&attachments),
+        link_cards: link_card
+            .iter()
+            .map(|card| NewLinkCardInput {
+                url: card.url.clone(),
+                title: card.title.clone(),
+                description: card.description.clone(),
+                thumbnail_url: card.thumbnail_url.clone(),
+            })
+            .collect(),
+        bsky_gates: gates,
+    };
+
+    // 投稿本体と付帯情報（添付・URLカード・返信可否/引用可否）を1つのトランザクションで書く
+    // （`crate::repository::post_extras`）。途中で失敗したら何も残らないので、呼び出し元が
+    // やり直せば最初から保存し直せる。ON CONFLICT でスキップされた場合（並行競合）は、先に
+    // 作成した側が同じトランザクションで付帯情報まで書いている。
+    let mut tx = pool.begin().await?;
     let result = sqlx::query(
         "INSERT INTO posts (id, actor_id, body, at_uri, at_cid, created_at, mention_facets, bridge_of_post_id, bridged_original_uri)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -633,8 +690,13 @@ async fn upsert_bsky_post_with(
     .bind(&mention_facets)
     .bind(bridge_of_post_id)
     .bind(&post.bridged_original_url)
-    .execute(pool)
+    .execute(&mut *tx)
     .await?;
+    let inserted = result.rows_affected() > 0;
+    if inserted {
+        apply_post_extras(&mut tx, post_id, &extras).await?;
+    }
+    tx.commit().await?;
 
     // ON CONFLICT で INSERT がスキップされた場合（並行同期の競合）に備え、確定した id を引き直す。
     let final_id = sqlx::query_scalar::<_, i64>("SELECT id FROM posts WHERE at_uri = $1 LIMIT 1")
@@ -642,177 +704,96 @@ async fn upsert_bsky_post_with(
         .fetch_one(pool)
         .await?;
 
-    // このリクエストで新規作成できた場合のみブリッジ処理を行う（並行競合時は先に作成した側で処理済み）。
-    if result.rows_affected() > 0 {
-        if let Some(url) = &post.bridged_original_url {
-            match bridge_of_post_id {
-                Some(original_id) => {
-                    if let Err(e) = crate::bridge_post::set_original_bridge_pointer(
-                        pool,
-                        original_id,
-                        final_id,
-                        crate::bridge_post::BridgeTargetProtocol::Atp,
-                    )
-                    .await
-                    {
-                        tracing::warn!(
-                            "[upsert_bsky_post] 元ポストへのブリッジ逆参照更新に失敗: {}",
-                            e
-                        );
-                    }
-                }
-                None => {
-                    if let Err(e) = queue
-                        .enqueue(
-                            Job::FetchBridgeOriginal {
-                                bridge_post_id: final_id,
-                                target_uri: url.clone(),
-                                protocol: "ap".to_string(),
-                            },
-                            priority::NORMAL,
-                        )
-                        .await
-                    {
-                        tracing::warn!(
-                            "[upsert_bsky_post] FetchBridgeOriginalの積み込みに失敗: {}",
-                            e
-                        );
-                    }
-                }
-            }
-        }
-
-        // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
-        // 無いか確認し、あれば結合する（安全網）。
-        if let Err(e) = crate::bridge_post::link_pending_bridges_for_new_original(
-            pool,
-            final_id,
-            None,
-            Some(&post.uri),
-        )
-        .await
-        {
-            tracing::warn!(
-                "[upsert_bsky_post] 待機中ブリッジポストの結合チェックに失敗: {}",
-                e
-            );
-        }
+    // ここから先はコミット後の後処理（ジョブの積み込み・ブリッジの結合）。新規作成できた場合
+    // のみ行う（並行競合時は先に作成した側で処理済み）。失敗しても投稿そのものは完全なので
+    // ログだけ残す。
+    if !inserted {
+        return Ok(final_id);
     }
-
-    // 実際にこのリクエストで新規作成できた場合のみ添付・URLカードを復元する。
-    // ON CONFLICT でスキップされた場合（並行競合）は、先に作成した側で処理済みのはず。
-    if result.rows_affected() > 0 {
-        let attachments = match &post.seiran_attachments {
-            Some(attachments) => attachments.clone(),
-            None => post
-                .embed
-                .as_ref()
-                .map(|embed| crate::atp::parse_bsky_embed_attachments(embed, &post.author_did))
-                .unwrap_or_default()
-                .into_iter()
-                .map(|att| (att, post.is_sensitive))
-                .collect(),
-        };
-        for (position, (att, is_sensitive)) in attachments.iter().enumerate() {
-            if let Err(e) = sqlx::query(
-                "INSERT INTO post_attachments (post_id, media_file_id, remote_url, remote_mime_type, remote_thumbnail_url, is_sensitive, is_gif, position)
-                 VALUES ($1, NULL, $2, $3, $4, $7, $5, $6)
-                 ON CONFLICT (post_id, position) DO NOTHING",
-            )
-            .bind(final_id)
-            .bind(&att.url)
-            .bind(&att.mime_type)
-            .bind(att.thumbnail_url.as_deref())
-            .bind(att.is_gif)
-            .bind(position as i16)
-            .bind(*is_sensitive)
-            .execute(pool)
-            .await
-            {
-                tracing::error!("[upsert_bsky_post] 添付URL保存失敗（スキップ）: {}", e);
-            }
-        }
-
-        if let Some(embed) = &post.embed {
-            if let Some(card) = crate::atp::parse_bsky_embed_link_card(embed, &post.author_did) {
-                let insert_result = crate::repository::note_extras::insert_link_card(
+    if let Some(url) = &post.bridged_original_url {
+        match bridge_of_post_id {
+            Some(original_id) => {
+                if let Err(e) = crate::bridge_post::set_original_bridge_pointer(
                     pool,
-                    &crate::repository::note_extras::NewLinkCard {
-                        post_id: final_id,
-                        position: 0,
-                        url: &card.url,
-                        title: &card.title,
-                        description: &card.description,
-                        thumbnail_url: card.thumbnail_url.as_deref(),
-                        embed_src: None,
-                        embed_type: None,
-                    },
+                    original_id,
+                    final_id,
+                    crate::bridge_post::BridgeTargetProtocol::Atp,
                 )
-                .await;
-                match insert_result {
-                    Ok(_) => {
-                        if let Err(e) = queue
-                            .enqueue(
-                                Job::LinkCardEmbedResolve {
-                                    post_id: final_id,
-                                    position: 0,
-                                    url: card.url.clone(),
-                                },
-                                priority::LOW,
-                            )
-                            .await
-                        {
-                            tracing::error!(
-                                "[upsert_bsky_post] LinkCardEmbedResolve enqueue失敗: {}",
-                                e
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        tracing::error!(
-                            "[upsert_bsky_post] post_link_cards 保存失敗（スキップ）: {}",
-                            e
-                        );
-                    }
+                .await
+                {
+                    tracing::warn!(
+                        "[upsert_bsky_post] 元ポストへのブリッジ逆参照更新に失敗: {}",
+                        e
+                    );
                 }
             }
-        }
-
-        // 返信許可（threadgate）・引用可否（postgate）を取得して保存する（#返信/引用グレーアウト）。
-        // 取得失敗時は両方とも「制限なし」のまま（デフォルト値: bsky_reply_allow=NULL,
-        // bsky_quote_disabled=false）にしておくのが安全（誤ってボタンをグレーアウトしない）。
-        let gates = match gate_fetch {
-            GateFetch::Inline => Some(fetch_bsky_gates(http, &post.author_did, &post.uri).await),
-            GateFetch::Deferred => {
+            None => {
                 if let Err(e) = queue
                     .enqueue(
-                        Job::BskyGatesFetch {
-                            post_id: final_id,
-                            author_did: post.author_did.clone(),
-                            at_uri: post.uri.clone(),
+                        Job::FetchBridgeOriginal {
+                            bridge_post_id: final_id,
+                            target_uri: url.clone(),
+                            protocol: "ap".to_string(),
                         },
                         priority::NORMAL,
                     )
                     .await
                 {
-                    tracing::error!("[upsert_bsky_post] BskyGatesFetch enqueue失敗: {}", e);
+                    tracing::warn!(
+                        "[upsert_bsky_post] FetchBridgeOriginalの積み込みに失敗: {}",
+                        e
+                    );
                 }
-                post.threadgate_allow
-                    .clone()
-                    .map(|allow| (Some(allow), false))
             }
-        };
-        if let Some((reply_allow, quote_disabled)) = gates {
-            if let Err(e) = crate::repository::bsky_ingest::set_bsky_gates(
-                pool,
-                final_id,
-                reply_allow.as_ref(),
-                quote_disabled,
+        }
+    }
+
+    // 受動的リンク: このATP投稿自身（at_uri）を待っている未解決ブリッジポストが
+    // 無いか確認し、あれば結合する（安全網）。
+    if let Err(e) = crate::bridge_post::link_pending_bridges_for_new_original(
+        pool,
+        final_id,
+        None,
+        Some(&post.uri),
+    )
+    .await
+    {
+        tracing::warn!(
+            "[upsert_bsky_post] 待機中ブリッジポストの結合チェックに失敗: {}",
+            e
+        );
+    }
+
+    // URLカードの埋め込みプレーヤー（oEmbed discovery）の解決はジョブへ委ねる。
+    if let Some(card) = &link_card {
+        if let Err(e) = queue
+            .enqueue(
+                Job::LinkCardEmbedResolve {
+                    post_id: final_id,
+                    position: 0,
+                    url: card.url.clone(),
+                },
+                priority::LOW,
             )
             .await
-            {
-                tracing::error!("[upsert_bsky_post] gate情報保存失敗（スキップ）: {}", e);
-            }
+        {
+            tracing::error!("[upsert_bsky_post] LinkCardEmbedResolve enqueue失敗: {}", e);
+        }
+    }
+
+    if gate_fetch == GateFetch::Deferred {
+        if let Err(e) = queue
+            .enqueue(
+                Job::BskyGatesFetch {
+                    post_id: final_id,
+                    author_did: post.author_did.clone(),
+                    at_uri: post.uri.clone(),
+                },
+                priority::NORMAL,
+            )
+            .await
+        {
+            tracing::error!("[upsert_bsky_post] BskyGatesFetch enqueue失敗: {}", e);
         }
     }
 

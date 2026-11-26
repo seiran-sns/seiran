@@ -155,6 +155,9 @@ pub struct BskyPostRow<'a> {
     pub claimed_ap_object_id: Option<&'a str>,
     pub bridge_of_post_id: Option<i64>,
     pub bridged_original_uri: Option<&'a str>,
+    /// 新規INSERTしたときに同じトランザクションで書く付帯情報
+    /// （`crate::repository::post_extras`）。マージ・重複スキップのときは書かない。
+    pub extras: Option<&'a crate::repository::post_extras::PostExtras>,
 }
 
 /// 相互一致マージ判定〜INSERTの1回分の試行。UNIQUE制約違反時の
@@ -177,6 +180,7 @@ pub async fn insert_or_merge_bsky_post(
         claimed_ap_object_id,
         bridge_of_post_id,
         bridged_original_uri,
+        extras,
     } = *row;
     let mut tx = pool.begin().await?;
 
@@ -233,6 +237,12 @@ pub async fn insert_or_merge_bsky_post(
     .bind(bridged_original_uri)
     .execute(&mut *tx)
     .await?;
+
+    if result.rows_affected() > 0 {
+        if let Some(extras) = extras {
+            crate::repository::post_extras::apply_post_extras(&mut tx, post_id, extras).await?;
+        }
+    }
 
     tx.commit().await?;
 

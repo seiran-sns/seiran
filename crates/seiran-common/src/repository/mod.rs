@@ -55,6 +55,7 @@ pub mod password_reset;
 pub mod pinned_post;
 pub mod poll;
 pub mod post;
+pub mod post_extras;
 pub mod post_merge;
 pub mod post_search;
 pub mod rate_limit_log;
