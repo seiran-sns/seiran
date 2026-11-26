@@ -25,10 +25,14 @@ const TEXT_DEFAULT_DIVERSITY = [
 
 const fromCodepoints = (...cps: string[]) => String.fromCodePoint(...cps.map((cp) => parseInt(cp, 16)));
 
+// frontend/package.json の範囲は ">=17.0.0 <17.0.2 || >17.0.2 <18.0.0"。壊れている 17.0.2 だけを
+// 外し、#16 が直った版が出れば取り込めるようにしてある。新しい版を取り込んだときにこのテストが
+// 落ちたら、その版もまだ直っていないので、範囲からその版も外して 17.0.1 に戻すこと。
 const BROKEN_PARSER_HINT =
   "@twemoji/parser が jdecked/twemoji-parser#16 のバグを含む版になっている（17.0.2 で混入）。" +
-  "17.0.1 なら通る。frontend/package.json の範囲（現在は \">=17.0.0 <17.0.2\"）と package-lock.json を確認し、" +
-  "#16 が直った版が出るまではこのテストが通る版に留めること。";
+  "17.0.1 なら通る。新しい版を取り込んで落ちたのなら、その版も #16 が直っていない。" +
+  "frontend/package.json の範囲からその版も外し（例: \">=17.0.0 <17.0.2 || >17.0.3 <18.0.0\"）、" +
+  "package-lock.json を 17.0.1 に戻すこと。";
 
 describe("@twemoji/parser の版（jdecked/twemoji-parser#16 を含まないこと）", () => {
   it.each(TEXT_DEFAULT_DIVERSITY)("U+%s に FE0F を付けると1つの絵文字として認識する", (cp) => {
