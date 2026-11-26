@@ -34,10 +34,20 @@ function scrollByPx(scroller: HTMLElement | null, delta: number) {
   else window.scrollTo(0, window.scrollY + delta);
 }
 
-/** 広げる・畳むときに画面上の位置を動かさない基準。`measure` が今の画面内の位置を返す。 */
+function scrollTopOf(scroller: HTMLElement | null): number {
+  return scroller ? scroller.scrollTop : window.scrollY;
+}
+
+/**
+ * 広げる・畳むときに画面上の位置を動かさない基準。`measure` が今の画面内の位置を返す。`docTop` は
+ * 前のフレームでのスクロール内容の中での位置（画面内の位置＋スクロール量）。広げる・畳むことで
+ * この位置がずれた分だけスクロールする。画面内の位置そのものを元へ戻すと、広げている間にユーザーが
+ * スクロールした分（スマホでは線を越えるのはスクロールの最中）まで打ち消してしまう。
+ */
 interface SpreadAnchor {
   measure: () => number | undefined;
-  value: number;
+  scroller: HTMLElement | null;
+  docTop: number;
 }
 
 /**
@@ -155,8 +165,14 @@ export default function CardStack({
   // 状態を変える直前に置き、アニメーションの間ずっとこれが元の画面内の位置に来るようスクロールで戻す。
   const anchorRef = useRef<SpreadAnchor | null>(null);
   const setAnchor = (measure: () => number | undefined) => {
+    const el = ref.current;
     const value = measure();
-    anchorRef.current = value === undefined ? null : { measure, value };
+    if (!el || value === undefined) {
+      anchorRef.current = null;
+      return;
+    }
+    const scroller = scrollParentOf(el);
+    anchorRef.current = { measure, scroller, docTop: value + scrollTopOf(scroller) };
   };
 
   // ずらし幅を目標へアニメーションさせる（top と padding-bottom を毎フレーム変える。CSS の
@@ -174,6 +190,12 @@ export default function CardStack({
       setOffset(targetOffset);
       return;
     }
+    // 動かしている間はブラウザのスクロールアンカーを止める（こちらの位置合わせと二重に動かさないため）。
+    const el = ref.current;
+    const scroller = el ? scrollParentOf(el) : null;
+    const anchorHost = scroller ?? document.documentElement;
+    const previousOverflowAnchor = anchorHost.style.overflowAnchor;
+    anchorHost.style.overflowAnchor = "none";
     const start = performance.now();
     let frame = window.requestAnimationFrame(function step(now) {
       const t = Math.min(1, (now - start) / SPREAD_ANIMATION_MS);
@@ -182,25 +204,26 @@ export default function CardStack({
       setOffset(value);
       if (t < 1) frame = window.requestAnimationFrame(step);
     });
-    return () => window.cancelAnimationFrame(frame);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      anchorHost.style.overflowAnchor = previousOverflowAnchor;
+    };
   }, [targetOffset]);
 
-  // ずらし幅を変えたフレームで、基準が元の画面内の位置に来るようスクロールで戻す。終わったら基準を
-  // 捨てるが、ブラウザのスクロールアンカーが後から動かすこともあるので次のフレームでもう一度合わせる。
+  // ずらし幅を変えたフレームで、基準がスクロール内容の中でずれた分だけスクロールする。
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
-    const el = ref.current;
-    if (!anchor || !el) return;
-    const scroller = scrollParentOf(el);
-    const correct = () => {
-      const now = anchor.measure();
-      if (now !== undefined) scrollByPx(scroller, now - anchor.value);
-    };
-    correct();
-    if (offset !== targetOffset) return;
-    anchorRef.current = null;
-    const frame = window.requestAnimationFrame(correct);
-    return () => window.cancelAnimationFrame(frame);
+    if (!anchor) return;
+    const now = anchor.measure();
+    if (now !== undefined) {
+      const docTop = now + scrollTopOf(anchor.scroller);
+      // 1px 未満のずれは動かさず次のフレームへ持ち越す（捨てると積もってずれる）。
+      if (Math.abs(docTop - anchor.docTop) >= 1) {
+        scrollByPx(anchor.scroller, docTop - anchor.docTop);
+        anchor.docTop = docTop;
+      }
+    }
+    if (offset === targetOffset) anchorRef.current = null;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [offset]);
 
