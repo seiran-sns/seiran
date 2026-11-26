@@ -177,8 +177,9 @@ export function describeNotification(
 export interface NotificationDeckState {
   /** 前面に出していた通知の ID。 */
   front?: string;
-  /** 広げたまま固定していたか（CardStack）。 */
-  pinned?: boolean;
+  /** 広げていたか（CardStack の `initialSpread`。マウス環境は広げたままの固定、タッチ環境は
+   * 画面の上から 25% の線がかかって広げていたか）。 */
+  spread?: boolean;
 }
 
 export interface NotificationsPanelCache {
@@ -676,9 +677,9 @@ export default function NotificationsPanel({
             onFrontChange={(id) => {
               deckState(g.items[g.items.length - 1].id).front = id;
             }}
-            initialPinned={deckState(g.items[g.items.length - 1].id).pinned}
-            onPinnedChange={(pinned) => {
-              deckState(g.items[g.items.length - 1].id).pinned = pinned;
+            initialSpread={deckState(g.items[g.items.length - 1].id).spread}
+            onSpreadChange={(spread) => {
+              deckState(g.items[g.items.length - 1].id).spread = spread;
             }}
           />
         )

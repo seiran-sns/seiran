@@ -5,6 +5,14 @@ import styles from "./CardStack.module.css";
 const STACK_OFFSET_PX = 8;
 /** タッチ環境で前面に出すカードを決める線の位置（画面の高さに対する割合、上から）。 */
 const TOUCH_FOCUS_LINE = 0.25;
+/** 広げる・畳むアニメーションの長さ（ms）。 */
+const SPREAD_ANIMATION_MS = 200;
+
+const easeOutCubic = (t: number) => 1 - (1 - t) ** 3;
+
+function prefersReducedMotion(): boolean {
+  return window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+}
 
 /** `el` をスクロールさせている一番近い祖先（右ペインの `.rightScroll` 等）。無ければ null（window）。 */
 function scrollParentOf(el: HTMLElement): HTMLElement | null {
@@ -56,15 +64,22 @@ function useNoHover(): boolean {
  *
  * カードは一番高いカードの高さまで伸ばす（`.stackCard` の直下の要素）。
  *
- * `spreadOffsetPx` を渡すと、マウス環境ではマウスが乗っている間だけずらし幅をその値に広げる（通知欄）。
- * 乗った瞬間のカードを画面上で動かさないよう、まとまりより上を上へ送る分だけスクロールし、
- * そのカードを中心に上下へ広がって見えるようにする。広げたまま押す（カードかその中のリンクを
- * クリックする）と広げた状態を「固定」し、ほかの画面から戻ってきても広げたままにする。固定は
- * もう一度マウスが乗るか、まとまりが画面の外へ出ると解ける。固定中は `pinnedClassName` を付ける
- * （呼び出し側が枠線で囲う）。
+ * `spreadOffsetPx` を渡すと、ずらし幅をその値に広げる（通知欄）。広げる・畳むときはずらし幅を
+ * `SPREAD_ANIMATION_MS` かけて変え、その間ずっと基準のカードが画面上で動かないようスクロールで
+ * 追いかける。
+ * - マウス環境: マウスが乗っている間だけ広げる。乗った瞬間のカードを基準にし、まとまりより上を
+ *   上へ送って、そのカードを中心に上下へ広がって見えるようにする（ポインタの下のカードが
+ *   入れ替わらない）。広げたまま押す（カードかその中のリンクをクリックする）と広げた状態を
+ *   「固定」し、ほかの画面から戻ってきても広げたままにする。固定はもう一度マウスが乗るか、
+ *   まとまりが画面の外へ出ると解ける。固定中は `pinnedClassName` を付ける（呼び出し側が枠線で囲う）。
+ * - タッチ環境: `TOUCH_FOCUS_LINE` の線がかかっている間だけ広げる。線にかかったカードを基準に
+ *   広げ、線が下へ抜けて畳むときはまとまりの下端を基準にする（線の下の一覧がずれない）。戻って
+ *   きたときはスクロール位置が戻れば線がまた同じところにかかるので固定はせず、広げていたことだけ
+ *   覚えておいて広げた形で出す（畳んだ形で出してから広げると、戻したスクロール位置がずれる）。
  *
- * `initialFront`・`initialPinned` は前回の前面のカード（キー）と固定の状態。変わったときは
- * `onFrontChange`・`onPinnedChange` で知らせるので、呼び出し側が覚えておいて次に渡す。
+ * `initialFront`・`initialSpread` は前回の前面のカード（キー）と、覚えておく広げた状態（マウス環境は
+ * 固定、タッチ環境は線がかかって広げていたか）。変わったときは `onFrontChange`・`onSpreadChange` で
+ * 知らせるので、呼び出し側が覚えておいて次に渡す。
  */
 export default function CardStack({
   keys,
@@ -75,8 +90,8 @@ export default function CardStack({
   spreadOffsetPx,
   initialFront,
   onFrontChange,
-  initialPinned = false,
-  onPinnedChange,
+  initialSpread = false,
+  onSpreadChange,
   pinnedClassName,
 }: {
   keys: string[];
@@ -87,8 +102,8 @@ export default function CardStack({
   spreadOffsetPx?: number;
   initialFront?: string;
   onFrontChange?: (key: string) => void;
-  initialPinned?: boolean;
-  onPinnedChange?: (pinned: boolean) => void;
+  initialSpread?: boolean;
+  onSpreadChange?: (spread: boolean) => void;
   pinnedClassName?: string;
 }) {
   const ref = useRef<HTMLElement>(null);
@@ -96,27 +111,61 @@ export default function CardStack({
   const [hoveredKey, setHoveredKey] = useState<string | null>(initialFront ?? null);
   const [touchFocused, setTouchFocused] = useState<number | null>(null);
   const [mouseInside, setMouseInside] = useState(false);
-  const [pinned, setPinned] = useState(initialPinned);
+  const [pinned, setPinned] = useState(() => initialSpread && !noHover);
+  const [touchSpread, setTouchSpread] = useState(() => initialSpread && noHover);
+  const touchSpreadRef = useRef(touchSpread);
   const count = keys.length;
   const hoveredIndex = hoveredKey === null ? -1 : keys.indexOf(hoveredKey);
   const hovered = hoveredIndex < 0 ? null : hoveredIndex;
 
-  const spreadable = spreadOffsetPx !== undefined && !noHover;
-  const spread = spreadable && (mouseInside || pinned);
-  const offset = spread ? (spreadOffsetPx ?? STACK_OFFSET_PX) : STACK_OFFSET_PX;
+  const canSpread = spreadOffsetPx !== undefined;
+  const hoverSpreadable = canSpread && !noHover;
+  const spread = canSpread && (noHover ? touchSpread : mouseInside || pinned);
+  const targetOffset = spread ? (spreadOffsetPx ?? STACK_OFFSET_PX) : STACK_OFFSET_PX;
 
   const changePinned = (next: boolean) => {
     setPinned(next);
-    onPinnedChange?.(next);
+    onSpreadChange?.(next);
   };
 
-  // 広げた・畳んだ後、基準（乗ったカードの上端・画面より上へ出たまとまりの下端）が元の画面内の
-  // 位置に来るようスクロールで戻す。ブラウザのスクロールアンカーが先に動かしていることもあるので、
-  // 次のフレームでもう一度合わせる。
+  // 広げる・畳む間の基準（乗ったカード・線にかかったカードの上端、まとまりの下端）。広げる・畳む
+  // 状態を変える直前に置き、アニメーションの間ずっとこれが元の画面内の位置に来るようスクロールで戻す。
   const anchorRef = useRef<SpreadAnchor | null>(null);
+  const setAnchor = (measure: () => number | undefined) => {
+    const value = measure();
+    anchorRef.current = value === undefined ? null : { measure, value };
+  };
+
+  // ずらし幅を目標へアニメーションさせる（top と padding-bottom を毎フレーム変える。CSS の
+  // transition にしないのは、フレームごとに基準を合わせるスクロールを同じフレームで行うため）。
+  const [offset, setOffset] = useState(targetOffset);
+  const offsetRef = useRef(targetOffset);
+  useEffect(() => {
+    const from = offsetRef.current;
+    if (from === targetOffset) {
+      anchorRef.current = null;
+      return;
+    }
+    if (prefersReducedMotion()) {
+      offsetRef.current = targetOffset;
+      setOffset(targetOffset);
+      return;
+    }
+    const start = performance.now();
+    let frame = window.requestAnimationFrame(function step(now) {
+      const t = Math.min(1, (now - start) / SPREAD_ANIMATION_MS);
+      const value = t >= 1 ? targetOffset : from + (targetOffset - from) * easeOutCubic(t);
+      offsetRef.current = value;
+      setOffset(value);
+      if (t < 1) frame = window.requestAnimationFrame(step);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [targetOffset]);
+
+  // ずらし幅を変えたフレームで、基準が元の画面内の位置に来るようスクロールで戻す。終わったら基準を
+  // 捨てるが、ブラウザのスクロールアンカーが後から動かすこともあるので次のフレームでもう一度合わせる。
   useLayoutEffect(() => {
     const anchor = anchorRef.current;
-    anchorRef.current = null;
     const el = ref.current;
     if (!anchor || !el) return;
     const scroller = scrollParentOf(el);
@@ -125,13 +174,16 @@ export default function CardStack({
       if (now !== undefined) scrollByPx(scroller, now - anchor.value);
     };
     correct();
+    if (offset !== targetOffset) return;
+    anchorRef.current = null;
     const frame = window.requestAnimationFrame(correct);
     return () => window.cancelAnimationFrame(frame);
-  }, [spread]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [offset]);
 
   // 固定したまとまりが画面の外へ出たら固定を解く。戻ってきた直後はスクロール位置を合わせる前で
   // 画面外にあることがあるので、一度画面に入ってから出たときだけ解く。画面より上へ出たときは、
-  // 畳んで縮んだ分だけ下の一覧が上へずれないよう、まとまりの下端を基準に戻す。
+  // 畳んで縮んだ分だけ下の一覧が上へずれないよう、まとまりの下端を基準にする。
   useEffect(() => {
     const el = ref.current;
     if (!pinned || !el || typeof IntersectionObserver === "undefined") return;
@@ -144,14 +196,9 @@ export default function CardStack({
       }
       if (!seen) return;
       const rootTop = entry.rootBounds?.top ?? 0;
-      if (entry.boundingClientRect.bottom <= rootTop) {
-        anchorRef.current = {
-          measure: () => ref.current?.getBoundingClientRect().bottom,
-          value: entry.boundingClientRect.bottom,
-        };
-      }
+      if (entry.boundingClientRect.bottom <= rootTop) setAnchor(() => ref.current?.getBoundingClientRect().bottom);
       setPinned(false);
-      onPinnedChange?.(false);
+      onSpreadChange?.(false);
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -161,23 +208,42 @@ export default function CardStack({
   useEffect(() => {
     if (!noHover) return;
     let frame: number | null = null;
+    // 広げた形で戻ってきたときは、スクロール位置を合わせる前で線がかかっていないことがあるので、
+    // 一度線がかかるまでは畳まない。
+    let seen = !touchSpreadRef.current;
+    const changeTouchSpread = (next: boolean) => {
+      touchSpreadRef.current = next;
+      setTouchSpread(next);
+      onSpreadChange?.(next);
+    };
     const update = () => {
       frame = null;
       const el = ref.current;
       if (!el) return;
       const rect = el.getBoundingClientRect();
       const line = window.innerHeight * TOUCH_FOCUS_LINE;
+      let focused: number | null;
       if (line < rect.top || rect.height <= 0) {
-        setTouchFocused(null);
-        return;
+        focused = null;
+      } else if (line >= rect.bottom) {
+        // 線より上へ通り過ぎたまとまりは一番古いカードを前面にする。線を下から上へ通る間に
+        // 新しい順から古い順へ前面が移っていくので、通り過ぎた後もその続きの状態にしておく。
+        focused = count - 1;
+      } else {
+        focused = Math.min(count - 1, Math.floor(((line - rect.top) / rect.height) * count));
       }
-      // 線より上へ通り過ぎたまとまりは一番古いカードを前面にする。線を下から上へ通る間に
-      // 新しい順から古い順へ前面が移っていくので、通り過ぎた後もその続きの状態にしておく。
-      if (line >= rect.bottom) {
-        setTouchFocused(count - 1);
-        return;
+      setTouchFocused(focused);
+      if (!canSpread) return;
+      const inside = rect.height > 0 && rect.top <= line && line < rect.bottom;
+      if (inside) seen = true;
+      if (inside === touchSpreadRef.current || (!inside && !seen)) return;
+      if (inside && focused !== null) {
+        const card = el.querySelector<HTMLElement>(`[data-stack-index="${focused}"]`);
+        setAnchor(() => card?.getBoundingClientRect().top);
+      } else if (!inside && line >= rect.bottom) {
+        setAnchor(() => ref.current?.getBoundingClientRect().bottom);
       }
-      setTouchFocused(Math.min(count - 1, Math.floor(((line - rect.top) / rect.height) * count)));
+      changeTouchSpread(inside);
     };
     const schedule = () => {
       if (frame === null) frame = window.requestAnimationFrame(update);
@@ -191,10 +257,11 @@ export default function CardStack({
       window.removeEventListener("resize", schedule);
       if (frame !== null) window.cancelAnimationFrame(frame);
     };
-  }, [noHover, count]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [noHover, count, canSpread]);
 
   const front = Math.min(count - 1, (noHover ? touchFocused : hovered) ?? 0);
-  const showPinned = spreadable && pinned && !mouseInside;
+  const showPinned = hoverSpreadable && pinned && !mouseInside;
   // 前面から遠い順（同じ距離なら上のカードを先）に並べる。最後が前面。
   const paintOrder = keys
     .map((key, index) => ({ key, index }))
@@ -207,15 +274,15 @@ export default function CardStack({
       className={[styles.stack, className, showPinned && pinnedClassName].filter(Boolean).join(" ")}
       style={{ paddingBottom: (count - 1) * offset }}
       onMouseEnter={
-        spreadable
+        hoverSpreadable
           ? () => {
               if (pinned) changePinned(false);
             }
           : undefined
       }
-      onMouseLeave={spreadable ? () => setMouseInside(false) : undefined}
+      onMouseLeave={hoverSpreadable ? () => setMouseInside(false) : undefined}
       onClickCapture={
-        spreadable
+        hoverSpreadable
           ? () => {
               if (spread && !pinned) changePinned(true);
             }
@@ -227,14 +294,16 @@ export default function CardStack({
           key={key}
           className={styles.stackCard}
           style={{ top: index * offset }}
+          data-stack-index={index}
           onMouseEnter={(e) => {
             setHoveredKey(key);
             onFrontChange?.(key);
-            if (spreadable && !spread) {
+            if (!hoverSpreadable) return;
+            if (!spread) {
               const card = e.currentTarget;
-              anchorRef.current = { measure: () => card.getBoundingClientRect().top, value: card.getBoundingClientRect().top };
+              setAnchor(() => card.getBoundingClientRect().top);
             }
-            if (spreadable) setMouseInside(true);
+            setMouseInside(true);
           }}
         >
           {renderCard(index)}
