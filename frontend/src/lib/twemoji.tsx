@@ -16,12 +16,16 @@ export interface TwemojiMatch {
   indices: [number, number];
 }
 
-/** `text` 中のUnicode絵文字を検出し、セルフホストSVGのURLとともに返す。絵文字が無ければ空配列。 */
+/** `text` 中のUnicode絵文字を検出し、セルフホストSVGのURLとともに返す。絵文字が無ければ空配列。
+ *
+ * parser の正規表現は末尾に単独の U+FE0F（VS16）に当たる分岐を持つため、絵文字として認識されなかった
+ * 文字の直後の FE0F が、url の空の「絵文字」として返ってくる。`<img src="">` にすると壊れた画像になる
+ * ので取り除く（FE0F は不可視なので、本文に残しても見た目は変わらない）。 */
 export function findTwemojiMatches(text: string): TwemojiMatch[] {
   return parseTwemoji(text, {
     assetType: "svg",
     buildUrl: (codepoints) => `/twemoji/${codepoints}.svg`,
-  });
+  }).filter((m) => m.url !== "" && m.text.replace(/\uFE0F/g, "") !== "");
 }
 
 /** 単一の絵文字文字列（"🎉" 等）をセルフホストSVGのURLに変換する。非絵文字文字列を渡した場合はundefined。 */
