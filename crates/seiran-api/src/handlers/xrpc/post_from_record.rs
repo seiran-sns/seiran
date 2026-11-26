@@ -34,7 +34,7 @@ pub struct AtpPostRecordResult {
 }
 
 /// `record.embed` から画像・動画blobのCIDを取り出し、`resolve_blob_media_id` でこのアクターの
-/// アップロード済み `media_files` 行に解決する。`app.bsky.embed.images`/`video`/
+/// アップロード済み `media_files` 行に解決する。`app.bsky.embed.images`/`gallery`/`video`/
 /// `recordWithMedia`（内側の`media`）に対応。見つからないblob（他PDS由来・未アップロード等）
 /// は無視する（投稿自体は継続し、その添付だけ欠落する）。
 async fn resolve_embed_attachments(
@@ -55,9 +55,14 @@ async fn resolve_embed_attachments(
     };
     let media_type = media.get("$type").and_then(|v| v.as_str()).unwrap_or("");
     match media_type {
-        "app.bsky.embed.images" => {
+        "app.bsky.embed.images" | "app.bsky.embed.gallery" => {
+            let key = if media_type == "app.bsky.embed.images" {
+                "images"
+            } else {
+                "items"
+            };
             let mut resolved = Vec::new();
-            if let Some(images) = media.get("images").and_then(|v| v.as_array()) {
+            if let Some(images) = media.get(key).and_then(|v| v.as_array()) {
                 for img in images {
                     if let Some(media_file_id) =
                         resolve_blob_media_id(state, img.get("image"), actor_id).await
@@ -74,7 +79,17 @@ async fn resolve_embed_attachments(
                 None => vec![],
             }
         }
-        _ => vec![],
+        // 添付を持たない embed（引用・リンクカード）は黙って空を返す
+        "app.bsky.embed.record" | "app.bsky.embed.external" => vec![],
+        other => {
+            // 知らない種別は添付が黙って消える原因になるので、気づけるよう記録する
+            tracing::warn!(
+                "[post_from_record] 未対応の embed 種別のため添付を無視します: actor_id={} type={}",
+                actor_id,
+                other
+            );
+            vec![]
+        }
     }
 }
 
