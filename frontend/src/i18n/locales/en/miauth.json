@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "Enter the following authorization code in the app.",
     "invalidRequest": "The authorization request is invalid. Please start over from the app."
+  },
+  "atprotoOAuth": {
+    "title": "Allow access to your Bluesky account",
+    "invalidRequest": "The authorization request is invalid. Please start again from the app.",
+    "clientHost": "Provided by: {{host}}",
+    "selfDeclaredNote": "The app name and icon are declared by the app itself. Make sure you trust the provider's domain.",
+    "account": "Signed in as @{{handle}}",
+    "loginHintMismatch": "This app is asking to sign in as @{{hint}}.",
+    "switchAccount": "Sign in with another account",
+    "scopeTitle": "This app will be able to",
+    "scopeAtproto": "Confirm your Bluesky account (@{{handle}})",
+    "scopeGeneric": "Read and write posts, likes, follows and more, and view your timeline and notifications",
+    "scopeEmail": "See your email address",
+    "approve": "Allow",
+    "deny": "Deny"
   }
 }

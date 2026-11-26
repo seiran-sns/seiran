@@ -4009,6 +4009,7 @@ dependencies = [
  "dotenvy",
  "emojis",
  "futures-util",
+ "getrandom 0.4.3",
  "hex",
  "html-escape",
  "image",

@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "Es gibt bereits ein App-Passwort mit diesem Zweck",
   "APP_PASSWORD_NOT_FOUND": "App-Passwort nicht gefunden",
   "ATP_ACCOUNT_REQUIRED": "Dieses Konto hat kein Bluesky-Konto",
-  "APP_PASSWORD_NOT_PERMITTED": "Mit einem App-Passwort angemeldet ist diese Aktion nicht erlaubt"
+  "APP_PASSWORD_NOT_PERMITTED": "Mit einem App-Passwort angemeldet ist diese Aktion nicht erlaubt",
+  "OAUTH_REQUEST_NOT_FOUND": "Die Autorisierungsanfrage wurde nicht gefunden oder ist abgelaufen. Bitte starte erneut in der App.",
+  "OAUTH_CLIENT_UNAVAILABLE": "Die App-Informationen konnten nicht geladen werden. Bitte versuche es später erneut.",
+  "OAUTH_INVALID_SCOPE": "Die von der App angeforderten Berechtigungen sind ungültig",
+  "OAUTH_SESSION_NOT_FOUND": "Autorisierung nicht gefunden"
 }

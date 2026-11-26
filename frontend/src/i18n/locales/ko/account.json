@@ -132,7 +132,14 @@
     "issuedWarning": "이 토큰은 지금만 표시됩니다. 닫으면 다시 표시할 수 없습니다.",
     "copyButton": "복사",
     "copiedButton": "복사됨",
-    "dismissButton": "닫기"
+    "dismissButton": "닫기",
+    "oauthClient": "Bluesky 앱 · {{host}}",
+    "authorizedAt": "{{date}}에 허용",
+    "oauthScopes": "권한: {{scopes}}",
+    "scopeSeparator": ", ",
+    "scopeAtproto": "계정 확인",
+    "scopeGeneric": "게시물 등 읽기·쓰기",
+    "scopeEmail": "이메일 주소 보기"
   },
   "appPasswordsSettings": {
     "description": "Bluesky 클라이언트(TOKIMEKI 등)에 로그인할 때 기본 비밀번호 대신 사용하는 비밀번호입니다. 사용자 이름에는 Bluesky 핸들(예: name.seiran.org)을 입력하세요. 클라이언트마다 따로 발급해 두면 더 이상 쓰지 않는 것만 해지할 수 있습니다.",

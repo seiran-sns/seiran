@@ -68,6 +68,8 @@ pub const ACTOR_REFERENCES: &[ActorReference] = &[
         unique: &[key(&["cid"])],
     },
     plain("atp_deferred_writes", "actor_id"),
+    plain("atp_oauth_requests", "actor_id"),
+    plain("atp_oauth_sessions", "actor_id"),
     ActorReference {
         table: "atp_preferences",
         column: "actor_id",

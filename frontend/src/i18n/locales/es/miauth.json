@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "Introduzca el siguiente código de autorización en la aplicación.",
     "invalidRequest": "La solicitud de autorización no es válida. Vuelva a empezar desde la aplicación."
+  },
+  "atprotoOAuth": {
+    "title": "Permitir el acceso a tu cuenta de Bluesky",
+    "invalidRequest": "La solicitud de autorización no es válida. Vuelve a empezar desde la aplicación.",
+    "clientHost": "Proveedor: {{host}}",
+    "selfDeclaredNote": "El nombre y el icono los declara la propia aplicación. Comprueba que confías en el dominio del proveedor.",
+    "account": "Sesión iniciada como @{{handle}}",
+    "loginHintMismatch": "Esta aplicación solicita iniciar sesión como @{{hint}}.",
+    "switchAccount": "Iniciar sesión con otra cuenta",
+    "scopeTitle": "Esta aplicación podrá",
+    "scopeAtproto": "Confirmar tu cuenta de Bluesky (@{{handle}})",
+    "scopeGeneric": "Leer y escribir publicaciones, me gusta, seguimientos y más, y ver tu cronología y notificaciones",
+    "scopeEmail": "Ver tu dirección de correo",
+    "approve": "Permitir",
+    "deny": "Rechazar"
   }
 }

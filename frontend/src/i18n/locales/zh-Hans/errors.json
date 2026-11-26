@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "已存在相同用途的应用专用密码",
   "APP_PASSWORD_NOT_FOUND": "找不到该应用专用密码",
   "ATP_ACCOUNT_REQUIRED": "此账号没有 Bluesky 账号",
-  "APP_PASSWORD_NOT_PERMITTED": "使用应用专用密码登录时无法执行此操作"
+  "APP_PASSWORD_NOT_PERMITTED": "使用应用专用密码登录时无法执行此操作",
+  "OAUTH_REQUEST_NOT_FOUND": "找不到授权请求或已过期。请从应用重新开始。",
+  "OAUTH_CLIENT_UNAVAILABLE": "无法获取应用信息。请稍后重试。",
+  "OAUTH_INVALID_SCOPE": "应用请求的权限无效",
+  "OAUTH_SESSION_NOT_FOUND": "找不到该授权"
 }

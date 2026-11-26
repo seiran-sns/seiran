@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "Ya existe una contraseña de aplicación con ese uso",
   "APP_PASSWORD_NOT_FOUND": "No se encontró la contraseña de aplicación",
   "ATP_ACCOUNT_REQUIRED": "Esta cuenta no tiene cuenta de Bluesky",
-  "APP_PASSWORD_NOT_PERMITTED": "No se permite esta acción con una sesión iniciada con contraseña de aplicación"
+  "APP_PASSWORD_NOT_PERMITTED": "No se permite esta acción con una sesión iniciada con contraseña de aplicación",
+  "OAUTH_REQUEST_NOT_FOUND": "No se encontró la solicitud de autorización o ha caducado. Vuelve a empezar desde la aplicación.",
+  "OAUTH_CLIENT_UNAVAILABLE": "No se pudo cargar la información de la aplicación. Inténtalo más tarde.",
+  "OAUTH_INVALID_SCOPE": "Los permisos solicitados por la aplicación no son válidos",
+  "OAUTH_SESSION_NOT_FOUND": "No se encontró la autorización"
 }

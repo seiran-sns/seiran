@@ -67,6 +67,7 @@
 - [x] **メールアドレス変更（#59）** — `docs/database.md`
 - [x] **アプリトークン（#60）** — `docs/database.md`
 - [x] **アプリパスワード（Bluesky クライアント向け）** — 設定画面での発行・無効化、無効化したパスワードのセッション失効。`docs/protocols.md` 3節
+- [x] **AT Protocol OAuth（Bluesky クライアント向け）** — PAR・DPoP・PKCE、`atproto`/`transition:generic`/`transition:email`、承認画面、アプリトークン画面からの取り消し。`docs/protocols.md` 3節「OAuth」
 - [x] **認証・操作レート制限（#223）** — 資格情報種類数制限、IP自動ブロック、Turnstile、ロール別上限。`docs/architecture.md`
 - [x] **新規登録の受付停止スイッチ・ユーザー数上限（PDSあたりDID数制限対策）** — `docs/architecture.md`
 - [x] **退会済みアクターの扱い（#242）** — ログイン・表示・連合エンドポイントから除外。`docs/database.md`

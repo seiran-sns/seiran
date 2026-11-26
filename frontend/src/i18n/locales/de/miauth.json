@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "Geben Sie den folgenden Autorisierungscode in der App ein.",
     "invalidRequest": "Die Autorisierungsanfrage ist ungültig. Bitte beginnen Sie in der App erneut."
+  },
+  "atprotoOAuth": {
+    "title": "Zugriff auf dein Bluesky-Konto erlauben",
+    "invalidRequest": "Die Autorisierungsanfrage ist ungültig. Bitte starte erneut in der App.",
+    "clientHost": "Anbieter: {{host}}",
+    "selfDeclaredNote": "Name und Symbol der App werden von der App selbst angegeben. Prüfe, ob du der Domain des Anbieters vertraust.",
+    "account": "Angemeldet als @{{handle}}",
+    "loginHintMismatch": "Diese App möchte sich als @{{hint}} anmelden.",
+    "switchAccount": "Mit einem anderen Konto anmelden",
+    "scopeTitle": "Diese App darf",
+    "scopeAtproto": "Dein Bluesky-Konto (@{{handle}}) bestätigen",
+    "scopeGeneric": "Beiträge, Likes, Follows usw. lesen und schreiben sowie Timeline und Mitteilungen ansehen",
+    "scopeEmail": "Deine E-Mail-Adresse sehen",
+    "approve": "Erlauben",
+    "deny": "Ablehnen"
   }
 }

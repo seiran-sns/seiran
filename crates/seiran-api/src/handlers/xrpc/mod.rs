@@ -1,4 +1,5 @@
 pub mod actor;
+pub mod auth;
 pub mod identity;
 pub mod post_from_record;
 pub mod proxy;
@@ -7,8 +8,6 @@ pub mod server;
 pub mod sync;
 
 use axum::http::HeaderMap;
-
-use seiran_common::auth::local::VerifiedAtpAccess;
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -29,8 +28,8 @@ pub(crate) fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
 /// DID移行（PLC操作）・アカウント無効化のような権限の強い操作は、メインパスワードで
 /// ログインしたセッションにだけ許す。アプリパスワードはサードパーティに渡すためのもので、
 /// これを許すと渡した相手がDIDを乗っ取れる（公式PDSと同じ制限）。
-pub(crate) fn require_privileged_session(verified: &VerifiedAtpAccess) -> Result<(), ApiError> {
-    if verified.privileged {
+pub(crate) fn require_privileged_session(privileged: bool) -> Result<(), ApiError> {
+    if privileged {
         Ok(())
     } else {
         Err(ApiError::Forbidden("APP_PASSWORD_NOT_PERMITTED"))

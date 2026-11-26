@@ -1,8 +1,8 @@
-use axum::{extract::State, http::HeaderMap, response::IntoResponse, Json};
+use axum::{extract::State, response::IntoResponse, Json};
 use chrono::{DateTime, NaiveDate};
 use serde::Deserialize;
 
-use super::{extract_bearer, service_did};
+use super::auth::{authenticate, ScopeNeed, XrpcRequest};
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -12,15 +12,9 @@ const PERSONAL_DETAILS_PREF_TYPE: &str = "app.bsky.actor.defs#personalDetailsPre
 /// 本人のみアクセス可能（他人の設定を覗き見/上書きできてはならない）。
 async fn authenticate_and_get_actor_id(
     state: &AppState,
-    headers: &HeaderMap,
+    xrpc: &XrpcRequest,
 ) -> Result<i64, axum::response::Response> {
-    let Some(token) = extract_bearer(headers) else {
-        return Err(ApiError::Unauthorized("Authorization ヘッダーが必要です").into_response());
-    };
-    let verified = state
-        .local_auth
-        .verify_atp_access_token(token, &service_did(state))
-        .map_err(|_| ApiError::Unauthorized("トークンが無効です").into_response())?;
+    let verified = authenticate(state, xrpc, ScopeNeed::Generic).await?;
     match state.actors.find_by_did(&verified.did).await {
         Ok(Some(actor)) => Ok(actor.id),
         Ok(None) => Err(ApiError::Unauthorized("アクターが見つかりません").into_response()),
@@ -59,10 +53,10 @@ fn strip_personal_details_pref(preferences: &serde_json::Value) -> Vec<serde_jso
 /// （年齢確認のbirthDate）だけは特別扱いし、`actors.birth_date`から都度生成して差し込む
 /// （`actors.birth_date`が真実の源。seiranのUI/API・Fediverse連合とも共有する値のため）。
 pub async fn xrpc_get_preferences(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
 ) -> impl IntoResponse {
-    let actor_id = match authenticate_and_get_actor_id(&state, &headers).await {
+    let actor_id = match authenticate_and_get_actor_id(&state, &xrpc).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };
@@ -105,11 +99,11 @@ pub struct PutPreferencesRequest {
 /// `#personalDetailsPref`が含まれていれば`birthDate`を`actors.birth_date`へ反映し、
 /// その要素自体は`atp_preferences`には保存しない（`actors.birth_date`と二重管理しない）。
 pub async fn xrpc_put_preferences(
-    headers: HeaderMap,
+    xrpc: XrpcRequest,
     State(state): State<AppState>,
     Json(req): Json<PutPreferencesRequest>,
 ) -> impl IntoResponse {
-    let actor_id = match authenticate_and_get_actor_id(&state, &headers).await {
+    let actor_id = match authenticate_and_get_actor_id(&state, &xrpc).await {
         Ok(id) => id,
         Err(resp) => return resp,
     };

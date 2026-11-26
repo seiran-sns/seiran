@@ -10,5 +10,20 @@
   "oauth": {
     "oobDescription": "以下の認可コードをアプリに入力してください。",
     "invalidRequest": "認可要求が不正です。アプリからやり直してください。"
+  },
+  "atprotoOAuth": {
+    "title": "Bluesky アカウントへのアクセスの許可",
+    "invalidRequest": "認可要求が不正です。アプリからやり直してください。",
+    "clientHost": "提供元: {{host}}",
+    "selfDeclaredNote": "アプリ名とアイコンはアプリ自身が名乗っているものです。提供元のドメインが信頼できるかを確かめてください。",
+    "account": "ログイン中のアカウント: @{{handle}}",
+    "loginHintMismatch": "このアプリは @{{hint}} でのログインを求めています。",
+    "switchAccount": "別のアカウントでログインする",
+    "scopeTitle": "このアプリに許可する操作",
+    "scopeAtproto": "あなたの Bluesky アカウント（@{{handle}}）を確認する",
+    "scopeGeneric": "投稿・いいね・フォローなどの読み書き、タイムラインや通知の閲覧",
+    "scopeEmail": "メールアドレスの参照",
+    "approve": "許可する",
+    "deny": "拒否する"
   }
 }

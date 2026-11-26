@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "같은 용도의 앱 비밀번호가 이미 있습니다",
   "APP_PASSWORD_NOT_FOUND": "앱 비밀번호를 찾을 수 없습니다",
   "ATP_ACCOUNT_REQUIRED": "이 계정에는 Bluesky 계정이 없습니다",
-  "APP_PASSWORD_NOT_PERMITTED": "앱 비밀번호로 로그인한 상태에서는 이 작업을 할 수 없습니다"
+  "APP_PASSWORD_NOT_PERMITTED": "앱 비밀번호로 로그인한 상태에서는 이 작업을 할 수 없습니다",
+  "OAUTH_REQUEST_NOT_FOUND": "인증 요청을 찾을 수 없거나 만료되었습니다. 앱에서 다시 시작하세요.",
+  "OAUTH_CLIENT_UNAVAILABLE": "앱 정보를 불러오지 못했습니다. 잠시 후 다시 시도하세요.",
+  "OAUTH_INVALID_SCOPE": "앱이 요청한 권한이 올바르지 않습니다",
+  "OAUTH_SESSION_NOT_FOUND": "연동을 찾을 수 없습니다"
 }

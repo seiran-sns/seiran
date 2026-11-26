@@ -28,7 +28,7 @@ workspace は6 crate。実行バイナリは `seiran-server` だけで、他は 
 - `auth/local.rs` — ローカル認証（Argon2 + JWT）
 - `secrets.rs` — `secrets.toml` の自動生成
 - `queue/` — `JobQueue` の InMemory/Redis 実装とワーカーエンジン
-- `messaging.rs` — プロセスの外とつながる配信路（ジョブキュー・`StreamHub`・subscribeRepos のイベント）と停止の合図（`Messaging`、3節）
+- `messaging.rs` — プロセスの外とつながる配信路（ジョブキュー・`StreamHub`・subscribeRepos のイベント）と再利用の検出（`replay_guard`）、停止の合図（`Messaging`、3節）
 - `event_bus.rs` — プロセス間ブロードキャスト（Redis Pub/Sub、無ければプロセス内）
 - `leader.rs` — 常駐処理の担当決め（advisory lock）
 - `jobs/` — 各ジョブの実処理
@@ -78,7 +78,7 @@ LeftNav 左下の「Powered by Seiran」から開く `ServerInfoDialog` は、�
 - **Worker**（`run_standalone_worker`）: HTTP を持たずジョブを消費する。
 - **Firehose**: Jetstream 購読・Bsky のポーリング・新規アカウントの DID 発行の定時処理だけを動かす。
 
-**プロセス間の共有（`Messaging`）**: ジョブキュー・`StreamHub`（WebSocket へのリアルタイム配信）・subscribeRepos のコミットイベントの3つは、`REDIS_URL` があればすべて Redis でプロセス間につなぎ、無ければプロセス内で完結させる。プロセス内で完結するのは `all` を1つだけ動かすときに限られる（split-role では worker が取り込んだ投稿が api の WebSocket に届かず、無停止更新では止める側の未処理ジョブが消える）。`REDIS_URL` を設定したのに繋がらないときは起動しない（黙ってプロセス内に切り替えると上の取りこぼしが起きるため）。配信は `event_bus::EventBus`: 送信を1本のタスクに通して Redis の Pub/Sub へ流し（同じプロセスから出たイベントの順序を保つ）、各プロセス（自分を含む）が購読して手元の購読者へ配る。Redis への送信に失敗したイベントは手元の購読者にだけ配る。
+**プロセス間の共有（`Messaging`）**: ジョブキュー・`StreamHub`（WebSocket へのリアルタイム配信）・subscribeRepos のコミットイベントの3つと、一度しか使えない値（ATP OAuth の DPoP 証明等の `jti`）の再利用の検出（`replay_guard::ReplayGuard`。別のプロセスへ送り直された証明も通さないため）は、`REDIS_URL` があればすべて Redis でプロセス間につなぎ、無ければプロセス内で完結させる。プロセス内で完結するのは `all` を1つだけ動かすときに限られる（split-role では worker が取り込んだ投稿が api の WebSocket に届かず、無停止更新では止める側の未処理ジョブが消える）。`REDIS_URL` を設定したのに繋がらないときは起動しない（黙ってプロセス内に切り替えると上の取りこぼしが起きるため）。配信は `event_bus::EventBus`: 送信を1本のタスクに通して Redis の Pub/Sub へ流し（同じプロセスから出たイベントの順序を保つ）、各プロセス（自分を含む）が購読して手元の購読者へ配る。Redis への送信に失敗したイベントは手元の購読者にだけ配る。
 
 **常駐処理の担当（`leader`）**: Jetstream 購読（投稿・いいね用とブロック監視用）・Bsky DM ポーリング・Bsky フォロワーポーリング・新規アカウントの DID 発行（「DNS TXT 登録完了待ち」の進行、`docs/protocols.md` 3節）は、複数のプロセスが動いていても1つだけが担当する。担当は PostgreSQL の advisory lock（セッションスコープ、`pg_try_advisory_lock(int4, int4)`。ジョブの重複排除が使う bigint のキーとはキー空間が重ならない）で決め、ロックを持つ接続が切れたら（10秒ごとに確認）担当を降りる。取れなかったプロセスは5秒ごとに取り直すので、担当のプロセスが止まると数秒で引き継ぐ。Redis の有無に依存しない。メディア GC・`car_bytes` の GC は1文の DELETE で完結し、重複しても害が無いので担当を決めない。DID 転入の入力待ちの処理（案内・警告メールと期限切れの打ち切り、API ロールで1分ごと）も担当を決めず、各段階を1文の UPDATE で「自分が担当する転入」として取ることで二重送信を防ぐ（`docs/account_migration.md` 4節）。止まった DID 転入のジョブの積み直し（3分ごと）も担当を決めない（積み直したジョブはロックで重複を防ぐ。`docs/account_migration.md` 3節）。
 

@@ -132,7 +132,14 @@
     "issuedWarning": "This token is shown only now. It cannot be shown again once you close this.",
     "copyButton": "Copy",
     "copiedButton": "Copied",
-    "dismissButton": "Close"
+    "dismissButton": "Close",
+    "oauthClient": "Bluesky app · {{host}}",
+    "authorizedAt": "Authorized {{date}}",
+    "oauthScopes": "Permissions: {{scopes}}",
+    "scopeSeparator": ", ",
+    "scopeAtproto": "confirm account",
+    "scopeGeneric": "read and write posts etc.",
+    "scopeEmail": "see email address"
   },
   "appPasswordsSettings": {
     "description": "Passwords to use instead of your main password when signing in to Bluesky clients (such as TOKIMEKI). Enter your Bluesky handle (e.g. name.seiran.org) as the username. Issue one per client so you can revoke only the ones you no longer use.",

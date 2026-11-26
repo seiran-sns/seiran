@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "An app password with the same purpose already exists",
   "APP_PASSWORD_NOT_FOUND": "App password not found",
   "ATP_ACCOUNT_REQUIRED": "This account has no Bluesky account",
-  "APP_PASSWORD_NOT_PERMITTED": "This action is not allowed when signed in with an app password"
+  "APP_PASSWORD_NOT_PERMITTED": "This action is not allowed when signed in with an app password",
+  "OAUTH_REQUEST_NOT_FOUND": "The authorization request was not found or has expired. Please start again from the app.",
+  "OAUTH_CLIENT_UNAVAILABLE": "Could not load the app's information. Please try again later.",
+  "OAUTH_INVALID_SCOPE": "The permissions requested by the app are invalid",
+  "OAUTH_SESSION_NOT_FOUND": "Authorization not found"
 }

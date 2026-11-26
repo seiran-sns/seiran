@@ -123,5 +123,9 @@
   "APP_PASSWORD_NAME_TAKEN": "已有相同用途的應用程式密碼",
   "APP_PASSWORD_NOT_FOUND": "找不到該應用程式密碼",
   "ATP_ACCOUNT_REQUIRED": "此帳號沒有 Bluesky 帳號",
-  "APP_PASSWORD_NOT_PERMITTED": "以應用程式密碼登入時無法執行此操作"
+  "APP_PASSWORD_NOT_PERMITTED": "以應用程式密碼登入時無法執行此操作",
+  "OAUTH_REQUEST_NOT_FOUND": "找不到授權請求或已過期。請從應用程式重新開始。",
+  "OAUTH_CLIENT_UNAVAILABLE": "無法取得應用程式資訊。請稍後再試。",
+  "OAUTH_INVALID_SCOPE": "應用程式請求的權限無效",
+  "OAUTH_SESSION_NOT_FOUND": "找不到該授權"
 }
