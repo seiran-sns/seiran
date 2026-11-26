@@ -118,7 +118,7 @@ describe("CardStack の広げる・固定する", () => {
   });
 });
 
-describe("CardStack の開閉（タッチ環境）", () => {
+describe("CardStack（タッチ環境）", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "matchMedia",
@@ -132,32 +132,17 @@ describe("CardStack の開閉（タッチ環境）", () => {
     );
   });
 
-  it("線がかかっても自動では広げない", () => {
-    render();
-    expect(tops()).toEqual(["0px", "8px", "16px"]);
-  });
-
-  it("畳んだまとまりはどこをタップしても広げ、カードへはタップを届けない", () => {
-    const onSpreadChange = vi.fn();
+  it("広げない。タップはそのままカードへ届く", () => {
     const onCardClick = vi.fn();
-    render({ onSpreadChange, renderCard: (i) => <button type="button" onClick={onCardClick}>{KEYS[i]}</button> });
-    act(() => card("c").querySelector("button")!.click());
-    expect(tops()).toEqual(["0px", "32px", "64px"]);
-    expect(onSpreadChange).toHaveBeenLastCalledWith(true);
-    expect(onCardClick).not.toHaveBeenCalled();
-    // タッチ環境では固定の枠は出さない。
-    expect(stack().classList.contains("pinned")).toBe(false);
-  });
-
-  it("広げたまとまりは前面のカードならそのまま押せ、それ以外の部分をタップすると畳む", () => {
-    const onCardClick = vi.fn();
-    render({ initialSpread: true, renderCard: (i) => <button type="button" onClick={onCardClick}>{KEYS[i]}</button> });
-    // 線がかかっていなければ前面は一番新しいカード。
-    act(() => card("a").querySelector("button")!.click());
-    expect(onCardClick).toHaveBeenCalledTimes(1);
-    expect(tops()).toEqual(["0px", "32px", "64px"]);
+    render({ renderCard: (i) => <button type="button" onClick={onCardClick}>{KEYS[i]}</button> });
     act(() => card("b").querySelector("button")!.click());
     expect(onCardClick).toHaveBeenCalledTimes(1);
     expect(tops()).toEqual(["0px", "8px", "16px"]);
+  });
+
+  it("PC で固定したまとまりの記憶があっても広げない", () => {
+    render({ initialSpread: true });
+    expect(tops()).toEqual(["0px", "8px", "16px"]);
+    expect(stack().classList.contains("pinned")).toBe(false);
   });
 });

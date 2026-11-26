@@ -670,13 +670,11 @@ export default function NotificationsPanel({
     <ul
       ref={listRef}
       className={styles.list}
-      onClick={(event) => {
+      onClickCapture={(event) => {
         // AppShellのonBeforeNavigateと同じ判定（`a[href]`クリック）。上記`<li>`のonClick
         // （ノート詳細へのnavigate、`a`タグではない）は個別にfreezeScrollを呼んでいるため、
         // ここでは二重発火してもnavigatingAwayRef.currentがtrueになるだけで無害。
-        // capture ではなく bubble で拾う: スマホで重ねた通知を開閉するタップは CardStack が止めて
-        // 遷移しないので、ここまで届かない（capture だと先に凍結して、以後の位置の保存が止まる）。
-        if (!event.defaultPrevented && (event.target as Element).closest("a[href]")) freezeScroll();
+        if ((event.target as Element).closest("a[href]")) freezeScroll();
       }}
     >
       {groups.map((g) =>

@@ -111,14 +111,10 @@ function useNoHover(): boolean {
  *   入れ替わらない）。広げたまま押す（カードかその中のリンクをクリックする）と広げた状態を
  *   「固定」し、ほかの画面から戻ってきても広げたままにする。固定はもう一度マウスが乗るか、
  *   まとまりが画面の外へ出ると解ける。固定中は `pinnedClassName` を付ける（呼び出し側が枠線で囲う）。
- * - タッチ環境: 自動では開閉しない。畳んだまとまりはどこをタップしても広げ、広げたまとまりは前面の
- *   カード以外の部分をタップするか、画面の外へ出ると畳む。開閉のタップはカードやリンクへは届けない。
- *   広げたまま前面のカードを押せば、ふつうにそのカード・リンクが開く。開閉の基準は前面のカード
- *   （`TOUCH_FOCUS_LINE` の線で決まる）。広げた状態は覚えておき、戻ってきても広げたまま出す。
- *   線がかかったら自動で開閉する作りは、隣り合うまとまりが開閉し合って止まらなくなることがあり、やめた。
+ * - タッチ環境: 広げない（8px のまま）。線がかかったら自動で開閉する作り・タップで開閉する作りを
+ *   試したが、どちらも思ったように動かせなかった（隣り合うまとまりが開閉し合って止まらない等）。
  *
- * `initialFront`・`initialSpread` は前回の前面のカード（キー）と、広げたままにしていたか（マウス環境は
- * 固定、タッチ環境はタップで広げていたか）。変わったときは `onFrontChange`・`onSpreadChange` で
+ * `initialFront`・`initialSpread` は前回の前面のカード（キー）と、広げたまま固定していたか。変わったときは `onFrontChange`・`onSpreadChange` で
  * 知らせるので、呼び出し側が覚えておいて次に渡す。
  */
 export default function CardStack({
@@ -151,15 +147,15 @@ export default function CardStack({
   const [hoveredKey, setHoveredKey] = useState<string | null>(initialFront ?? null);
   const [touchFocused, setTouchFocused] = useState<number | null>(null);
   const [mouseInside, setMouseInside] = useState(false);
-  // 広げたままにしているか（マウス環境は固定、タッチ環境はタップで広げた状態）。
-  const [pinned, setPinned] = useState(initialSpread);
+  // 広げたまま固定しているか（マウス環境のみ）。
+  const [pinned, setPinned] = useState(() => initialSpread && !noHover);
   const count = keys.length;
   const hoveredIndex = hoveredKey === null ? -1 : keys.indexOf(hoveredKey);
   const hovered = hoveredIndex < 0 ? null : hoveredIndex;
 
   const canSpread = spreadOffsetPx !== undefined;
   const hoverSpreadable = canSpread && !noHover;
-  const spread = canSpread && (noHover ? pinned : mouseInside || pinned);
+  const spread = hoverSpreadable && (mouseInside || pinned);
   const targetOffset = spread ? (spreadOffsetPx ?? STACK_OFFSET_PX) : STACK_OFFSET_PX;
 
   const changePinned = (next: boolean) => {
@@ -327,23 +323,11 @@ export default function CardStack({
       }
       onMouseLeave={hoverSpreadable ? () => setMouseInside(false) : undefined}
       onClickCapture={
-        !canSpread
-          ? undefined
-          : noHover
-            ? (e) => {
-                // タッチ環境: 畳んでいればどこでも広げ、広げていれば前面のカード以外で畳む。
-                const tapped = (e.target as Element).closest<HTMLElement>("[data-stack-index]");
-                const onFront = tapped !== null && Number(tapped.dataset.stackIndex) === front;
-                if (pinned && onFront) return;
-                e.preventDefault();
-                e.stopPropagation();
-                const frontCard = ref.current?.querySelector<HTMLElement>(`[data-stack-index="${front}"]`);
-                if (frontCard) setCardAnchor(frontCard);
-                changePinned(!pinned);
-              }
-            : () => {
-                if (spread && !pinned) changePinned(true);
-              }
+        hoverSpreadable
+          ? () => {
+              if (spread && !pinned) changePinned(true);
+            }
+          : undefined
       }
     >
       {paintOrder.map(({ key, index }) => (
