@@ -509,6 +509,11 @@ pub struct InsertRemoteWithDedupParams<'a> {
     /// この投稿自身がブリッジポストである場合、元ポストを指す識別子の生値
     /// （ATP原本ブリッジなら`at://...`）。非ブリッジなら`None`。
     pub bridged_original_uri: Option<&'a str>,
+    /// 投稿本体と同じトランザクションで書く付帯情報（添付・CW/アンケート・ハッシュタグ・
+    /// URLカード、`crate::repository::post_extras`）。新規INSERTしたときと、相互一致マージで
+    /// 既存行を更新したときに書く。`ON CONFLICT`で重複スキップしたときは書かない（先に
+    /// 保存した側が同じトランザクションで書いている）。
+    pub extras: Option<&'a crate::repository::post_extras::PostExtras>,
 }
 
 /// `PostRepository::insert_repost` の引数一式（`docs/coding_rules.md` 引数肥大化対策）。
@@ -1994,6 +1999,14 @@ impl PgPostRepository {
                     .bind(existing_id)
                     .execute(&mut *tx)
                     .await?;
+                    if let Some(extras) = params.extras {
+                        crate::repository::post_extras::apply_post_extras(
+                            &mut tx,
+                            existing_id,
+                            extras,
+                        )
+                        .await?;
+                    }
                     tx.commit().await?;
                     return Ok(());
                 }
@@ -2043,6 +2056,10 @@ impl PgPostRepository {
                 .bind(params.actor_id)
                 .execute(&mut *tx)
                 .await?;
+            if let Some(extras) = params.extras {
+                crate::repository::post_extras::apply_post_extras(&mut tx, params.id, extras)
+                    .await?;
+            }
         }
 
         tx.commit().await

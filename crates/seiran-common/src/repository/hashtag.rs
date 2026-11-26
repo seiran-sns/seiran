@@ -47,6 +47,37 @@ pub trait HashtagRepository: Send + Sync {
     async fn list_pinned(&self, actor_id: i64) -> Result<Vec<PinnedHashtagRow>, sqlx::Error>;
 }
 
+/// `text` のハッシュタグを `post_id` に紐付ける。呼び出し元のトランザクション（`conn`）の中で
+/// 実行する（投稿本体と同時に確定させるため、`crate::repository::post_extras`）。
+pub async fn link_post_in(
+    conn: &mut sqlx::PgConnection,
+    post_id: i64,
+    text: &str,
+) -> Result<(), sqlx::Error> {
+    for name in &extract_hashtags(text) {
+        // ON CONFLICT DO NOTHING だと既存行の id が RETURNING に乗らないため、
+        // 実質的な no-op 更新にして常に id を取れるようにする。
+        let hashtag_id: i64 = sqlx::query_scalar(
+            "INSERT INTO hashtags (name) VALUES ($1)
+             ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+             RETURNING id",
+        )
+        .bind(name)
+        .fetch_one(&mut *conn)
+        .await?;
+
+        sqlx::query(
+            "INSERT INTO post_hashtags (post_id, hashtag_id) VALUES ($1, $2)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(post_id)
+        .bind(hashtag_id)
+        .execute(&mut *conn)
+        .await?;
+    }
+    Ok(())
+}
+
 pub struct PgHashtagRepository {
     pool: PgPool,
 }
@@ -60,35 +91,11 @@ impl PgHashtagRepository {
 #[async_trait]
 impl HashtagRepository for PgHashtagRepository {
     async fn link_post(&self, post_id: i64, text: &str) -> Result<(), sqlx::Error> {
-        let names = extract_hashtags(text);
-        if names.is_empty() {
+        if extract_hashtags(text).is_empty() {
             return Ok(());
         }
-
         let mut tx = self.pool.begin().await?;
-
-        for name in &names {
-            // ON CONFLICT DO NOTHING だと既存行の id が RETURNING に乗らないため、
-            // 実質的な no-op 更新にして常に id を取れるようにする。
-            let hashtag_id: i64 = sqlx::query_scalar(
-                "INSERT INTO hashtags (name) VALUES ($1)
-                 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-                 RETURNING id",
-            )
-            .bind(name)
-            .fetch_one(&mut *tx)
-            .await?;
-
-            sqlx::query(
-                "INSERT INTO post_hashtags (post_id, hashtag_id) VALUES ($1, $2)
-                 ON CONFLICT DO NOTHING",
-            )
-            .bind(post_id)
-            .bind(hashtag_id)
-            .execute(&mut *tx)
-            .await?;
-        }
-
+        link_post_in(&mut tx, post_id, text).await?;
         tx.commit().await
     }
 

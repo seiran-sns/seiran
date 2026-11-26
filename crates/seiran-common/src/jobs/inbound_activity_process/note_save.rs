@@ -212,8 +212,8 @@ pub(crate) async fn save_ap_note_core(
     let (bridge_target_at_uri, bridge_of_post_id) = resolve_bridge_original(inbox, note).await;
 
     // seiranPostがあれば本文・絵文字マップを標準変換の代わりに使う（Single Source of
-    // Truth、`docs/protocols.md` 5節）。添付は`save_remote_attachments`が`attachments[]`
-    // から、URLカードは`store_note_extras`が`linkCards[]`から反映する。
+    // Truth、`docs/protocols.md` 5節）。添付は`attachments[]`から、URLカードは`linkCards[]`
+    // から`build_note_extras`が組み立てる。
     let body = seiran_post_ext
         .as_ref()
         .map(|sp| sp.body.clone())
@@ -227,6 +227,11 @@ pub(crate) async fn save_ap_note_core(
     } else {
         Some(&content_html_sanitized)
     };
+
+    // 付帯情報（CW・アンケート、ハッシュタグ、seiranPostのURLカード、添付）は投稿本体と同じ
+    // トランザクションで書く（`crate::repository::post_extras`）。ここまでで外部への呼び出し
+    // （アクター・参照・絵文字の解決）は済んでおり、トランザクションの中ではSQLしか発行しない。
+    let extras = build_note_extras(note, &body, seiran_post_ext.as_ref());
 
     // posts テーブルに挿入（ap_object_id 重複はスキップ、claimed_at_uriがあれば
     // #237相互一致マージを試みる。旧seiran_uuidは常にNone、詳細は上記コメント参照）。
@@ -254,6 +259,7 @@ pub(crate) async fn save_ap_note_core(
             claimed_at_uri,
             bridge_of_post_id,
             bridged_original_uri: bridge_target_at_uri.as_deref(),
+            extras: Some(&extras),
         })
         .await
         .map_err(|e| format!("posts INSERT エラー: {}", e))?;
@@ -276,15 +282,15 @@ pub(crate) async fn save_ap_note_core(
         bridge_of_post_id,
     )
     .await;
-    store_note_extras(
-        inbox,
-        post_id,
-        note,
-        &note_id,
-        &body,
-        seiran_post_ext.as_ref(),
-    )
-    .await?;
+    // URLカードのOGP取得はジョブへ委ねる（コミット後に積む。seiranPostの申告済みカードは
+    // 上のトランザクションで保存済み）。OGP取得ジョブはoEmbed discoveryによる埋め込み
+    // プレーヤー解決も行う。`Article`（bridgy-fed Webブリッジ等、#242）はNoteと異なり
+    // 元記事そのものに価値があるため、本文中リンクの有無に関わらず自身の`id`（ap_object_id）
+    // も常にカード化候補へ加える（タイムライン上からでも元記事へジャンプできるように）。
+    if extras.link_cards.is_empty() {
+        let article_url = (note["type"].as_str() == Some("Article")).then_some(note_id.as_str());
+        queue_link_cards_for_post(&inbox.queue, post_id, &body, article_url).await;
+    }
 
     Ok(SaveApNoteOutcome::Inserted(Box::new(SavedApNote {
         post_id,
@@ -661,53 +667,42 @@ async fn link_bridge_posts(
     }
 }
 
-/// 投稿本体以外の付帯情報を保存する: CW・アンケート、ハッシュタグ、URLカード、添付メディア。
-async fn store_note_extras(
-    inbox: &InboxContext,
-    post_id: i64,
+/// 投稿本体と同じトランザクションで書く付帯情報（CW・アンケート、ハッシュタグ、seiranPost の
+/// URLカード、添付メディア）を組み立てる。SQLもHTTPも発行しない。
+///
+/// URLカードは、`seiranPost.linkCards[]` があれば送信側が既に申告した title/description/
+/// thumbnailUrl をそのまま使う（受信側で改めてOGP取得し直す必要がない。#237）。無ければ空で
+/// 返し、呼び出し元がコミット後に本文中URLのOGP取得ジョブを積む。
+fn build_note_extras(
     note: &serde_json::Value,
-    note_id: &str,
     body: &str,
     seiran_post_ext: Option<&crate::seiran_post::SeiranPost>,
-) -> Result<(), String> {
+) -> crate::repository::post_extras::PostExtras {
+    use crate::repository::post_extras::{
+        link_cards_from_seiran_post, ContentMetadata, PostExtras,
+    };
     let (content_warning, poll) = match seiran_post_ext {
-        Some(sp) => (sp.content_warning.as_deref(), sp.poll.clone()),
+        Some(sp) => (sp.content_warning.clone(), sp.poll.clone()),
         None => (
-            note["summary"].as_str().filter(|s| !s.is_empty()),
+            note["summary"]
+                .as_str()
+                .filter(|s| !s.is_empty())
+                .map(str::to_string),
             normalize_ap_poll(note),
         ),
     };
-    inbox
-        .post_repo
-        .set_fedi_content_metadata(post_id, content_warning, poll.as_ref())
-        .await
-        .map_err(|e| format!("投稿メタデータ更新エラー: {}", e))?;
-
-    if let Err(e) = inbox.hashtag_repo.link_post(post_id, body).await {
-        tracing::error!(
-            "[NoteSave] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
-            e
-        );
+    PostExtras {
+        content_metadata: Some(ContentMetadata {
+            content_warning,
+            poll,
+        }),
+        hashtag_text: Some(body.to_string()),
+        attachments: remote_attachments_of(note, seiran_post_ext),
+        link_cards: seiran_post_ext
+            .map(|sp| link_cards_from_seiran_post(&sp.link_cards))
+            .unwrap_or_default(),
+        bsky_gates: None,
     }
-
-    // URLカード。`seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
-    // thumbnailUrlをそのまま反映する（受信側で改めてOGP取得し直す必要がない。#237、
-    // 実地検証で「本文にURLが無くlinkCardsのみのケースが空振りする」欠落を発見して対応）。
-    // 無ければ従来通り本文中URLをOGP取得ジョブ（oEmbed discoveryによる埋め込みプレーヤー
-    // 解決も行う）へ委ねる。`Article`（bridgy-fed Webブリッジ等、#242）はNoteと異なり
-    // 元記事そのものに価値があるため、本文中リンクの有無に関わらず自身の`id`（ap_object_id）
-    // も常にカード化候補へ加える（タイムライン上からでも元記事へジャンプできるように）。
-    let article_url = (note["type"].as_str() == Some("Article")).then_some(note_id);
-    match seiran_post_ext.map(|sp| &sp.link_cards) {
-        Some(cards) if !cards.is_empty() => {
-            crate::seiran_post::insert_seiran_post_link_cards(&inbox.db_pool, post_id, cards).await;
-        }
-        _ => queue_link_cards_for_post(&inbox.queue, post_id, body, article_url).await,
-    }
-
-    // 添付画像・動画・音声の URL を保存（S3 には保存せず URL のみ記録）
-    save_remote_attachments(inbox, post_id, note, seiran_post_ext).await;
-    Ok(())
 }
 
 /// 1投稿から抽出するURLカード候補の上限。大量リンクを含む投稿でのOGPフェッチ暴走を防ぐ。
@@ -800,70 +795,44 @@ pub(super) async fn queue_link_cards_for_post(
     }
 }
 
-/// AP Note の `attachment` 配列を、投稿の添付メディア URL として保存する
-/// （S3 には保存せず URL のみ記録。how: 添付の永続化）。
-pub(super) async fn save_remote_attachments(
-    inbox: &InboxContext,
-    post_id: i64,
+/// AP Note の `attachment` 配列（seiranPost があればその `attachments[]`）を、投稿の添付メディア
+/// URL の一覧にする（S3 には保存せず URL のみ記録する）。
+pub(super) fn remote_attachments_of(
     note: &serde_json::Value,
     seiran_post_ext: Option<&crate::seiran_post::SeiranPost>,
-) {
+) -> Vec<crate::repository::post_extras::NewRemoteAttachment> {
+    use crate::repository::post_extras::{attachments_from_parsed, NewRemoteAttachment};
     // seiranPost があれば添付はそちらから（画像ごとの NSFW を再現する。Note の `sensitive`
     // は1枚でも NSFW があれば立つので、それを全添付に当てると全部ぼかしになる）。
     if let Some(sp) = seiran_post_ext {
-        for (position, (att, is_sensitive)) in sp.received_attachments().iter().enumerate() {
-            if let Err(e) = inbox
-                .post_repo
-                .attach_remote_media_url(
-                    post_id,
-                    &crate::repository::RemoteAttachment {
-                        url: &att.url,
-                        mime_type: Some(&att.mime_type),
-                        thumbnail_url: None,
-                        is_sensitive: *is_sensitive,
-                        is_gif: att.is_gif,
-                        position: position as i16,
-                    },
-                )
-                .await
-            {
-                tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
-            }
-        }
-        return;
+        return attachments_from_parsed(&sp.received_attachments())
+            .into_iter()
+            .map(|att| NewRemoteAttachment {
+                thumbnail_url: None,
+                ..att
+            })
+            .collect();
     }
     let Some(attachments) = note["attachment"].as_array() else {
-        return;
+        return Vec::new();
     };
-    for (position, att) in attachments.iter().enumerate() {
-        let url = att["url"]
-            .as_str()
-            .or_else(|| att.as_str())
-            .unwrap_or_default();
-        if url.is_empty() {
-            continue;
-        }
-        let mime_type = guess_attachment_mime_type(att, url);
-        let is_sensitive = att["sensitive"].as_bool().unwrap_or(false)
-            || note["sensitive"].as_bool().unwrap_or(false);
-        if let Err(e) = inbox
-            .post_repo
-            .attach_remote_media_url(
-                post_id,
-                &crate::repository::RemoteAttachment {
-                    url,
-                    mime_type: mime_type.as_deref(),
-                    thumbnail_url: None,
-                    is_sensitive,
-                    is_gif: false,
-                    position: position as i16,
-                },
-            )
-            .await
-        {
-            tracing::error!("[Create/Note] 添付 URL 保存失敗（スキップ）: {}", e);
-        }
-    }
+    attachments
+        .iter()
+        .filter_map(|att| {
+            let url = att["url"].as_str().or_else(|| att.as_str())?;
+            if url.is_empty() {
+                return None;
+            }
+            Some(NewRemoteAttachment {
+                url: url.to_string(),
+                mime_type: guess_attachment_mime_type(att, url),
+                thumbnail_url: None,
+                is_sensitive: att["sensitive"].as_bool().unwrap_or(false)
+                    || note["sensitive"].as_bool().unwrap_or(false),
+                is_gif: false,
+            })
+        })
+        .collect()
 }
 
 #[cfg(test)]

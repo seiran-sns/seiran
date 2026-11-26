@@ -11,8 +11,12 @@
 //! `posts.reply_to_post_id` を設定してリプライとして保存する。
 
 use seiran_common::repository::bsky_ingest::{self, BskyPostRow, InsertOrMergeOutcome};
+use seiran_common::repository::post_extras::{
+    BskyGates, ContentMetadata, NewLinkCardInput, PostExtras, attachments_from_parsed,
+    link_cards_from_seiran_post,
+};
 use seiran_common::repository::{
-    NewNotification, PgSiteSettingsRepository, SiteSettingsRepository, note_extras,
+    NewNotification, PgSiteSettingsRepository, SiteSettingsRepository,
 };
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -33,10 +37,10 @@ use seiran_common::jetstream_control::fetch_wanted_dids_touch;
 use seiran_common::queue::worker::priority;
 use seiran_common::repository::denied_host as denied_host_repo;
 use seiran_common::repository::{
-    ActorRepository, EmojiRepository, HashtagRepository, NotificationKind, NotificationRepository,
-    PgActorRepository, PgEmojiRepository, PgFollowRepository, PgHashtagRepository,
-    PgNotificationRepository, PgPostRepository, PgReactionRepository, PostRepository,
-    ReactionRepository, extract_shortcode_candidates, parse_reaction_shortcode_and_host,
+    ActorRepository, EmojiRepository, NotificationKind, NotificationRepository, PgActorRepository,
+    PgEmojiRepository, PgFollowRepository, PgNotificationRepository, PgPostRepository,
+    PgReactionRepository, PostRepository, ReactionRepository, extract_shortcode_candidates,
+    parse_reaction_shortcode_and_host,
 };
 use seiran_common::streaming::{ChannelScope, ReactorChange, broadcast_reaction_update};
 use seiran_common::traits::{Job, JobQueue};
@@ -592,36 +596,72 @@ async fn save_new_bsky_post(
             .map(|att| (att, parsed.attachments_sensitive))
             .collect(),
     };
-    save_bsky_post(
-        pool,
-        &deps.job_queue,
-        &deps.http,
-        &deps.stream_hub,
-        IncomingBskyPost {
-            at_uri: &at_uri,
-            author_did: &did,
-            at_cid: &parsed.cid,
-            text: &body_text,
-            mention_facets: &mention_facets,
-            emoji_map: &emoji_map,
-            created_at: parsed.created_at,
-            actor_id: author.actor_id,
-            username: &author.username,
-            display_name: author.display_name.as_deref(),
-            avatar_url: author.avatar_url.as_deref(),
-            reply_to_post_id,
-            quote_of_post_id,
-            attachments,
-            link_card: parsed.link_card,
-            claimed_ap_object_id: sp.as_ref().and_then(|sp| sp.counterpart_post_id.clone()),
-            content_warning: sp.as_ref().and_then(|sp| sp.content_warning.clone()),
-            poll: sp.as_ref().and_then(|sp| sp.poll.clone()),
-            seiran_link_cards: sp.map(|sp| sp.link_cards).unwrap_or_default(),
-            bridged_original_url: parsed.bridged_original_url,
-        },
-    )
-    .await;
+    let incoming = IncomingBskyPost {
+        at_uri: &at_uri,
+        author_did: &did,
+        at_cid: &parsed.cid,
+        text: &body_text,
+        mention_facets: &mention_facets,
+        emoji_map: &emoji_map,
+        created_at: parsed.created_at,
+        actor_id: author.actor_id,
+        username: &author.username,
+        display_name: author.display_name.as_deref(),
+        avatar_url: author.avatar_url.as_deref(),
+        reply_to_post_id,
+        quote_of_post_id,
+        attachments,
+        link_card: parsed.link_card,
+        claimed_ap_object_id: sp.as_ref().and_then(|sp| sp.counterpart_post_id.clone()),
+        content_warning: sp.as_ref().and_then(|sp| sp.content_warning.clone()),
+        poll: sp.as_ref().and_then(|sp| sp.poll.clone()),
+        seiran_link_cards: sp.map(|sp| sp.link_cards).unwrap_or_default(),
+        bridged_original_url: parsed.bridged_original_url,
+    };
+    // 保存に失敗したら（DB 接続プールの枯渇など）、時間を置いて最初からやり直す。保存は
+    // 投稿本体と付帯情報を1つのトランザクションで行うので、失敗した試行は何も残さない。
+    // Jetstream のイベントはここで捨てると二度と届かないため読み飛ばさない。イベントの
+    // 中身（レコード本体）はこのタスクが持っているので、キューを経由せずこの場で再試行する。
+    for attempt in 1..=JETSTREAM_SAVE_ATTEMPTS {
+        match save_bsky_post(
+            pool,
+            &deps.job_queue,
+            &deps.http,
+            &deps.stream_hub,
+            &incoming,
+        )
+        .await
+        {
+            Ok(()) => return,
+            Err(e) if attempt < JETSTREAM_SAVE_ATTEMPTS => {
+                let wait = JETSTREAM_SAVE_RETRY_BASE * 2u32.pow(attempt - 1);
+                tracing::warn!(
+                    "[Jetstream] 保存失敗: {}: {} → {}ms後にやり直します (attempt {}/{})",
+                    at_uri,
+                    e,
+                    wait.as_millis(),
+                    attempt,
+                    JETSTREAM_SAVE_ATTEMPTS
+                );
+                tokio::time::sleep(wait).await;
+            }
+            Err(e) => {
+                tracing::error!(
+                    "[Jetstream] 保存失敗（諦めます）: {}: {} (attempt {}/{})",
+                    at_uri,
+                    e,
+                    attempt,
+                    JETSTREAM_SAVE_ATTEMPTS
+                );
+            }
+        }
+    }
 }
+
+/// Jetstream で受けた投稿の保存を試みる回数と、最初のやり直しまでの待ち時間（以後は倍々）。
+/// 受信 Activity の処理（`Job::InboundActivityProcess`）と同じく、3回・2秒から。
+const JETSTREAM_SAVE_ATTEMPTS: u32 = 3;
+const JETSTREAM_SAVE_RETRY_BASE: std::time::Duration = std::time::Duration::from_secs(2);
 
 /// `subject.uri`（リポスト・いいねの対象投稿）を取り出す。
 fn subject_uri_of(record: &JsonValue) -> Option<String> {
@@ -748,16 +788,21 @@ struct IncomingBskyPost<'a> {
     bridged_original_url: Option<String>,
 }
 
-/// Jetstream イベントから得た投稿本体を DB に保存し、ローカルフォロワーへ配信する。
+/// Jetstream イベントから得た投稿を DB に保存し、ローカルフォロワーへ配信する。
 /// Jetstream はほぼリアルタイムでレコード本体を同梱してくるため、AppView への
 /// 再取得・インデックス遅延リトライは不要（旧 Relay Firehose 直結実装にはあった）。
+///
+/// 投稿本体と付帯情報（CW・投票、返信可否・引用可否、URLカード、ハッシュタグ、添付）は1つの
+/// トランザクションで書く（`seiran_common::repository::post_extras`）。トランザクションの前に
+/// 外部への呼び出し（返信可否・引用可否の取得）を済ませ、コミットの後にジョブの積み込みと
+/// 配信を行う。`Err` のときは何も保存されていない。
 async fn save_bsky_post(
     pool: &PgPool,
     job_queue: &Arc<dyn JobQueue>,
     http: &Arc<reqwest::Client>,
     stream_hub: &StreamHub,
-    post: IncomingBskyPost<'_>,
-) {
+    post: &IncomingBskyPost<'_>,
+) -> Result<(), sqlx::Error> {
     let post_id = generate_snowflake_id(post.created_at);
 
     // brid.gy(Bridgy Fed)ブリッジポスト対応（`seiran_common::bridge_post`参照）: 元AP投稿の
@@ -773,6 +818,19 @@ async fn save_bsky_post(
         .unwrap_or(None),
         None => None,
     };
+
+    // 返信許可（threadgate）・引用可否（postgate）を取得する（#返信/引用グレーアウト、
+    // `docs/protocols.md`参照）。HTTP 呼び出しなのでトランザクションの前に行う。取得失敗時は
+    // 両方とも「制限なし」になる（誤ってボタンをグレーアウトしない）。
+    let (reply_allow, quote_disabled) =
+        seiran_common::atp::fetch_bsky_gates(http, post.author_did, post.at_uri).await;
+    let extras = build_bsky_post_extras(
+        post,
+        BskyGates {
+            reply_allow,
+            quote_disabled,
+        },
+    );
 
     // #237 相互一致マージ判定〜INSERTまでを単一トランザクションで行う
     // （`insert_remote_with_dedup`, AP側と同じ形）。直列化はadvisory lockではなく
@@ -795,173 +853,115 @@ async fn save_bsky_post(
         claimed_ap_object_id: post.claimed_ap_object_id.as_deref(),
         bridge_of_post_id,
         bridged_original_uri: post.bridged_original_url.as_deref(),
+        extras: Some(&extras),
     };
-    let insert_outcome: Result<InsertOrMergeOutcome, sqlx::Error> =
-        seiran_common::unique_retry::retry_on_unique_violation(|| {
-            bsky_ingest::insert_or_merge_bsky_post(pool, &row)
-        })
-        .await;
+    let outcome = seiran_common::unique_retry::retry_on_unique_violation(|| {
+        bsky_ingest::insert_or_merge_bsky_post(pool, &row)
+    })
+    .await?;
 
-    match insert_outcome {
-        Ok(InsertOrMergeOutcome::Merged {
+    match outcome {
+        InsertOrMergeOutcome::Merged {
             post_id: merged_post_id,
-        }) => {
+        } => {
             tracing::info!(
                 "[Jetstream] seiranPostマージ成立（ATP側更新）、INSERTはスキップ: at_uri={} → post_id={}",
                 post.at_uri,
                 merged_post_id
             );
         }
-        Ok(InsertOrMergeOutcome::DuplicateSkipped) => {
+        InsertOrMergeOutcome::DuplicateSkipped => {
             tracing::warn!("[Jetstream] 重複スキップ: {}", post.at_uri);
         }
-        Err(e) => {
-            tracing::error!("[Jetstream] 保存失敗: {}: {}", post.at_uri, e);
-        }
-        Ok(InsertOrMergeOutcome::Inserted) => {
+        InsertOrMergeOutcome::Inserted => {
             tracing::info!("[Jetstream] 保存完了: {}", post.at_uri);
-            store_bsky_post_extras(pool, job_queue, http, &post, post_id).await;
-            link_bsky_bridge_posts(pool, job_queue, &post, post_id, bridge_of_post_id).await;
-            notify_local_actors_of_bsky_post(pool, stream_hub, &post, post_id).await;
-            publish_bsky_post_to_timelines(pool, stream_hub, &post, post_id).await;
+            queue_bsky_link_card_embed(job_queue, post, post_id).await;
+            link_bsky_bridge_posts(pool, job_queue, post, post_id, bridge_of_post_id).await;
+            notify_local_actors_of_bsky_post(pool, stream_hub, post, post_id).await;
+            publish_bsky_post_to_timelines(pool, stream_hub, post, post_id).await;
         }
     }
+    Ok(())
 }
 
-/// 保存した Bsky 投稿の付帯情報（CW・投票、返信可否・引用可否、URLカード、ハッシュタグ、添付）を保存する。
-async fn store_bsky_post_extras(
-    pool: &PgPool,
-    job_queue: &Arc<dyn JobQueue>,
-    http: &reqwest::Client,
-    post: &IncomingBskyPost<'_>,
-    post_id: i64,
-) {
-    let text = post.text;
-    let at_uri = post.at_uri;
-    let author_did = post.author_did;
-    let attachments = &post.attachments;
-    let link_card = &post.link_card;
-    let content_warning = &post.content_warning;
-    let poll = &post.poll;
-    let seiran_link_cards = &post.seiran_link_cards;
+/// Bsky の URL カード（external embed）を保存するか。`seiranPost.linkCards[]` があればそちらを
+/// 使い、投票付き投稿では保存しない。
+///
+/// `poll.is_none()`ガード: Bskyの埋め込み枠は1投稿につき1つしか無く、投票
+/// （`poll`）付き投稿をBskyへ配信する際は`resolve_poll_embed`が「自分自身の
+/// URL＋選択肢の箇条書きdescription」という投票の代替表現を`external` embed
+/// として自動生成する（Bskyに投票型が無いため）。このガードが無いと、
+/// ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
+/// この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
+/// 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
+/// （AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
+fn bsky_link_card_to_store<'a>(post: &'a IncomingBskyPost<'_>) -> Option<&'a ParsedLinkCard> {
+    if !post.seiran_link_cards.is_empty() || post.poll.is_some() {
+        return None;
+    }
+    post.link_card.as_ref()
+}
+
+/// 投稿本体と同じトランザクションで書く付帯情報を組み立てる。SQLもHTTPも発行しない。
+fn build_bsky_post_extras(post: &IncomingBskyPost<'_>, gates: BskyGates) -> PostExtras {
     // seiranPost拡張オブジェクト（#237）のCW・投票をposts.content_warning/pollへ
     // 反映する。AP受信側（note_save.rs）は既に対応済みだが、ATP受信側で
     // これを欠いていると、ATP経由でしか受信できていない間はCW/投票が
     // 一切表示されない非対称が生じる。
-    if content_warning.is_some() || poll.is_some() {
-        let posts_repo = PgPostRepository::new(pool.clone());
-        if let Err(e) = posts_repo
-            .set_fedi_content_metadata(post_id, content_warning.as_deref(), poll.as_ref())
-            .await
-        {
-            tracing::error!(
-                "[Jetstream] seiranPost CW/投票の保存失敗（投稿自体は成功済み）: {}",
-                e
-            );
-        }
+    let content_metadata =
+        (post.content_warning.is_some() || post.poll.is_some()).then(|| ContentMetadata {
+            content_warning: post.content_warning.clone(),
+            poll: post.poll.clone(),
+        });
+    // URLカード。`seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
+    // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。無ければBskyの
+    // external embed（常に最大1件、position=0固定）。
+    let link_cards = if post.seiran_link_cards.is_empty() {
+        bsky_link_card_to_store(post)
+            .map(|card| NewLinkCardInput {
+                url: card.url.clone(),
+                title: card.title.clone(),
+                description: card.description.clone(),
+                thumbnail_url: card.thumbnail_url.clone(),
+            })
+            .into_iter()
+            .collect()
+    } else {
+        link_cards_from_seiran_post(&post.seiran_link_cards)
+    };
+    PostExtras {
+        content_metadata,
+        hashtag_text: Some(post.text.to_string()),
+        attachments: attachments_from_parsed(&post.attachments),
+        link_cards,
+        bsky_gates: Some(gates),
     }
+}
 
-    // 返信許可（threadgate）・引用可否（postgate）を取得して保存する
-    // （#返信/引用グレーアウト、`docs/protocols.md`参照）。取得失敗時は両方とも
-    // 「制限なし」のまま（誤ってボタンをグレーアウトしない）。
-    let (reply_allow, quote_disabled) =
-        seiran_common::atp::fetch_bsky_gates(http, author_did, at_uri).await;
-    if let Err(e) =
-        bsky_ingest::set_bsky_gates(pool, post_id, reply_allow.as_ref(), quote_disabled).await
-    {
-        tracing::error!("[Jetstream] gate情報保存失敗（スキップ）: {}", e);
-    }
-
-    if !seiran_link_cards.is_empty() {
-        // `seiranPost.linkCards[]`があれば送信側が既に申告したtitle/description/
-        // thumbnailUrlをそのまま反映する（AP受信側と共通のロジック、#237）。
-        // `embed_src`は設計上NULLのまま（送信側の申告を信用しない方針）のため
-        // Job::LinkCardEmbedResolveは積まない。
-        seiran_common::seiran_post::insert_seiran_post_link_cards(pool, post_id, seiran_link_cards)
-            .await;
-    } else if let Some(card) = link_card.as_ref().filter(|_| poll.is_none()) {
-        // URLカード（Bskyは常に最大1件、position=0固定）。埋め込みプレーヤーのiframe src
-        // （oEmbed discovery）はここでは未解決のため、後追いでJob::LinkCardEmbedResolveへ
-        // 委ねる（Bskyのexternal embedにはiframe情報が無いため）。
-        //
-        // `poll.is_none()`ガード: Bskyの埋め込み枠は1投稿につき1つしか無く、投票
-        // （`poll`）付き投稿をBskyへ配信する際は`resolve_poll_embed`が「自分自身の
-        // URL＋選択肢の箇条書きdescription」という投票の代替表現を`external` embed
-        // として自動生成する（Bskyに投票型が無いため）。このガードが無いと、
-        // ATP経由でのみ受信した投票付き投稿（`seiranPost.linkCards[]`は当然空）で、
-        // この投票の代替表現を本物のリンクカードと誤認して保存してしまい、本来の
-        // 投票ウィジェットとは別に同じ選択肢を並べただけの余計なカードが表示される
-        // （AP受信側`note_save.rs`は本文URL抽出方式のためこの問題が無い）。
-        let result = note_extras::insert_link_card(
-            pool,
-            &note_extras::NewLinkCard {
+/// Bsky の URL カードを保存したなら、埋め込みプレーヤーのiframe src（oEmbed discovery）の解決を
+/// `Job::LinkCardEmbedResolve`へ委ねる（Bskyのexternal embedにはiframe情報が無いため）。
+/// `seiranPost.linkCards[]`由来のカードは`embed_src`を設計上NULLのまま（送信側の申告を信用
+/// しない方針）にするので積まない。コミットの後に呼ぶ。
+async fn queue_bsky_link_card_embed(
+    job_queue: &Arc<dyn JobQueue>,
+    post: &IncomingBskyPost<'_>,
+    post_id: i64,
+) {
+    let Some(card) = bsky_link_card_to_store(post) else {
+        return;
+    };
+    if let Err(e) = job_queue
+        .enqueue(
+            Job::LinkCardEmbedResolve {
                 post_id,
                 position: 0,
-                url: &card.url,
-                title: &card.title,
-                description: &card.description,
-                thumbnail_url: card.thumbnail_url.as_deref(),
-                embed_src: None,
-                embed_type: None,
+                url: card.url.clone(),
             },
+            priority::LOW,
         )
-        .await;
-        match result {
-            Ok(_) => {
-                if let Err(e) = job_queue
-                    .enqueue(
-                        Job::LinkCardEmbedResolve {
-                            post_id,
-                            position: 0,
-                            url: card.url.clone(),
-                        },
-                        priority::LOW,
-                    )
-                    .await
-                {
-                    tracing::error!("[Jetstream] LinkCardEmbedResolve enqueue失敗: {}", e);
-                }
-            }
-            Err(e) => {
-                tracing::error!(
-                    "[Jetstream] post_link_cards INSERT失敗（投稿自体は成功済み）: {}",
-                    e
-                );
-            }
-        }
-    }
-
-    if let Err(e) = PgHashtagRepository::new(pool.clone())
-        .link_post(post_id, text)
         .await
     {
-        tracing::error!(
-            "[Jetstream] ハッシュタグ抽出・リンク失敗（投稿自体は成功済み）: {}",
-            e
-        );
-    }
-
-    // 添付（画像・動画）を post_attachments に保存
-    if !attachments.is_empty() {
-        let posts_repo = PgPostRepository::new(pool.clone());
-        for (position, (att, is_sensitive)) in attachments.iter().enumerate() {
-            if let Err(e) = posts_repo
-                .attach_remote_media_url(
-                    post_id,
-                    &seiran_common::repository::RemoteAttachment {
-                        url: &att.url,
-                        mime_type: Some(&att.mime_type),
-                        thumbnail_url: att.thumbnail_url.as_deref(),
-                        is_sensitive: *is_sensitive,
-                        is_gif: att.is_gif,
-                        position: position as i16,
-                    },
-                )
-                .await
-            {
-                tracing::error!("[Jetstream] 添付 URL 保存失敗（スキップ）: {}", e);
-            }
-        }
+        tracing::error!("[Jetstream] LinkCardEmbedResolve enqueue失敗: {}", e);
     }
 }
 
