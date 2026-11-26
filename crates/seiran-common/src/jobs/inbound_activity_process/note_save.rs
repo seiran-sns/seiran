@@ -816,6 +816,11 @@ pub(super) fn remote_attachments_of(
     let Some(attachments) = note["attachment"].as_array() else {
         return Vec::new();
     };
+    // 添付ごとの `sensitive` を1つでも送ってくる実装（Misskey 系）は、それに従う。Note の
+    // `sensitive` は1枚でも NSFW があれば立つので、全添付に当てると全部ぼかしになる。
+    // 添付ごとの値を送らない実装（Mastodon 系）は、Note の値を投稿の添付全体に当てる。
+    let per_attachment = attachments.iter().any(|att| att["sensitive"].is_boolean());
+    let note_sensitive = note["sensitive"].as_bool().unwrap_or(false);
     attachments
         .iter()
         .filter_map(|att| {
@@ -827,8 +832,11 @@ pub(super) fn remote_attachments_of(
                 url: url.to_string(),
                 mime_type: guess_attachment_mime_type(att, url),
                 thumbnail_url: None,
-                is_sensitive: att["sensitive"].as_bool().unwrap_or(false)
-                    || note["sensitive"].as_bool().unwrap_or(false),
+                is_sensitive: if per_attachment {
+                    att["sensitive"].as_bool().unwrap_or(false)
+                } else {
+                    note_sensitive
+                },
                 is_gif: false,
             })
         })
@@ -838,6 +846,37 @@ pub(super) fn remote_attachments_of(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn sensitivity_of(note: serde_json::Value) -> Vec<bool> {
+        remote_attachments_of(&note, None)
+            .into_iter()
+            .map(|att| att.is_sensitive)
+            .collect()
+    }
+
+    #[test]
+    fn remote_attachments_follow_per_attachment_sensitive() {
+        let note = serde_json::json!({
+            "sensitive": true,
+            "attachment": [
+                { "url": "https://example.com/1.webp", "mediaType": "image/webp", "sensitive": false },
+                { "url": "https://example.com/2.webp", "mediaType": "image/webp", "sensitive": true },
+            ],
+        });
+        assert_eq!(sensitivity_of(note), vec![false, true]);
+    }
+
+    #[test]
+    fn remote_attachments_use_note_sensitive_without_per_attachment_values() {
+        let note = serde_json::json!({
+            "sensitive": true,
+            "attachment": [
+                { "url": "https://example.com/1.png", "mediaType": "image/png" },
+                { "url": "https://example.com/2.png", "mediaType": "image/png" },
+            ],
+        });
+        assert_eq!(sensitivity_of(note), vec![true, true]);
+    }
 
     #[test]
     fn extract_link_card_urls_finds_multiple_and_dedups() {

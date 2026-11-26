@@ -40,7 +40,7 @@
 
 ### Fedi投稿のCW・アンケート・閲覧注意画像
 
-`summary` を CW、`Question.oneOf`/`anyOf` をアンケートとして保存する。`summary` は受信したまま保存する（Misskey は本文 `content` を HTML に変換して送るのに、`summary` は生の MFM のまま送るため、タグや `$[…]` 記法を含みうる）。表示用の変換は API 応答の組み立て時に `fedi_content_warning::fedi_content_warning_html` で行う（`actor_type = fedi` の投稿だけ。タグの形をしていない `<` は文字として残す）。Misskey 互換 API の `cw` は変換前の文字列を返す。添付または投稿全体の `sensitive` が真なら画像を閲覧注意として返す。
+`summary` を CW、`Question.oneOf`/`anyOf` をアンケートとして保存する。`summary` は受信したまま保存する（Misskey は本文 `content` を HTML に変換して送るのに、`summary` は生の MFM のまま送るため、タグや `$[…]` 記法を含みうる）。表示用の変換は API 応答の組み立て時に `fedi_content_warning::fedi_content_warning_html` で行う（`actor_type = fedi` の投稿だけ。タグの形をしていない `<` は文字として残す）。Misskey 互換 API の `cw` は変換前の文字列を返す。添付の閲覧注意は、添付ごとの `sensitive` を1つでも送ってくる投稿（Misskey 系）ではその値に従い、送ってこない投稿（Mastodon 系）では投稿全体の `sensitive` を全添付に当てる（Misskey 系は1枚でも閲覧注意があれば投稿全体の `sensitive` も立てるので、それを当てると全部ぼかしになる）。
 
 ### Fedi投稿のURLカード
 
