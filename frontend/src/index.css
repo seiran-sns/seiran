@@ -28,6 +28,8 @@
   --card-bg-admin-override: #e4e5e8;
   /* 通知欄で、未読だった（今回初めて表示した）通知を目立たせる背景。 */
   --notif-fresh-bg: #fff3bf;
+  /* 通知欄で、広げたまま固定した重ねた通知を囲む枠。 */
+  --deck-pinned-outline: #eab308;
   /* リモートサーバー表示（投稿カード・プロフィール）のバッジ。背景はそのサーバーの themeColor
    * を `--server-badge-mix` の割合で `--bg-elev-2` に混ぜる（通常はそのまま）。文字は背景が任意の色
    * なのでテーマに関わらず濃色＋縁取りにする。 */
@@ -71,6 +73,7 @@
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #2c2e33;
   --notif-fresh-bg: #4a3f12;
+  --deck-pinned-outline: #facc15;
   --line-icon-repost: #4cc276;
   --line-icon-heart: #f06478;
   color-scheme: dark;
@@ -107,6 +110,7 @@
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #dbd9d4;
   --notif-fresh-bg: #ebe0bf;
+  --deck-pinned-outline: #d4a72c;
   --server-badge-mix: 45%;
   --server-label-color: #53565d;
   --server-label-halo: #eeece7;
@@ -140,6 +144,7 @@
   --card-bg-opaque: var(--card-bg);
   --card-bg-admin-override: #2e2f32;
   --notif-fresh-bg: #3a3525;
+  --deck-pinned-outline: #c9a43a;
   --server-badge-mix: 45%;
   --server-label-color: #c8cbd0;
   --server-label-halo: #1d2025;

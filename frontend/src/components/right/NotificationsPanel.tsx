@@ -30,10 +30,13 @@ import TwemojiEmoji from "../common/TwemojiEmoji";
 import UiIcon from "../common/UiIcon";
 import CardStack from "../common/CardStack";
 import { groupNotifications } from "../../lib/notificationGroups";
+import { applyTimelineScroll, captureTimelineScroll, TimelineScroll } from "../../lib/timelineScroll";
 
 const PAGE_SIZE = 20;
 /** 未読だった通知を目立たせておく時間（10秒＋元の背景へ戻る1.5秒。CSS の notifFresh と揃える）。 */
 const FRESH_HIGHLIGHT_MS = 11_500;
+/** 重ねた通知にマウスが乗っている間（と固定中）のずらし幅。1枚ずつめくりやすくする。 */
+const DECK_SPREAD_OFFSET_PX = 32;
 
 /** 2行で出す通知種別。2行目に対象ポストを出し、どのポストへの反応か・何と書かれたかを一目で
  * わかるようにする（返信・引用・メンションでは相手のポスト自体）。 */
@@ -170,25 +173,38 @@ export function describeNotification(
   }
 }
 
+/** 重ねた通知のまとまり1つの状態。戻ったときに同じ見た目で出すために覚える。 */
+export interface NotificationDeckState {
+  /** 前面に出していた通知の ID。 */
+  front?: string;
+  /** 広げたまま固定していたか（CardStack）。 */
+  pinned?: boolean;
+}
+
 export interface NotificationsPanelCache {
   items: NotificationItem[];
   hasMore: boolean;
   /** 重ねるまとまりの境（`groupNotifications` の `baseOldestId`）。戻ったときに同じまとまりで出す。 */
   groupBaseId?: string;
+  /** まとまりごとの状態（キーはまとまりの一番古い通知の ID）。マウスが乗るたびに変わるので、
+   * 書き戻して呼び出し元を描き直させることはせず、このオブジェクトをその場で書き換える。
+   * カードを押して画面を離れるときも、押した時点の状態がそのまま残る。 */
+  decks?: Record<string, NotificationDeckState>;
 }
 
 interface NotificationsPanelProps {
-  /** 復元すべきスクロール位置。省略時はスクロール位置の保存・復元を行わない。 */
-  scrollY?: number;
+  /** 復元すべきスクロール位置（一番上に見えている通知とその位置、lib/timelineScroll.ts）。
+   * 省略時はスクロール位置の保存・復元を行わない。 */
+  scroll?: TimelineScroll;
   /** スクロールのたびに現在位置を書き戻すコールバック。 */
-  onScrollYChange?: (y: number) => void;
+  onScrollChange?: (scroll: TimelineScroll) => void;
   /** スクロールを監視・復元する要素を返す関数。省略時は`window`
    *（通知一覧画面のように中央ペインでwindowスクロールする場合）。
    * Home/Search画面の右ペインのようにコンテナ自身が`overflow-y: auto`で
    * 独立スクロールする場合はそのコンテナを返す関数を渡す。 */
   getScrollContainer?: () => HTMLElement | null;
   /** 前回表示時の一覧（追加読み込み分含む）。渡された場合は再フェッチせずこれを初期表示に使い、
-   * 離脱中に届いた新着だけを補って差し込む。これが無いと`scrollY`だけ復元しても、
+   * 離脱中に届いた新着だけを補って差し込む。これが無いとスクロール位置だけ復元しても、
    * 再フェッチで先頭ページ分（`PAGE_SIZE`件）しか一覧が無い状態になり、無限スクロールで
    * それより深く読み込んでいた場合に一覧の実高さが足りずスクロール位置が正しく再現できない。 */
   cache?: NotificationsPanelCache;
@@ -204,8 +220,8 @@ interface NotificationsPanelProps {
  * 実データは常に REST から取得することで、一覧表示と整合したID体系を保つ。
  */
 export default function NotificationsPanel({
-  scrollY,
-  onScrollYChange,
+  scroll,
+  onScrollChange,
   getScrollContainer,
   cache,
   onCacheChange,
@@ -263,6 +279,45 @@ export default function NotificationsPanel({
   }, [groupBaseId, items]);
   const groups = useMemo(() => groupNotifications(items, groupBaseId), [items, groupBaseId]);
   const sentinelRef = useInfiniteScrollSentinel<HTMLLIElement>(loadMore, hasMore);
+  const listRef = useRef<HTMLUListElement>(null);
+
+  // まとまりごとの状態（NotificationsPanelCache.decks）。キャッシュから戻したときは同じオブジェクトを
+  // 使い続けて書き換える。絞り込み中のまとまりは絞り込み無しの一覧とは別なので、別に持って捨てる。
+  const decksRef = useRef<Record<string, NotificationDeckState>>(cache?.decks ?? {});
+  const filteredDecksRef = useRef<Record<string, NotificationDeckState>>({});
+  const filterActiveRef = useRef(filterActive);
+  filterActiveRef.current = filterActive;
+  const deckState = useCallback((key: string): NotificationDeckState => {
+    const decks = filterActiveRef.current ? filteredDecksRef.current : decksRef.current;
+    decks[key] ??= {};
+    return decks[key];
+  }, []);
+
+  /** 今のスクロール位置（一番上に見えている通知）。 */
+  const captureScroll = useCallback(() => {
+    const el = getScrollContainer?.() ?? null;
+    return captureTimelineScroll(listRef.current, 0, el);
+  }, [getScrollContainer]);
+  // 覚えている位置。戻ってきたときはこれへ合わせる。
+  const scrollRef = useRef(scroll);
+  // 位置を合わせた直後のスクロール量。この値のままのスクロールイベントは自分で動かしたものなので、
+  // ユーザーの位置として読まず、覚えている通知へ合わせ直す（HomePage の pinnedScrollY と同じ）。
+  const pinnedTopRef = useRef<number | null>(null);
+  const currentScrollTop = useCallback(() => {
+    const el = getScrollContainer?.() ?? null;
+    return el ? el.scrollTop : window.scrollY;
+  }, [getScrollContainer]);
+  const pinScroll = useCallback(() => {
+    if (!scrollRef.current) return;
+    applyTimelineScroll(listRef.current, scrollRef.current, getScrollContainer?.() ?? null);
+    pinnedTopRef.current = currentScrollTop();
+  }, [getScrollContainer, currentScrollTop]);
+  // 合わせた位置から動いていなければ、もう一度合わせる（上に新着が入って高さが変わったとき。
+  // ブラウザのスクロールアンカーが働かない環境向け）。
+  const repinScroll = useCallback(() => {
+    const pinnedTop = pinnedTopRef.current;
+    if (pinnedTop !== null && Math.abs(currentScrollTop() - pinnedTop) < 1) pinScroll();
+  }, [currentScrollTop, pinScroll]);
 
   // 遷移（ノート詳細・プロフィールへのnavigate）でこのコンポーネントがアンマウントされる際、
   // DOMが取り除かれている最中（cleanupでイベントリスナーが外れきるまでの一瞬）に実高さが
@@ -275,10 +330,8 @@ export default function NotificationsPanel({
   const navigatingAwayRef = useRef(false);
   const freezeScroll = useCallback(() => {
     navigatingAwayRef.current = true;
-    if (!onScrollYChange) return;
-    const el = getScrollContainer?.() ?? null;
-    onScrollYChange(el ? el.scrollTop : window.scrollY);
-  }, [onScrollYChange, getScrollContainer]);
+    onScrollChange?.(captureScroll());
+  }, [onScrollChange, captureScroll]);
 
   // 未読だった（今回の取得で初めて表示した）通知。少しの間だけ背景色で目立たせる。
   // 既読にした取得の結果だけを対象にする（絞り込み中は既読にしないので、次に開いても未読のまま
@@ -335,7 +388,9 @@ export default function NotificationsPanel({
     // 離脱中に届いた新着だけをsinceIdで補って先頭へ差し込み、既読マークする
     // （HomePageの`mergeHeadIntoTimeline`と同じ、真のfire-and-forget）。
     if (cache) {
-      mergeSince(cache.items[0]?.id).catch((e) => !cancelled && onError(e));
+      mergeSince(cache.items[0]?.id)
+        .then(() => requestAnimationFrame(() => requestAnimationFrame(() => !cancelled && repinScroll())))
+        .catch((e) => !cancelled && onError(e));
       return () => {
         cancelled = true;
       };
@@ -362,6 +417,7 @@ export default function NotificationsPanel({
   useEffect(() => {
     if (loadedKeyRef.current === filterKey) return;
     loadedKeyRef.current = filterKey;
+    filteredDecksRef.current = {};
     let cancelled = false;
     setLoadingInitial(true);
     api.notifications
@@ -396,35 +452,49 @@ export default function NotificationsPanel({
   useEffect(() => {
     // 絞り込み中の一覧は書き戻さない（キャッシュは絞り込み無しの一覧として復元されるため）。
     if (loadingInitial || !onCacheChange || filterActive) return;
-    onCacheChange({ items, hasMore, groupBaseId });
+    onCacheChange({ items, hasMore, groupBaseId, decks: decksRef.current });
   }, [items, hasMore, groupBaseId, loadingInitial, onCacheChange, filterActive]);
 
   // スクロール位置は継続的に（都度）呼び出し元へ書き戻す（HomePageのタイムラインと同じ方式）。
+  // 画素値ではなく一番上に見えている通知で覚えるので、離れている間に新着が上に入っても、
+  // 重ねた通知が広がって高さが変わっても、同じ通知を同じ位置へ戻せる。
   // navigatingAwayRefが立った後（上記freezeScroll参照）は、DOM除去中のクランプ由来の
-  // 'scroll'イベントを拾って正しい記憶を上書きしないよう保存を止める。
+  // 'scroll'イベントを拾って正しい記憶を上書きしないよう保存を止める。復元前（一覧の描画直後）も
+  // 読まない（復元前の位置で覚えていた位置を上書きしてしまう）。
+  const scrollRestoredRef = useRef(false);
   useEffect(() => {
-    if (!onScrollYChange) return;
+    if (!onScrollChange) return;
     const el = getScrollContainer?.() ?? null;
     const onScroll = () => {
-      if (navigatingAwayRef.current) return;
-      onScrollYChange(el ? el.scrollTop : window.scrollY);
+      if (navigatingAwayRef.current || !scrollRestoredRef.current) return;
+      if (!listRef.current?.isConnected) return;
+      const pinnedTop = pinnedTopRef.current;
+      if (pinnedTop !== null && Math.abs(currentScrollTop() - pinnedTop) < 1) {
+        if (scrollRef.current?.kind === "anchor") pinScroll();
+        return;
+      }
+      pinnedTopRef.current = null;
+      const next = captureScroll();
+      scrollRef.current = next;
+      onScrollChange(next);
     };
     const target = el ?? window;
     target.addEventListener("scroll", onScroll, { passive: true });
     return () => target.removeEventListener("scroll", onScroll);
-  }, [onScrollYChange, getScrollContainer]);
+  }, [onScrollChange, getScrollContainer, captureScroll, currentScrollTop, pinScroll]);
 
   // 初回読み込みが終わり一覧がDOMへ反映された後に、一度だけスクロール位置を復元する
   // （絞り込みによる再読み込みでは復元しない）。
-  const scrollRestoredRef = useRef(false);
   useEffect(() => {
-    if (loadingInitial || scrollY === undefined || scrollRestoredRef.current) return;
-    scrollRestoredRef.current = true;
-    const el = getScrollContainer?.() ?? null;
+    if (loadingInitial || scrollRestoredRef.current) return;
+    if (scroll === undefined) {
+      scrollRestoredRef.current = true;
+      return;
+    }
     requestAnimationFrame(() =>
       requestAnimationFrame(() => {
-        if (el) el.scrollTop = scrollY;
-        else window.scrollTo(0, scrollY);
+        pinScroll();
+        scrollRestoredRef.current = true;
       })
     );
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -555,6 +625,7 @@ export default function NotificationsPanel({
         key={n.id}
         className={className}
         data-notification-id={n.id}
+        data-timeline-id={stacked ? undefined : n.id}
         onClick={
           clickNoteId
             ? () => {
@@ -579,6 +650,7 @@ export default function NotificationsPanel({
     <>
     {filterBar}
     <ul
+      ref={listRef}
       className={styles.list}
       onClickCapture={(event) => {
         // AppShellのonBeforeNavigateと同じ判定（`a[href]`クリック）。上記`<li>`のonClick
@@ -596,7 +668,18 @@ export default function NotificationsPanel({
             as="li"
             className={styles.stack}
             keys={g.items.map((n) => n.id)}
+            containerProps={{ "data-timeline-id": g.items[0].id }}
             renderCard={(i) => renderCard(g.items[i], true)}
+            spreadOffsetPx={DECK_SPREAD_OFFSET_PX}
+            pinnedClassName={styles.stackPinned}
+            initialFront={deckState(g.items[g.items.length - 1].id).front}
+            onFrontChange={(id) => {
+              deckState(g.items[g.items.length - 1].id).front = id;
+            }}
+            initialPinned={deckState(g.items[g.items.length - 1].id).pinned}
+            onPinnedChange={(pinned) => {
+              deckState(g.items[g.items.length - 1].id).pinned = pinned;
+            }}
           />
         )
       )}
