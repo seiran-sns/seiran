@@ -30,7 +30,12 @@ import TwemojiEmoji from "../common/TwemojiEmoji";
 import UiIcon from "../common/UiIcon";
 import CardStack from "../common/CardStack";
 import { groupNotifications } from "../../lib/notificationGroups";
-import { applyTimelineScroll, captureTimelineScroll, TimelineScroll } from "../../lib/timelineScroll";
+import {
+  applyTimelineScroll,
+  captureTimelineScroll,
+  sameTimelineScroll,
+  TimelineScroll,
+} from "../../lib/timelineScroll";
 
 const PAGE_SIZE = 20;
 /** 未読だった通知を目立たせておく時間（10秒＋元の背景へ戻る1.5秒。CSS の notifFresh と揃える）。 */
@@ -301,6 +306,18 @@ export default function NotificationsPanel({
   }, [getScrollContainer]);
   // 覚えている位置。戻ってきたときはこれへ合わせる。
   const scrollRef = useRef(scroll);
+  // 呼び出し元へ書き戻す。位置はオブジェクトなので、同じ位置でも書き戻すと呼び出し元（RightPaneContext
+  // の state）が変わって画面全体が描き直される。スクロールのたび・遷移のクリックのたびに描き直すと
+  // 重く、遷移先の表示も遅れるので、変わったときだけ書き戻す。
+  const reportedScrollRef = useRef(scroll);
+  const reportScroll = useCallback(
+    (next: TimelineScroll) => {
+      if (sameTimelineScroll(reportedScrollRef.current, next)) return;
+      reportedScrollRef.current = next;
+      onScrollChange?.(next);
+    },
+    [onScrollChange]
+  );
   // 位置を合わせた直後のスクロール量。この値のままのスクロールイベントは自分で動かしたものなので、
   // ユーザーの位置として読まず、覚えている通知へ合わせ直す（HomePage の pinnedScrollY と同じ）。
   const pinnedTopRef = useRef<number | null>(null);
@@ -331,8 +348,8 @@ export default function NotificationsPanel({
   const navigatingAwayRef = useRef(false);
   const freezeScroll = useCallback(() => {
     navigatingAwayRef.current = true;
-    onScrollChange?.(captureScroll());
-  }, [onScrollChange, captureScroll]);
+    if (onScrollChange) reportScroll(captureScroll());
+  }, [onScrollChange, reportScroll, captureScroll]);
 
   // 未読だった（今回の取得で初めて表示した）通知。少しの間だけ背景色で目立たせる。
   // 既読にした取得の結果だけを対象にする（絞り込み中は既読にしないので、次に開いても未読のまま
@@ -477,12 +494,12 @@ export default function NotificationsPanel({
       pinnedTopRef.current = null;
       const next = captureScroll();
       scrollRef.current = next;
-      onScrollChange(next);
+      reportScroll(next);
     };
     const target = el ?? window;
     target.addEventListener("scroll", onScroll, { passive: true });
     return () => target.removeEventListener("scroll", onScroll);
-  }, [onScrollChange, getScrollContainer, captureScroll, currentScrollTop, pinScroll]);
+  }, [onScrollChange, reportScroll, getScrollContainer, captureScroll, currentScrollTop, pinScroll]);
 
   // 初回読み込みが終わり一覧がDOMへ反映された後に、一度だけスクロール位置を復元する
   // （絞り込みによる再読み込みでは復元しない）。

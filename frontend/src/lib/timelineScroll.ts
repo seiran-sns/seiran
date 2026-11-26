@@ -19,6 +19,16 @@ export type TimelineScroll =
 
 export const TIMELINE_TOP: TimelineScroll = { kind: "top", y: 0 };
 
+/** 同じ位置か（React の state に置くとき、同じ位置で書き戻して描き直させないため）。 */
+export function sameTimelineScroll(a: TimelineScroll | undefined, b: TimelineScroll | undefined): boolean {
+  if (a === b) return true;
+  if (!a || !b || a.kind !== b.kind) return false;
+  // 1px 未満の違いは同じ位置とみなす（getBoundingClientRect は小数を返す）。
+  if (a.kind === "top") return Math.abs(a.y - (b as typeof a).y) < 1;
+  const other = b as typeof a;
+  return a.id === other.id && Math.abs(a.top - other.top) < 1;
+}
+
 function scrollTopOf(scroller: HTMLElement | null): number {
   return scroller ? scroller.scrollTop : window.scrollY;
 }
