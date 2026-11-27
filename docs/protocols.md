@@ -265,6 +265,7 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `sync.listBlobs` — その DID がアップロードした `media_files` の CID。CID は保持せず `sha256` から再構築する（`cid_from_sha256_hex`）。
 
 ### postgate・getTrends のスタブ応答
+- `repo.getRecord` でレコードが無いときは、公式 PDS と同じ 400 `{"error": "RecordNotFound", "message": "Could not locate record: at://…"}` を返す。bsky.app は `RecordNotFound` だけを「未設定」とみなして既定値で扱い（例: `app.bsky.notification.declaration` が無ければ `followers`）、それ以外の応答は読み込み失敗と表示する。
 - `repo.getRecord?collection=app.bsky.feed.postgate`（`get_record_postgate`）— 実レコードが無ければ合成レコードを返す。仕様上は「不在＝制限なし」だが、404 だと bsky.app が引用不可として扱うことがあるため。CID は実際に DAG-CBOR エンコードして計算する。ローカルユーザーは常に `embeddingRules: []`（postgate 作成機能が無い）。リモート Bsky の投稿は `posts.bsky_quote_disabled` から合成し、未取得なら「制限なし」。実レコードがあればそちらを優先する。
 - `app.bsky.unspecced.getTrends` — 常に `{"trends": []}`。無いと `atproto-proxy` ヘッダー無しの呼び出しが 404 になる。
 
@@ -348,6 +349,8 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 
 ### クライアント設定（`app.bsky.actor.getPreferences`/`putPreferences`）
 本人の accessJwt 必須。`preferences` は MST に入らないプライベートデータで、`atp_preferences`（`actor_id` PK、JSONB）に中身を解釈せず保存する。`putPreferences` は全置換。bsky.app の年齢確認（`#personalDetailsPref`）はこれが無いと動かない。
+- `#personalDetailsPref`（生年月日）と `#declaredAgePref`（`isOverAge13`/`16`/`18`）は保存せず、`actors.birth_date` から都度生成する。生年月日はメインパスワードのセッションにだけ返し、アプリパスワード・OAuth には年齢区分だけを返す（年齢制限の判定に要る範囲だけ渡す。bsky.app は生年月日が読めなければ年齢区分で判定し、投稿のビュー数表示も18歳以上が条件）。
+- `putPreferences` で、メインパスワード以外のセッションが `#personalDetailsPref` を送ると 400 で拒否する（読めない値を書き換えさせない）。`#declaredAgePref` は読み取り専用なので受け取っても捨てる（保存すると誕生日を過ぎても古い区分が返り続ける）。
 
 ### XRPCプロキシ（`atproto-proxy`ヘッダー）
 `getTimeline`/`searchPosts`/`listNotifications` 等の AppView 専用メソッドは、PDS が AppView への透過プロキシとして振る舞うことで提供する。
@@ -456,7 +459,7 @@ Jetstream の `wantedDids` は発行者 DID の絞り込みなので、新たに
 AP と ATP で可視性の位置づけが違うため、同じ値を配送先ごとに別ルールで扱う。
 
 - **AP**: `birth_date_public=true` のときだけ Actor に `vcard:bday`（`@context` に `"vcard": "http://www.w3.org/2006/vcard/ns#"`）を含める（Misskey の `ApRendererService` と同じ表現）。既定は `false`（seiran 独自の公開設定）。Actor 文書（`actor.rs`）と Update(Person)（`build_person_object`）の両方で同じ判定をする。
-- **ATP**: `#personalDetailsPref` は `birth_date_public` と無関係に常に非公開（本人の `getPreferences` のみ）。`putPreferences` で受け取ると `birth_date` を更新するが、公開設定は変えない。
+- **ATP**: `#personalDetailsPref` は `birth_date_public` と無関係に常に非公開（本人がメインパスワードで呼んだ `getPreferences` のみ。それ以外の本人セッションには `#declaredAgePref` の年齢区分だけ。3節「クライアント設定」）。`putPreferences` で受け取ると `birth_date` を更新するが、公開設定は変えない。
 
 ### ポストの言語（`app.bsky.feed.post`の`langs`）
 ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らない。
@@ -467,6 +470,22 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 
 ### アルゴリズムレコメンドからの除外（`app.bsky.actor.contentVisibilityDeclaration`）
 設定画面「プライバシー」から、Discover フィード等のレコメンドから自分の投稿を除外するよう要求する。`GET`/`POST /api/account/content-visibility` が `actors.hide_from_algorithmic_recommendations` を読み書きし、更新時に `commit_content_visibility` が `app.bsky.actor.contentVisibilityDeclaration/self`（`hideFromAlgorithmicRecommendations` のみ）をコミットする。`chat.bsky.actor.declaration` と同じ「self キーの単一 boolean レコード」で、`atp_records` の有無で create/update を決める。レコードが無ければ `false` 扱い（公式仕様）。AP に対応概念は無い。
+
+### self レコードで表すプライバシー設定（ATP → actors の同期）
+bsky.app のプライバシー設定画面のスイッチは、PDS へ self レコードを書く。seiran はそれぞれを `actors` の列に持ち、seiran 側から self レコードをコミットし直すときはそこから組み立てる。
+
+| bsky.app のスイッチ | self レコード | `actors` の列 |
+|---|---|---|
+| ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める | `app.bsky.actor.profile` の self-label `!no-unauthenticated` | `hide_from_unauthenticated` |
+| 他のユーザーにあなたの投稿の通知を許可する | `app.bsky.notification.declaration` の `allowSubscriptions`（`followers`/`mutuals`/`none`、レコードが無ければ `followers`） | `allow_activity_subscriptions` |
+| アルゴリズムのおすすめから除外するよう求める | `app.bsky.actor.contentVisibilityDeclaration` の `hideFromAlgorithmicRecommendations` | `hide_from_algorithmic_recommendations` |
+
+- **ATP → actors**: `createRecord`/`putRecord`/`deleteRecord`/`applyWrites` でこれらの self レコードが変わったら、`seiran_common::atp::self_settings::sync_from_repo` がリポジトリにある今の3レコードを読み直して3列をまとめて更新する（書かれた値ではなく読み直すので、削除・DID 転入・既存データの移行も同じ関数で済む）。DID 転入では取り込んだプロフィールを当てはめる時点で同じ関数を呼ぶ。反映しないと、次に seiran 側からコミットし直したときに外部で変えた設定が巻き戻る。
+- **完全同期**: actors に値がある以上、リポジトリにも同じ内容のレコードを置く（レコードが無いと bsky.app 等は既定値を推測するしかなく、リポジトリの書き出し・Relay への配信からも設定が読めない）。`AtpCommitService::ensure_self_setting_declarations` が、通知の宣言・表示の宣言のうち無いものを actors の値からコミットする。呼ぶのは DID 確定時（`publish_initial_atp_records`）・起動時（`backfill_self_setting_declarations`、どちらかを持たないローカルアクター全員）・外部クライアントがこれらを削除したあと（actors は既定値に戻り、その値で置き直す）。プロフィールは登録時から常にある。
+- **actors → ATP**: `commit_profile` は `hide_from_unauthenticated` が真なら `labels`（`com.atproto.label.defs#selfLabels`、`!no-unauthenticated` だけ）を付ける。プロフィールレコードのそれ以外の self-label は持たない。
+- **既存データ**: 列の追加前に書かれたレコードは、マイグレーションが積んだ `atp_self_settings_backfill` を起動時の `backfill_atp_self_settings` が読んで反映する（CBOR は SQL で読めない）。反映前に seiran でプロフィールを編集するとラベルが外れるので、起動時タスクの最初に行う。
+- **設定画面**: 「プライバシー」（`/settings/privacy`）で切り替える。`GET`/`POST /api/account/bluesky-privacy`（`POST` は指定した項目だけを更新）が列を書き換え、ログアウト時の非表示はプロフィールを再コミット（`recommit_bsky_profile`）、投稿の通知は `commit_notification_declaration` で `app.bsky.notification.declaration/self` をコミットする。
+- seiran の画面・Fediverse 側はまだこの2列を使わない（ログアウト時の表示制限・投稿通知の仕組みが無い）。設定画面では両方に「現在は Bluesky のクライアントでのみ有効」と注記する。
 
 ### 既存DID転入（移行元PDSとの通信）
 全体の流れと設計判断は `docs/account_migration.md`。ここでは移行元 PDS（PDS A）への XRPC と SSRF 対策だけを書く。

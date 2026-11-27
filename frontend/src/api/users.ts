@@ -1,5 +1,5 @@
 import { cursorParams, mailLanguage, request } from "./core";
-import type { ActorSuggestion, AlsoKnownAsItem, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, ProfileFeedItem, RawNote, RawProfileFeedItem, RemoteFollowSummaryResponse, UserProfile } from "./types";
+import type { ActorSuggestion, AlsoKnownAsItem, BlueskyPrivacy, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, ProfileFeedItem, RawNote, RawProfileFeedItem, RemoteFollowSummaryResponse, UserProfile } from "./types";
 import { normalizeNote, normalizeProfileFeedItem } from "./types";
 import { credentialJson, registrationOptions } from "./webauthn";
 import type { RegistrationOptionsJson, WebAuthnEnvelope } from "./webauthn";
@@ -254,6 +254,14 @@ export const account = {
       { hide_from_algorithmic_recommendations: hideFromAlgorithmicRecommendations },
     );
   },
+  /** 設定画面「プライバシー」の Bluesky 向け設定（ATP の self レコードで表すもの）を取得する。 */
+  getBlueskyPrivacy() {
+    return request<BlueskyPrivacy>("GET", "/account/bluesky-privacy");
+  },
+  /** 設定画面「プライバシー」の Bluesky 向け設定を、指定した項目だけ更新する。 */
+  updateBlueskyPrivacy(update: Partial<BlueskyPrivacy>) {
+    return request<BlueskyPrivacy>("POST", "/account/bluesky-privacy", update);
+  },
   /** 設定画面「プライバシー」の承認制フォロー（鍵アカウント）の現在値を取得する。
    * Mastodon/Misskey準拠の`manuallyApprovesFollowers`で、投稿の公開範囲には影響しない。 */
   getLock() {
@@ -342,3 +350,4 @@ export const account = {
     },
   },
 };
+

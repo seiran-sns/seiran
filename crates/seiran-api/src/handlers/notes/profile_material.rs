@@ -24,17 +24,17 @@ pub async fn resolve_bsky_pinned_post(state: &AppState, actor_id: i64) -> Option
     }
 }
 
-/// pin/unpin 後に Bsky プロフィール（`app.bsky.actor.profile`）を再コミットする。
-/// 現在の display_name/bio/avatar は維持したまま `pinnedPost` だけを更新するため、
-/// 都度 DB から現在値を読み直す。失敗してもログのみ（pin/unpin 自体は成功済みのため
-/// 呼び出し元へは伝播しない）。
-pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
+/// Bsky プロフィール（`app.bsky.actor.profile`）を今の値で再コミットする（pin/unpin 後の
+/// `pinnedPost`、設定画面での「ログアウトしたユーザーに表示しない」の切り替え後）。
+/// 表示名・自己紹介・画像・ピン留め・ラベルはすべて DB から読み直す。失敗してもログのみ
+/// （呼び出し元の変更自体は成功済みのため伝播しない）。
+pub(crate) async fn recommit_bsky_profile(state: &AppState, actor_id: i64) {
     let pinned_post = resolve_bsky_pinned_post(state, actor_id).await;
     let (display_name, bio, avatar_media, banner_media) =
         match fetch_atp_profile_material(state, actor_id).await {
             Ok(m) => m,
             Err(e) => {
-                tracing::error!("[pinned] プロフィール材料取得失敗: {}", e);
+                tracing::error!("[profile] プロフィール材料取得失敗: {}", e);
                 return;
             }
         };
@@ -53,7 +53,7 @@ pub(super) async fn sync_bsky_pinned_post(state: &AppState, actor_id: i64) {
         )
         .await
     {
-        tracing::error!("[pinned] ATP プロフィール再コミット失敗: {}", e);
+        tracing::error!("[profile] ATP プロフィール再コミット失敗: {}", e);
     }
 }
 

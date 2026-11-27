@@ -844,8 +844,16 @@ async fn prefetch_profile_blob(ic: &ImportContext<'_>, cid: &str) -> Result<(), 
 }
 
 /// blob を取り終えた時点で、取り込んだプロフィールをもう一度 actors へ当てはめる（先に取れ
-/// なかったアバター・バナーを反映するため）。
+/// なかったアバター・バナーを反映するため）。self レコードが表すプライバシー設定
+/// （ログアウト時の非表示・投稿通知の許可・おすすめからの除外）もここで actors へ反映する。
 async fn reapply_imported_profile(ic: &ImportContext<'_>) {
+    if let Err(e) = crate::atp::self_settings::sync_from_repo(ic.pool, ic.actor_id).await {
+        tracing::error!(
+            "[MigrationImportProcess] request_id={} プライバシー設定の actors への反映失敗: {}",
+            ic.req.id,
+            e
+        );
+    }
     let Some(user_id) = ic.req.user_id else {
         return;
     };

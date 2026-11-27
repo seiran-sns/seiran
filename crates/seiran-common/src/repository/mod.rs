@@ -75,7 +75,7 @@ pub mod totp;
 pub mod user;
 
 pub use actor::{
-    Actor, ActorProfileRow, ActorRepository, BskyActorProfile, FediActorProfile,
+    Actor, ActorProfileRow, ActorRepository, AtpSelfSettings, BskyActorProfile, FediActorProfile,
     LocalProfileUpdate, NewLocalActor, PgActorRepository,
 };
 pub use also_known_as::{AlsoKnownAsRepository, AlsoKnownAsRow, PgAlsoKnownAsRepository};

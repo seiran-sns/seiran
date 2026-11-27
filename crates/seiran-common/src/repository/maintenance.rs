@@ -131,6 +131,32 @@ pub async fn local_actors_without_self_record(
     .await
 }
 
+/// 通知の宣言・表示の宣言の self レコードのどちらかが無いローカルアクター。
+pub async fn local_actors_missing_self_setting_declarations(
+    pool: &PgPool,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT a.id
+         FROM actors a
+         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM atp_records r
+               WHERE r.actor_id = a.id AND r.rkey = 'self'
+                 AND r.collection = 'app.bsky.notification.declaration'
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM atp_records r
+               WHERE r.actor_id = a.id AND r.rkey = 'self'
+                 AND r.collection = 'app.bsky.actor.contentVisibilityDeclaration'
+             )
+           )
+         ORDER BY a.id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// 孤立メディアファイル。
 #[derive(Debug, sqlx::FromRow)]
 pub struct OrphanedMediaFile {
@@ -221,6 +247,29 @@ pub async fn post_record_blobs_backfill_batch(
     .bind(limit)
     .fetch_all(pool)
     .await
+}
+
+/// self レコードのプライバシー設定を actors へまだ反映していないアクター（最大 `limit` 件）。
+pub async fn atp_self_settings_backfill_batch(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT actor_id FROM atp_self_settings_backfill ORDER BY actor_id LIMIT $1")
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+}
+
+/// 反映し終えたアクターをバックフィル対象から外す。
+pub async fn finish_atp_self_settings_backfill(
+    pool: &PgPool,
+    actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM atp_self_settings_backfill WHERE actor_id = $1")
+        .bind(actor_id)
+        .execute(pool)
+        .await?;
+    Ok(())
 }
 
 /// 処理し終えた投稿をバックフィル対象から外す。

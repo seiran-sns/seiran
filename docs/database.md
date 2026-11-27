@@ -40,6 +40,7 @@ ID の採番は2系統:
 | `post_recipients` / `dm_read_states` / `bsky_convo_links` | DM の宛先、既読カーソル、Bsky convoId の対応 |
 | `atp_records` / `atp_blocks` / `atp_repo_events` | ATP の非 post レコード、MST のブロックストア、`subscribeRepos` のイベントログ |
 | `atp_deferred_writes` | DID 転入の有効化まで積んでおく ATP への書き込み |
+| `atp_self_settings_backfill` | self レコードのプライバシー設定を `actors` へまだ反映していない既存ローカルアクター |
 | `post_record_blobs` / `post_record_blobs_backfill` | ローカル投稿の ATP レコードが参照する blob の `media_files` 行、その既存投稿分のバックフィル待ち |
 | `atp_app_passwords` / `atp_refresh_tokens` / `atp_preferences` | ATP のアプリパスワード、refreshJwt の `jti`、クライアント設定 |
 | `atp_oauth_requests` / `atp_oauth_sessions` | ATP OAuth の認可要求（PAR〜認可コード）と、承認済みクライアントのセッション |
@@ -101,6 +102,8 @@ ID の採番は2系統:
 - **「DNS TXT 登録完了待ち」**: `pending_did_provisions` に行がある間は `at_did`/`at_signing_key_pem`/`at_rotation_key_pem` が NULL で、シングルホストモードの DID 無しユーザーと同じに扱う（ATP のイベントを出さない）。
 - `birth_date`/`birth_date_public`: Misskey 互換の `birthday`。`birth_date_public`（既定 `false`、seiran 独自）は `vcard:bday` で Fedi に出すかどうか。Bsky の `#personalDetailsPref` は常に非公開（`docs/protocols.md` 3節）。
 - `hide_from_algorithmic_recommendations`: `contentVisibilityDeclaration` のローカルキャッシュ（`docs/protocols.md` 3節）。
+- `hide_from_unauthenticated`: プロフィールの self-label `!no-unauthenticated`（ログアウトしたユーザーに表示しないよう求める）。`commit_profile` がここからラベルを付ける（`docs/protocols.md` 3節「self レコードで表すプライバシー設定」）。
+- `allow_activity_subscriptions`: `app.bsky.notification.declaration` の `allowSubscriptions`（`followers`/`mutuals`/`none`、CHECK 制約、既定 `followers`）。
 - `is_locked`: フォロー承認制。投稿の公開範囲には影響しない（`docs/protocols.md` 2節）。
 - `at_rotation_key_pem`: アカウント単位の PLC ローテーションキー（`docs/account_migration.md` 6節）。NULL は、この列より前に作られた/転入したアカウントの取り残しだけ。
 - `atp_activation_pending`: DID 転入でレコードを取り込み終えて有効化するまで true。この間の ATP への書き込みはコミットせず `atp_deferred_writes` に積む（下記「ATP リポジトリ関連」）。転入のアカウント作成（`materialize_account`）で立て、有効化で積んだ書き込みを流し終えたら下ろす。
@@ -319,6 +322,7 @@ Mastodon 互換 API のブックマーク（`docs/protocols.md` 7.1節）。本�
 ### `post_record_blobs`（投稿レコードの blob 参照）
 ローカル投稿の `app.bsky.feed.post` レコードが参照する blob の `media_files` 行（`(post_id, media_file_id)` が主キー、どちらも `ON DELETE CASCADE`）。URL カードのサムネイル（`embed.external.thumb`）は seiran で取得・再ホストしても外部クライアントが `uploadBlob` しても `post_attachments` に載らないため、これが無いと孤立ファイル GC に消され、AppView/CDN が `getBlob` で取り直すと 404 になる。
 - 書き込みは `try_apply_write` が `posts.at_uri` を埋めるのと同じトランザクションで、コミットの `blob_cids` の sha256 に一致する `media_files` 行をすべて入れる（`blurhash` 違いで同じ sha256 の行が複数あっても `getBlob` はどれも使いうる）。画像添付も入るが、`post_attachments` と二重に数えるだけで害は無い。
+- `atp_self_settings_backfill`: 列の追加前から self レコード（`app.bsky.actor.profile`・`app.bsky.notification.declaration`・`app.bsky.actor.contentVisibilityDeclaration`）を持っていたローカルアクターの `actor_id`。起動時の `backfill_atp_self_settings` がレコードを読んで `actors` の3列へ反映し、行を消す（読めなかった行も消す）。
 - `post_record_blobs_backfill`: 導入前の既存ローカル投稿（`at_cid` あり・未削除）の `post_id`。レコードの CBOR は `atp_blocks` にしか無く SQL で読めないので、起動時の `backfill_post_record_blobs` がデコードして `post_record_blobs` を埋め、行を消す。1行でも残っている間は孤立ファイル GC が1件も消さない（参照を数え漏らすため）。
 
 ### ATP セッション認証関連（`atp_app_passwords` / `atp_refresh_tokens`）

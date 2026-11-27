@@ -328,6 +328,10 @@ impl DidProvisioner {
         if let Err(e) = atp.commit_chat_declaration(actor_id, now).await {
             tracing::error!("[did_provision] chat declaration コミット失敗: {}", e);
         }
+        // 投稿の通知を許可する範囲・おすすめからの除外（actors の既定値をレコードにも書く）。
+        if let Err(e) = atp.ensure_self_setting_declarations(actor_id, now).await {
+            tracing::error!("[did_provision] プライバシー設定の宣言コミット失敗: {}", e);
+        }
         // リモートseiranアクターの相互申告マージ用の自己申告（#236）。
         let ap_actor_uri = format!("https://{}/users/{}", self.local_domain, username);
         if let Err(e) = atp

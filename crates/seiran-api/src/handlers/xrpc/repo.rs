@@ -303,6 +303,17 @@ pub struct GetRecordResponse {
     pub value: serde_json::Value,
 }
 
+/// `getRecord` でレコードが無いときの応答（公式 PDS と同じ 400 `RecordNotFound`）。
+fn record_not_found(repo: &str, collection: &str, rkey: &str) -> axum::response::Response {
+    super::xrpc_error(
+        "RecordNotFound",
+        format!(
+            "Could not locate record: at://{}/{}/{}",
+            repo, collection, rkey
+        ),
+    )
+}
+
 pub async fn xrpc_get_record(
     Query(params): Query<GetRecordParams>,
     State(state): State<AppState>,
@@ -399,7 +410,7 @@ async fn get_record_postgate(
 async fn get_record_post(params: &GetRecordParams, state: &AppState) -> axum::response::Response {
     let record = match state.posts.find_record(&params.repo, &params.rkey).await {
         Ok(Some(r)) => r,
-        Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
+        Ok(None) => return record_not_found(&params.repo, &params.collection, &params.rkey),
         Err(e) => {
             return ApiError::Internal(format!("[getRecord] DB エラー: {}", e)).into_response();
         }
@@ -488,7 +499,10 @@ async fn get_record_from_atp_records(
 
     let cid_str = match record_row {
         Ok(Some(cid)) => cid,
-        Ok(None) => return ApiError::NotFound("レコードが見つかりません").into_response(),
+        Ok(None) => {
+            let repo = actor.at_did.as_deref().unwrap_or(&params.repo);
+            return record_not_found(repo, &params.collection, &params.rkey);
+        }
         Err(e) => {
             return ApiError::Internal(format!("[getRecord] atp_records 取得失敗: {}", e))
                 .into_response();
@@ -500,7 +514,10 @@ async fn get_record_from_atp_records(
 
     let cbor_bytes: Vec<u8> = match block_row {
         Ok(Some(bytes)) => bytes,
-        Ok(None) => return ApiError::NotFound("ブロックが見つかりません").into_response(),
+        Ok(None) => {
+            let repo = actor.at_did.as_deref().unwrap_or(&params.repo);
+            return record_not_found(repo, &params.collection, &params.rkey);
+        }
         Err(e) => {
             return ApiError::Internal(format!("[getRecord] atp_blocks 取得失敗: {}", e))
                 .into_response();
@@ -757,6 +774,40 @@ async fn sync_profile_to_actors(state: &AppState, actor: &Actor, value: &serde_j
     }
 }
 
+/// self レコード（プロフィール・通知の宣言・表示の宣言）を書き込み・削除したあと、
+/// それが表すプライバシー設定を`actors`へ反映する（`seiran_common::atp::self_settings`）。
+/// 反映しないと、次に seiran 側から self レコードをコミットし直したときに巻き戻る。
+/// 宣言レコードが削除された場合は既定値のレコードを置き直す。
+async fn sync_self_settings(state: &AppState, actor: &Actor, collection: &str, rkey: &str) {
+    use seiran_common::atp::self_settings;
+    if !self_settings::is_self_settings_record(collection, rkey) {
+        return;
+    }
+    if let Err(e) = self_settings::sync_from_repo(&state.db, actor.id).await {
+        tracing::error!(
+            "[repo] {}/{} → actors のプライバシー設定同期失敗 actor_id={}: {}",
+            collection,
+            rkey,
+            actor.id,
+            e
+        );
+        return;
+    }
+    // 宣言レコードが削除されたら、actors に戻った既定値でレコードを置き直す
+    // （actors とリポジトリを常に一致させる）。
+    if let Err(e) = state
+        .atp_service
+        .ensure_self_setting_declarations(actor.id, chrono::Utc::now())
+        .await
+    {
+        tracing::error!(
+            "[repo] プライバシー設定の宣言コミット失敗 actor_id={}: {}",
+            actor.id,
+            e
+        );
+    }
+}
+
 /// blob参照のCIDから、このアクターがアップロードした`media_files`行（Seiran自前UI経由、
 /// または`com.atproto.repo.uploadBlob`経由）を探す（`profile_sync::blob_media_id`）。
 pub(crate) async fn resolve_blob_media_id(
@@ -867,6 +918,7 @@ pub async fn xrpc_create_record(
             if req.collection == "app.bsky.actor.profile" {
                 sync_profile_to_actors(&state, &actor, &req.record).await;
             }
+            sync_self_settings(&state, &actor, &req.collection, &rkey).await;
             Json(serde_json::json!({
                 "uri": format!("at://{}/{}/{}", at_did, req.collection, rkey),
                 "cid": cid_to_string(&record_cid),
@@ -943,6 +995,7 @@ pub async fn xrpc_put_record(
             if req.collection == "app.bsky.actor.profile" {
                 sync_profile_to_actors(&state, &actor, &req.record).await;
             }
+            sync_self_settings(&state, &actor, &req.collection, &req.rkey).await;
             Json(serde_json::json!({
                 "uri": format!("at://{}/{}/{}", at_did, req.collection, req.rkey),
                 "cid": cid_to_string(&record_cid),
@@ -985,7 +1038,10 @@ pub async fn xrpc_delete_record(
         .delete_atp_record_generic(actor.id, &req.collection, &req.rkey, chrono::Utc::now())
         .await
     {
-        Ok(()) => Json(serde_json::json!({})).into_response(),
+        Ok(()) => {
+            sync_self_settings(&state, &actor, &req.collection, &req.rkey).await;
+            Json(serde_json::json!({})).into_response()
+        }
         Err(e) => ApiError::Internal(format!("[deleteRecord] 削除失敗: {}", e)).into_response(),
     }
 }
@@ -1084,6 +1140,7 @@ pub async fn xrpc_apply_writes(
                         if collection == "app.bsky.actor.profile" {
                             sync_profile_to_actors(&state, &actor, &value).await;
                         }
+                        sync_self_settings(&state, &actor, &collection, &rkey).await;
                         results.push(serde_json::json!({
                             "$type": "com.atproto.repo.applyWrites#createResult",
                             "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
@@ -1139,6 +1196,7 @@ pub async fn xrpc_apply_writes(
                         if collection == "app.bsky.actor.profile" {
                             sync_profile_to_actors(&state, &actor, &value).await;
                         }
+                        sync_self_settings(&state, &actor, &collection, &rkey).await;
                         results.push(serde_json::json!({
                             "$type": "com.atproto.repo.applyWrites#updateResult",
                             "uri": format!("at://{}/{}/{}", at_did, collection, rkey),
@@ -1169,9 +1227,12 @@ pub async fn xrpc_apply_writes(
                     .delete_atp_record_generic(actor.id, &collection, &rkey, now)
                     .await
                 {
-                    Ok(()) => results.push(serde_json::json!({
-                        "$type": "com.atproto.repo.applyWrites#deleteResult",
-                    })),
+                    Ok(()) => {
+                        sync_self_settings(&state, &actor, &collection, &rkey).await;
+                        results.push(serde_json::json!({
+                            "$type": "com.atproto.repo.applyWrites#deleteResult",
+                        }))
+                    }
                     Err(e) => {
                         return ApiError::Internal(format!("[applyWrites] delete失敗: {}", e))
                             .into_response()

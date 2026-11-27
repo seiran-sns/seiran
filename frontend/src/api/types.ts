@@ -1197,3 +1197,13 @@ export interface AboutResponse {
   /** 未設定なら空文字列。 */
   contactEmail: string;
 }
+
+/** 他のユーザーに投稿の通知を許可する範囲（`app.bsky.notification.declaration` の `allowSubscriptions`）。 */
+export type ActivitySubscriptionAllowance = "followers" | "mutuals" | "none";
+
+/** 設定画面「プライバシー」の Bluesky 向け設定。 */
+export interface BlueskyPrivacy {
+  /** ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める。 */
+  hide_from_unauthenticated: boolean;
+  allow_activity_subscriptions: ActivitySubscriptionAllowance;
+}

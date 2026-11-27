@@ -46,11 +46,20 @@
     "title": "Paramètres de confidentialité",
     "discoverabilityTitle": "Découvrabilité",
     "hideFromAlgorithmicRecommendationsLabel": "Masquer mes publications des recommandations algorithmiques (ex. le fil Discover de Bsky)",
-    "hideFromAlgorithmicRecommendationsDescription": "Une fois activé, sur Bluesky vos publications n'apparaîtront dans le fil Discover que pour les personnes qui vous suivent déjà. Cette préférence est enregistrée au niveau du compte dans votre PDS ; d'autres applications AT Protocol peuvent donc aussi la lire, mais c'est à chaque application de décider si elle la respecte. La prise en compte complète peut prendre jusqu'à une heure.",
     "saved": "Paramètre enregistré.",
+    "loggedOutVisibilityTitle": "Visibilité hors connexion",
+    "hideFromUnauthenticatedLabel": "Demander aux applis et sites web de ne pas montrer mon compte aux utilisateurs déconnectés",
+    "blueskyClientsOnlyNote": "Pour l’instant, ce réglage ne s’applique que dans les clients Bluesky (ni dans les écrans de seiran, ni dans le Fédivers).",
+    "activitySubscriptionsTitle": "Notifications de publications",
+    "activitySubscriptionsLabel": "Autoriser les autres à être notifiés de vos publications",
+    "activitySubscriptionsOptions": {
+      "followers": "Toute personne qui me suit",
+      "mutuals": "Seulement les abonnés que je suis",
+      "none": "Personne"
+    },
     "followApprovalTitle": "Demandes d'abonnement",
     "lockedAccountLabel": "Exiger une approbation pour les nouveaux abonnés",
-    "lockedAccountDescription": "Lorsque cette option est activée, les nouvelles demandes d'abonnement ne sont pas acceptées automatiquement — vous devrez les approuver ou les rejeter depuis « Demandes d'abonnement » dans les Paramètres. Cela n'affecte que qui peut vous suivre ; cela ne change pas qui peut voir vos publications publiques. En désactivant cette option, toutes les demandes d'abonnement en attente seront automatiquement approuvées."
+    "lockedAccountDescription": "En désactivant cette option, toutes les demandes d'abonnement en attente seront automatiquement approuvées."
   },
   "guidesSettings": {
     "title": "Masquer les guides insistants",

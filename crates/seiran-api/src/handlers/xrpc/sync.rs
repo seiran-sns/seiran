@@ -15,6 +15,7 @@ use seiran_common::atp::{
 };
 use seiran_common::repository::actor::Actor;
 
+use super::xrpc_error;
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -250,15 +251,6 @@ fn repo_status(withdrawn: bool, did_moved_out: bool) -> (bool, Option<&'static s
     } else {
         (true, None)
     }
-}
-
-/// XRPC 標準形式（`{"error", "message"}`、400）のエラー応答。
-fn xrpc_error(error: &str, message: String) -> axum::response::Response {
-    (
-        StatusCode::BAD_REQUEST,
-        axum::Json(serde_json::json!({ "error": error, "message": message })),
-    )
-        .into_response()
 }
 
 /// この PDS がリポジトリを持つローカルアクター。ローカルのリポジトリを持たない DID
