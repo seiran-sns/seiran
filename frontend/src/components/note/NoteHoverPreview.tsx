@@ -29,12 +29,20 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
   const [target, setTarget] = useState<Note | null>(null);
   const [loading, setLoading] = useState(false);
   const [failed, setFailed] = useState(false);
-  const [open, setOpen] = useState(false);
+  // 一度でもマウスが乗ったらポップアップをDOMに置く。表示・非表示はCSSの`:hover`が
+  // 決める（.module.cssの`.wrap:hover > .popup`）。mouseenter/mouseleaveの対で開閉
+  // ステートを持つと、重ねた通知の広げ畳みのようにカーソルを動かさずに要素が
+  // 動く場面や、ホバー中に子要素が差し替わる場面でleaveを取りこぼしたとき、
+  // 閉じる契機が二度と来ずポップアップが残り続ける。`:hover`はブラウザが
+  // 現在のカーソル位置から都度判定するため、この取りこぼしが起きない。
+  const [activated, setActivated] = useState(false);
+  // クリック直後の誤表示を抑える（onClickCaptureのコメント参照）。次にマウスが
+  // 離れるまで続く。leaveを取りこぼしても「出ないまま」に倒れるだけで残り続けはしない。
+  const [suppressed, setSuppressed] = useState(false);
   const [showContent, setShowContent] = useState(false);
   const [fixedStyle, setFixedStyle] = useState<CSSProperties | null>(null);
   const [effectiveSide, setEffectiveSide] = useState<"bottom" | "left" | "right">(side);
   const fetchedRef = useRef(false);
-  const timerRef = useRef<number | null>(null);
   const wrapRef = useRef<HTMLSpanElement>(null);
 
   function ensureFetched() {
@@ -50,7 +58,6 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
 
   function onEnter() {
     ensureFetched();
-    if (timerRef.current) window.clearTimeout(timerRef.current);
     // side="left"は右ペインの通知アイテムで使う想定。右ペインは独自に縦スクロールする
     // コンテナ（AppShellの.rightScroll）であり、CSSの仕様上「縦だけauto、横はvisible」
     // という指定はできない（片方がvisibleでない場合は両方autoに揃えられる）ため、
@@ -92,36 +99,38 @@ export default function NoteHoverPreview({ noteId, children, className, side = "
         setFixedStyle(null);
       }
     }
-    setOpen(true);
+    setActivated(true);
   }
 
   function onLeave() {
-    // 少し遅延させてから閉じる（ポップアップへのカーソル移動を許容）。
-    timerRef.current = window.setTimeout(() => setOpen(false), 120);
+    setSuppressed(false);
   }
 
   // 子要素内の対ユーザー操作メニュー（`UserContextMenu`/`UserLinkTag`）は
   // `document.body`直下へポータルされ、この`wrap`要素の真上に重なって表示される。
   // メニュー項目クリックでそのポータルがDOMから消えると、同じ座標に残っていた
   // この`wrap`要素へ「新規にマウスが入った」というmouseenterがブラウザから
-  // 発火してしまい、`onEnter`が閉じかけのタイマーを止めてポップアップが残り続ける。
-  // クリック自体はReactツリーに沿ってこの要素まで
-  // バブルするため、ここで即座に閉じてその再オープンを打ち消す。
+  // 発火し、カーソルがこの要素の上にあるため`:hover`も成り立ってポップアップが出てしまう。
+  // クリック自体はReactツリーに沿ってこの要素までバブルするため、ここで次にマウスが
+  // 離れるまで表示を抑える（ポップアップ内のリンクを押して画面遷移した場合も同様）。
   function onClickCapture() {
-    if (timerRef.current) window.clearTimeout(timerRef.current);
-    setOpen(false);
+    setSuppressed(true);
   }
+
+  const wrapClass = [styles.wrap, suppressed ? styles.suppressed : null, className]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <span
       ref={wrapRef}
-      className={className ? `${styles.wrap} ${className}` : styles.wrap}
+      className={wrapClass}
       onMouseEnter={onEnter}
       onMouseLeave={onLeave}
       onClickCapture={onClickCapture}
     >
       {children}
-      {open && (
+      {activated && (
         <span
           className={
             effectiveSide === "left"
