@@ -348,6 +348,8 @@ accessJwt で任意コレクションに書き込める。`authenticate_atp_writ
 
 ### クライアント設定（`app.bsky.actor.getPreferences`/`putPreferences`）
 本人の accessJwt 必須。`preferences` は MST に入らないプライベートデータで、`atp_preferences`（`actor_id` PK、JSONB）に中身を解釈せず保存する。`putPreferences` は全置換。bsky.app の年齢確認（`#personalDetailsPref`）はこれが無いと動かない。
+- `#personalDetailsPref`（生年月日）と `#declaredAgePref`（`isOverAge13`/`16`/`18`）は保存せず、`actors.birth_date` から都度生成する。生年月日はメインパスワードのセッションにだけ返し、アプリパスワード・OAuth には年齢区分だけを返す（年齢制限の判定に要る範囲だけ渡す。bsky.app は生年月日が読めなければ年齢区分で判定し、投稿のビュー数表示も18歳以上が条件）。
+- `putPreferences` で、メインパスワード以外のセッションが `#personalDetailsPref` を送ると 400 で拒否する（読めない値を書き換えさせない）。`#declaredAgePref` は読み取り専用なので受け取っても捨てる（保存すると誕生日を過ぎても古い区分が返り続ける）。
 
 ### XRPCプロキシ（`atproto-proxy`ヘッダー）
 `getTimeline`/`searchPosts`/`listNotifications` 等の AppView 専用メソッドは、PDS が AppView への透過プロキシとして振る舞うことで提供する。
@@ -456,7 +458,7 @@ Jetstream の `wantedDids` は発行者 DID の絞り込みなので、新たに
 AP と ATP で可視性の位置づけが違うため、同じ値を配送先ごとに別ルールで扱う。
 
 - **AP**: `birth_date_public=true` のときだけ Actor に `vcard:bday`（`@context` に `"vcard": "http://www.w3.org/2006/vcard/ns#"`）を含める（Misskey の `ApRendererService` と同じ表現）。既定は `false`（seiran 独自の公開設定）。Actor 文書（`actor.rs`）と Update(Person)（`build_person_object`）の両方で同じ判定をする。
-- **ATP**: `#personalDetailsPref` は `birth_date_public` と無関係に常に非公開（本人の `getPreferences` のみ）。`putPreferences` で受け取ると `birth_date` を更新するが、公開設定は変えない。
+- **ATP**: `#personalDetailsPref` は `birth_date_public` と無関係に常に非公開（本人がメインパスワードで呼んだ `getPreferences` のみ。それ以外の本人セッションには `#declaredAgePref` の年齢区分だけ。3節「クライアント設定」）。`putPreferences` で受け取ると `birth_date` を更新するが、公開設定は変えない。
 
 ### ポストの言語（`app.bsky.feed.post`の`langs`）
 ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らない。
