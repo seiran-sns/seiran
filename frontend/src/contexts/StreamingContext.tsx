@@ -83,8 +83,9 @@ interface StreamingValue {
   /** 予約の投稿・失敗・他のタブでの操作（`scheduledPostsChanged`）を購読する（予約一覧が
    * 使用）。戻り値で解除。 */
   registerScheduledPostsChanged: (cb: () => void) => () => void;
-  /** DM新着（visibility="direct"のnoteイベント）を購読する（MessagesPageが使用）。戻り値で解除。 */
-  registerDirectMessage: (cb: NoteListener) => () => void;
+  /** DM新着（visibility="direct"のnoteイベント）と、接続していない間があった後の再接続を
+   * 知らせる（MessagesPageが取り直しに使用）。戻り値で解除。 */
+  registerDirectMessage: (cb: () => void) => () => void;
   /** 未読のあるDMセッション数（左ペインバッジ用）。 */
   dmUnreadCount: number;
   /** サーバーから未読数を再取得する（既読操作後・ページロード時に呼ぶ）。 */
@@ -153,7 +154,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   const reactionListeners = useRef<Map<string, Set<ReactionListener>>>(new Map());
   const notifListeners = useRef<Set<NotifListener>>(new Set());
   const linkResolvedListeners = useRef<Set<LinkResolvedListener>>(new Set());
-  const dmListeners = useRef<Set<NoteListener>>(new Set());
+  const dmListeners = useRef<Set<() => void>>(new Set());
   const scheduledListeners = useRef<Set<() => void>>(new Set());
   /** subscription id -> {spec, onNote, onResync}。再接続時の`connect`再送、`channel`イベントの配り先に使う。 */
   const channelSubs = useRef<Map<string, { spec: ChannelSpec; onNote: NoteListener; onResync?: ResyncListener }>>(
@@ -224,7 +225,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         // DM（visibility="direct"）は既存の`recipients`方式のまま届く。チャンネル購読不要。
         void resolveStreamNote(body).then((n) => {
           if (n.visibility === "direct") {
-            dmListeners.current.forEach((cb) => cb(n));
+            dmListeners.current.forEach((cb) => cb());
             refreshDmUnreadCount();
           }
         });
@@ -283,7 +284,19 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     // （WebSocket再接続でサーバー側の購読状態は失われるため）。あわせて各購読の`onResync`を
     // 呼び、切断中に取りこぼした可能性のある更新の補完を呼び出し元に促す。表示中ノートの
     // `subNote`も同じ理由で送り直す（接続前に登録されたぶんもここで届く）。
-    useCallback(() => {
+    // 接続していない間があったとき（`resync`。ページが非表示の間も切っている）は、通知・DM・
+    // 件数バッジも取り直す（それらの新着シグナルも届いていないため）。通知一覧は届いた
+    // シグナルと同じ経路で取り直すので、離れていた間の新着が強調付きで一度に入る。
+    useCallback((resync: boolean) => {
+      if (resync) {
+        refreshUnread();
+        notifListeners.current.forEach((cb) => cb());
+        refreshDmUnreadCount();
+        dmListeners.current.forEach((cb) => cb());
+        refreshFollowRequestCount();
+        refreshScheduledPostCounts();
+        scheduledListeners.current.forEach((cb) => cb());
+      }
       reactionListeners.current.forEach((_, noteId) => {
         sendRef.current({ type: "subNote", body: { id: noteId } });
       });
@@ -294,7 +307,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
         });
         onResync?.();
       });
-    }, [])
+    }, [refreshUnread, refreshDmUnreadCount, refreshFollowRequestCount, refreshScheduledPostCounts])
   );
   sendRef.current = send;
 
@@ -356,7 +369,7 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     };
   }, []);
 
-  const registerDirectMessage = useCallback((cb: NoteListener) => {
+  const registerDirectMessage = useCallback((cb: () => void) => {
     dmListeners.current.add(cb);
     return () => {
       dmListeners.current.delete(cb);
