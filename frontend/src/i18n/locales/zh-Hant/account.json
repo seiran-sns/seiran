@@ -50,11 +50,9 @@
     "saved": "設定已儲存。",
     "loggedOutVisibilityTitle": "未登入時的顯示",
     "hideFromUnauthenticatedLabel": "要求應用程式與網站不要向未登入的使用者顯示我的帳號",
-    "hideFromUnauthenticatedDescription": "開啟後，將要求支援此設定的應用程式與網站不要向未登入的人顯示你的個人檔案與貼文。此設定以帳號為單位記錄在 PDS 上，但是否遵守取決於各應用程式的實作。",
     "blueskyClientsOnlyNote": "目前僅在 Bluesky 用戶端中生效（不適用於 seiran 本身的畫面與聯邦宇宙）。",
     "activitySubscriptionsTitle": "貼文通知",
     "activitySubscriptionsLabel": "允許他人接收你的貼文通知",
-    "activitySubscriptionsDescription": "你允許的人可以設定在你發布新貼文時收到通知。",
     "activitySubscriptionsOptions": {
       "followers": "追蹤我的任何人",
       "mutuals": "僅限我追蹤的追蹤者",

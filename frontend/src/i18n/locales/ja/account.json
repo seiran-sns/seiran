@@ -50,11 +50,9 @@
     "saved": "設定を保存しました。",
     "loggedOutVisibilityTitle": "ログアウト時の表示",
     "hideFromUnauthenticatedLabel": "ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める",
-    "hideFromUnauthenticatedDescription": "有効にすると、ログインしていない人に自分のプロフィールと投稿を見せないよう、対応するアプリやサイトに求めます。この設定はアカウント単位でPDSに記録されますが、実際に尊重するかどうかは各アプリの実装次第です。",
     "blueskyClientsOnlyNote": "現在はBlueskyのクライアントでのみ有効です（seiranの画面とFediverseには反映されません）。",
     "activitySubscriptionsTitle": "投稿の通知",
     "activitySubscriptionsLabel": "他のユーザーにあなたの投稿の通知を許可する",
-    "activitySubscriptionsDescription": "許可した相手は、あなたが新しく投稿したときに通知を受け取るよう設定できます。",
     "activitySubscriptionsOptions": {
       "followers": "自分をフォローしているユーザー",
       "mutuals": "自分がフォローしているフォロワーのみ",

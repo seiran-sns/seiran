@@ -150,9 +150,6 @@ export default function PrivacySettingsPage() {
           />
           {t("account:privacySettings.hideFromUnauthenticatedLabel")}
         </label>
-        <p className={styles.description}>
-          {t("account:privacySettings.hideFromUnauthenticatedDescription")}
-        </p>
         <p className={styles.note}>{t("account:privacySettings.blueskyClientsOnlyNote")}</p>
         {blueskySaved === "hide_from_unauthenticated" && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>
@@ -179,9 +176,6 @@ export default function PrivacySettingsPage() {
             </label>
           ))}
         </div>
-        <p className={styles.description}>
-          {t("account:privacySettings.activitySubscriptionsDescription")}
-        </p>
         <p className={styles.note}>{t("account:privacySettings.blueskyClientsOnlyNote")}</p>
         {blueskySaved === "allow_activity_subscriptions" && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>

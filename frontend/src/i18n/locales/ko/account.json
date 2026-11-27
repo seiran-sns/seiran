@@ -50,11 +50,9 @@
     "saved": "설정이 저장되었습니다.",
     "loggedOutVisibilityTitle": "로그아웃 상태 표시",
     "hideFromUnauthenticatedLabel": "로그아웃한 사용자에게 내 계정을 표시하지 않도록 앱과 웹사이트에 요청",
-    "hideFromUnauthenticatedDescription": "켜면 이를 지원하는 앱과 웹사이트에 로그인하지 않은 사람에게 내 프로필과 게시물을 보여 주지 않도록 요청합니다. 이 설정은 계정 단위로 PDS에 기록되지만, 실제로 따를지는 각 앱의 구현에 달려 있습니다.",
     "blueskyClientsOnlyNote": "현재는 Bluesky 클라이언트에서만 적용됩니다(seiran 화면과 Fediverse에는 반영되지 않습니다).",
     "activitySubscriptionsTitle": "게시물 알림",
     "activitySubscriptionsLabel": "다른 사용자가 내 게시물 알림을 받도록 허용",
-    "activitySubscriptionsDescription": "허용한 사람은 내가 새 게시물을 올릴 때 알림을 받도록 설정할 수 있습니다.",
     "activitySubscriptionsOptions": {
       "followers": "나를 팔로우하는 모든 사용자",
       "mutuals": "내가 팔로우하는 팔로워만",

@@ -50,11 +50,9 @@
     "saved": "Einstellung gespeichert.",
     "loggedOutVisibilityTitle": "Sichtbarkeit für abgemeldete Nutzer",
     "hideFromUnauthenticatedLabel": "Apps und Websites bitten, mein Konto abgemeldeten Nutzern nicht anzuzeigen",
-    "hideFromUnauthenticatedDescription": "Wenn aktiviert, werden unterstützende Apps und Websites gebeten, dein Profil und deine Beiträge nicht abgemeldeten Personen zu zeigen. Die Einstellung wird kontoweit auf deinem PDS gespeichert; ob sie beachtet wird, hängt von der jeweiligen App ab.",
     "blueskyClientsOnlyNote": "Derzeit wirkt dies nur in Bluesky-Clients (nicht in seirans eigener Oberfläche und nicht im Fediverse).",
     "activitySubscriptionsTitle": "Beitragsbenachrichtigungen",
     "activitySubscriptionsLabel": "Anderen erlauben, über deine Beiträge benachrichtigt zu werden",
-    "activitySubscriptionsDescription": "Personen, denen du es erlaubst, können sich benachrichtigen lassen, wenn du einen neuen Beitrag veröffentlichst.",
     "activitySubscriptionsOptions": {
       "followers": "Alle, die mir folgen",
       "mutuals": "Nur Follower, denen ich folge",

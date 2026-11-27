@@ -50,11 +50,9 @@
     "saved": "Setting saved.",
     "loggedOutVisibilityTitle": "Logged-out visibility",
     "hideFromUnauthenticatedLabel": "Ask apps and websites not to show my account to logged-out users",
-    "hideFromUnauthenticatedDescription": "When enabled, apps and websites that support it are asked not to show your profile and posts to people who are not logged in. This setting is recorded on your PDS for your account, but whether it is respected depends on each app.",
     "blueskyClientsOnlyNote": "Currently this only takes effect in Bluesky clients (it does not apply to seiran's own screens or to the Fediverse).",
     "activitySubscriptionsTitle": "Post notifications",
     "activitySubscriptionsLabel": "Allow others to be notified of your posts",
-    "activitySubscriptionsDescription": "People you allow can choose to be notified when you publish a new post.",
     "activitySubscriptionsOptions": {
       "followers": "Anyone who follows me",
       "mutuals": "Only followers who I follow",

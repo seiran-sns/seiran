@@ -50,11 +50,9 @@
     "saved": "Paramètre enregistré.",
     "loggedOutVisibilityTitle": "Visibilité hors connexion",
     "hideFromUnauthenticatedLabel": "Demander aux applis et sites web de ne pas montrer mon compte aux utilisateurs déconnectés",
-    "hideFromUnauthenticatedDescription": "Si activé, les applis et sites web compatibles sont priés de ne pas montrer votre profil ni vos publications aux personnes non connectées. Ce réglage est enregistré sur votre PDS pour tout le compte, mais son respect dépend de chaque appli.",
     "blueskyClientsOnlyNote": "Pour l’instant, ce réglage ne s’applique que dans les clients Bluesky (ni dans les écrans de seiran, ni dans le Fédivers).",
     "activitySubscriptionsTitle": "Notifications de publications",
     "activitySubscriptionsLabel": "Autoriser les autres à être notifiés de vos publications",
-    "activitySubscriptionsDescription": "Les personnes autorisées peuvent choisir d’être notifiées lorsque vous publiez un nouveau message.",
     "activitySubscriptionsOptions": {
       "followers": "Toute personne qui me suit",
       "mutuals": "Seulement les abonnés que je suis",

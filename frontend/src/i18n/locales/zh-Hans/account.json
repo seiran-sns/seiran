@@ -50,11 +50,9 @@
     "saved": "设置已保存。",
     "loggedOutVisibilityTitle": "未登录时的显示",
     "hideFromUnauthenticatedLabel": "请求应用和网站不要向未登录用户显示我的账号",
-    "hideFromUnauthenticatedDescription": "开启后，将请求支持此设置的应用和网站不要向未登录的人显示你的个人资料和帖子。此设置以账号为单位记录在 PDS 上，但是否遵守取决于各应用的实现。",
     "blueskyClientsOnlyNote": "目前仅在 Bluesky 客户端中生效（不适用于 seiran 自身的界面和联邦宇宙）。",
     "activitySubscriptionsTitle": "帖子通知",
     "activitySubscriptionsLabel": "允许他人接收你的帖子通知",
-    "activitySubscriptionsDescription": "你允许的人可以设置在你发布新帖子时收到通知。",
     "activitySubscriptionsOptions": {
       "followers": "关注我的任何人",
       "mutuals": "仅限我关注的关注者",
