@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use crate::event_bus::EventBus;
+use crate::repository::{ActorRepository, PgActorRepository};
 
 use crate::atp::plc::{signing_key_from_pem, PlcError};
 use crate::atp::repo::{
@@ -13,9 +14,9 @@ use crate::atp::repo::{
     create_commit, encode_bsky_actor_profile, encode_bsky_feed_like, encode_bsky_feed_post,
     encode_bsky_feed_repost, encode_bsky_graph_block, encode_bsky_graph_follow,
     encode_bsky_graph_list, encode_bsky_graph_listitem, encode_car, encode_chat_actor_declaration,
-    encode_content_visibility_declaration, encode_generic_record, encode_seiran_actor_declaration,
-    generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet, BskyPostReply, Cid, CommitEvtOp,
-    FeedPostRecord, RepoError, NSFW_SELF_LABEL,
+    encode_content_visibility_declaration, encode_generic_record, encode_notification_declaration,
+    encode_seiran_actor_declaration, generate_tid, sha256_hexes_of_blob_cids, BskyEmbed, BskyFacet,
+    BskyPostReply, Cid, CommitEvtOp, FeedPostRecord, RepoError, NSFW_SELF_LABEL,
 };
 
 #[derive(Debug, thiserror::Error)]
@@ -1409,12 +1410,23 @@ impl AtpCommitService {
         let pinned_post_ref = pinned_post
             .as_ref()
             .map(|(uri, cid)| (uri.as_str(), cid.as_str()));
+        // bsky.app 等で付けた「ログアウトしたユーザーに表示しない」は actors に持っている。
+        // ここで付け直さないと、seiran でプロフィールを編集するたびに外れる。
+        let hide_from_unauthenticated = PgActorRepository::new(self.pool.clone())
+            .find_hide_from_unauthenticated(actor_id)
+            .await?;
+        let self_labels: &[&str] = if hide_from_unauthenticated {
+            &[crate::atp::self_settings::NO_UNAUTHENTICATED_LABEL]
+        } else {
+            &[]
+        };
         let (record_cbor, record_cid) = encode_bsky_actor_profile(
             display_name,
             *description,
             avatar_ref,
             banner_ref,
             pinned_post_ref,
+            self_labels,
             &created_at_str,
         )?;
 
@@ -1534,23 +1546,61 @@ impl AtpCommitService {
         hide_from_algorithmic_recommendations: bool,
         now: DateTime<Utc>,
     ) -> Result<(), AtpCommitError> {
+        let (cbor, cid) =
+            encode_content_visibility_declaration(hide_from_algorithmic_recommendations)?;
+        self.commit_self_record(
+            actor_id,
+            "app.bsky.actor.contentVisibilityDeclaration",
+            cbor,
+            cid,
+            now,
+        )
+        .await
+    }
+
+    /// `app.bsky.notification.declaration`（他のユーザーに投稿の通知を許可する範囲、
+    /// rkey固定`self`）をコミットする。設定画面のプライバシーセクションから変えるたびに呼ばれる。
+    pub async fn commit_notification_declaration(
+        &self,
+        actor_id: i64,
+        allow_subscriptions: &str,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        let (cbor, cid) = encode_notification_declaration(allow_subscriptions)?;
+        self.commit_self_record(
+            actor_id,
+            "app.bsky.notification.declaration",
+            cbor,
+            cid,
+            now,
+        )
+        .await
+    }
+
+    /// rkey `self` の単一レコードを、`atp_records` の有無で create/update を決めてコミットする。
+    async fn commit_self_record(
+        &self,
+        actor_id: i64,
+        collection: &str,
+        cbor: Vec<u8>,
+        cid: Cid,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
         let existing: bool = sqlx::query_scalar(
             "SELECT EXISTS(SELECT 1 FROM atp_records \
-             WHERE actor_id = $1 AND collection = 'app.bsky.actor.contentVisibilityDeclaration' AND rkey = 'self')",
+             WHERE actor_id = $1 AND collection = $2 AND rkey = 'self')",
         )
         .bind(actor_id)
+        .bind(collection)
         .fetch_one(&self.pool)
         .await?;
         let action: &'static str = if existing { "update" } else { "create" };
 
-        let (record_cbor, record_cid) =
-            encode_content_visibility_declaration(hide_from_algorithmic_recommendations)?;
-
         let record = CommitRecord {
-            collection: "app.bsky.actor.contentVisibilityDeclaration".to_string(),
+            collection: collection.to_string(),
             rkey: "self".to_string(),
-            cbor: record_cbor,
-            cid: record_cid,
+            cbor,
+            cid,
             action,
             blob_cids: vec![],
         };
@@ -1560,10 +1610,10 @@ impl AtpCommitService {
             .await?;
 
         tracing::info!(
-            "[atp] content visibility declaration commit 完了（{}）: did={}, hide={}",
+            "[atp] {}/self commit 完了（{}）: did={}",
+            collection,
             action,
-            result.at_did,
-            hide_from_algorithmic_recommendations
+            result.at_did
         );
         self.spawn_request_crawl();
         Ok(())

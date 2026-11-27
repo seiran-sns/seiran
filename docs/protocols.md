@@ -470,6 +470,21 @@ ISO 639-1 の2文字コード。Bsky 配送にだけ使い、AP には送らな�
 ### アルゴリズムレコメンドからの除外（`app.bsky.actor.contentVisibilityDeclaration`）
 設定画面「プライバシー」から、Discover フィード等のレコメンドから自分の投稿を除外するよう要求する。`GET`/`POST /api/account/content-visibility` が `actors.hide_from_algorithmic_recommendations` を読み書きし、更新時に `commit_content_visibility` が `app.bsky.actor.contentVisibilityDeclaration/self`（`hideFromAlgorithmicRecommendations` のみ）をコミットする。`chat.bsky.actor.declaration` と同じ「self キーの単一 boolean レコード」で、`atp_records` の有無で create/update を決める。レコードが無ければ `false` 扱い（公式仕様）。AP に対応概念は無い。
 
+### self レコードで表すプライバシー設定（ATP → actors の同期）
+bsky.app のプライバシー設定画面のスイッチは、PDS へ self レコードを書く。seiran はそれぞれを `actors` の列に持ち、seiran 側から self レコードをコミットし直すときはそこから組み立てる。
+
+| bsky.app のスイッチ | self レコード | `actors` の列 |
+|---|---|---|
+| ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める | `app.bsky.actor.profile` の self-label `!no-unauthenticated` | `hide_from_unauthenticated` |
+| 他のユーザーにあなたの投稿の通知を許可する | `app.bsky.notification.declaration` の `allowSubscriptions`（`followers`/`mutuals`/`none`、レコードが無ければ `followers`） | `allow_activity_subscriptions` |
+| アルゴリズムのおすすめから除外するよう求める | `app.bsky.actor.contentVisibilityDeclaration` の `hideFromAlgorithmicRecommendations` | `hide_from_algorithmic_recommendations` |
+
+- **ATP → actors**: `createRecord`/`putRecord`/`deleteRecord`/`applyWrites` でこれらの self レコードが変わったら、`seiran_common::atp::self_settings::sync_from_repo` がリポジトリにある今の3レコードを読み直して3列をまとめて更新する（書かれた値ではなく読み直すので、削除・DID 転入・既存データの移行も同じ関数で済む）。DID 転入では取り込んだプロフィールを当てはめる時点で同じ関数を呼ぶ。反映しないと、次に seiran 側からコミットし直したときに外部で変えた設定が巻き戻る。
+- **actors → ATP**: `commit_profile` は `hide_from_unauthenticated` が真なら `labels`（`com.atproto.label.defs#selfLabels`、`!no-unauthenticated` だけ）を付ける。プロフィールレコードのそれ以外の self-label は持たない。
+- **既存データ**: 列の追加前に書かれたレコードは、マイグレーションが積んだ `atp_self_settings_backfill` を起動時の `backfill_atp_self_settings` が読んで反映する（CBOR は SQL で読めない）。反映前に seiran でプロフィールを編集するとラベルが外れるので、起動時タスクの最初に行う。
+- **設定画面**: 「プライバシー」（`/settings/privacy`）で切り替える。`GET`/`POST /api/account/bluesky-privacy`（`POST` は指定した項目だけを更新）が列を書き換え、ログアウト時の非表示はプロフィールを再コミット（`recommit_bsky_profile`）、投稿の通知は `commit_notification_declaration` で `app.bsky.notification.declaration/self` をコミットする。
+- seiran の画面・Fediverse 側はまだこの2列を使わない（ログアウト時の表示制限・投稿通知の仕組みが無い）。設定画面では両方に「現在は Bluesky のクライアントでのみ有効」と注記する。
+
 ### 既存DID転入（移行元PDSとの通信）
 全体の流れと設計判断は `docs/account_migration.md`。ここでは移行元 PDS（PDS A）への XRPC と SSRF 対策だけを書く。
 

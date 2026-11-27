@@ -251,6 +251,99 @@ pub async fn update_content_visibility(
 }
 
 #[derive(serde::Serialize)]
+pub struct BlueskyPrivacyResponse {
+    pub hide_from_unauthenticated: bool,
+    pub allow_activity_subscriptions: String,
+}
+
+/// 指定した項目だけを変える。
+#[derive(Deserialize)]
+pub struct UpdateBlueskyPrivacyRequest {
+    pub hide_from_unauthenticated: Option<bool>,
+    pub allow_activity_subscriptions: Option<String>,
+}
+
+async fn bluesky_privacy(
+    state: &AppState,
+    actor_id: i64,
+) -> Result<BlueskyPrivacyResponse, ApiError> {
+    let db_err =
+        |e: sqlx::Error| ApiError::Internal(format!("[bluesky-privacy] SELECT 失敗: {}", e));
+    Ok(BlueskyPrivacyResponse {
+        hide_from_unauthenticated: state
+            .actors
+            .find_hide_from_unauthenticated(actor_id)
+            .await
+            .map_err(db_err)?,
+        allow_activity_subscriptions: state
+            .actors
+            .find_allow_activity_subscriptions(actor_id)
+            .await
+            .map_err(db_err)?,
+    })
+}
+
+/// `GET /api/account/bluesky-privacy`（設定画面「プライバシー」）
+/// ATP の self レコードで表すプライバシー設定（ログアウトしたユーザーに表示しないよう求めるか・
+/// 投稿の通知を許可する範囲）を返す。`docs/protocols.md` 3節。
+pub async fn get_bluesky_privacy(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+) -> Result<Json<BlueskyPrivacyResponse>, ApiError> {
+    Ok(Json(bluesky_privacy(&state, user.actor_id).await?))
+}
+
+/// `POST /api/account/bluesky-privacy`（設定画面「プライバシー」）
+/// DB を更新したうえで、対応する self レコード（プロフィールの self-label
+/// `!no-unauthenticated`・`app.bsky.notification.declaration`）をコミットし直す。
+/// Bluesky のクライアントは PDS のレコードを見るので、コミットしないと設定が効かない。
+pub async fn update_bluesky_privacy(
+    user: crate::middleware::AuthedUser,
+    State(state): State<AppState>,
+    Json(req): Json<UpdateBlueskyPrivacyRequest>,
+) -> Result<Json<BlueskyPrivacyResponse>, ApiError> {
+    use seiran_common::atp::self_settings::ALLOW_SUBSCRIPTIONS_VALUES;
+    if let Some(allow) = req.allow_activity_subscriptions.as_deref() {
+        if !ALLOW_SUBSCRIPTIONS_VALUES.contains(&allow) {
+            return Err(ApiError::BadRequest(format!(
+                "allow_activity_subscriptions は {} のいずれかです",
+                ALLOW_SUBSCRIPTIONS_VALUES.join("/")
+            )));
+        }
+    }
+    let db_err =
+        |e: sqlx::Error| ApiError::Internal(format!("[bluesky-privacy] UPDATE 失敗: {}", e));
+
+    if let Some(hide) = req.hide_from_unauthenticated {
+        state
+            .actors
+            .update_hide_from_unauthenticated(user.actor_id, hide)
+            .await
+            .map_err(db_err)?;
+        crate::handlers::notes::recommit_bsky_profile(&state, user.actor_id).await;
+    }
+    if let Some(allow) = req.allow_activity_subscriptions.as_deref() {
+        state
+            .actors
+            .update_allow_activity_subscriptions(user.actor_id, allow)
+            .await
+            .map_err(db_err)?;
+        if let Err(e) = state
+            .atp_service
+            .commit_notification_declaration(user.actor_id, allow, chrono::Utc::now())
+            .await
+        {
+            tracing::error!(
+                "[bluesky-privacy] ATP コミット失敗（DB更新は完了済み）: {}",
+                e
+            );
+        }
+    }
+
+    Ok(Json(bluesky_privacy(&state, user.actor_id).await?))
+}
+
+#[derive(serde::Serialize)]
 pub struct LockResponse {
     pub is_locked: bool,
 }

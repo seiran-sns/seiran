@@ -78,6 +78,19 @@ pub struct BskyActorProfile<'a> {
     pub banner_url: Option<&'a str>,
 }
 
+/// ATP リポジトリの self レコードで表すプライバシー設定（`ActorRepository::update_atp_self_settings`
+/// の入力）。どれも bsky.app のプライバシー設定画面のスイッチに対応する。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AtpSelfSettings {
+    /// プロフィールの self-label `!no-unauthenticated`。
+    pub hide_from_unauthenticated: bool,
+    /// `app.bsky.notification.declaration` の `allowSubscriptions`
+    /// （`followers`/`mutuals`/`none`）。
+    pub allow_activity_subscriptions: &'static str,
+    /// `app.bsky.actor.contentVisibilityDeclaration` の `hideFromAlgorithmicRecommendations`。
+    pub hide_from_algorithmic_recommendations: bool,
+}
+
 /// ローカルアクターのプロフィール更新内容（`ActorRepository::update_profile`の入力、全項目を上書きする）。
 #[derive(Debug, Clone, Copy)]
 pub struct LocalProfileUpdate<'a> {
@@ -284,6 +297,35 @@ pub trait ActorRepository: Send + Sync {
         &self,
         actor_id: i64,
     ) -> Result<bool, sqlx::Error>;
+
+    /// ATP リポジトリの self レコードで表すプライバシー設定をまとめて更新する
+    /// （ATP → actors。`crate::atp::self_settings::sync_from_repo` が使う）。
+    async fn update_atp_self_settings(
+        &self,
+        actor_id: i64,
+        settings: &AtpSelfSettings,
+    ) -> Result<(), sqlx::Error>;
+
+    /// ログアウトしたユーザーに表示しないよう求めるか。行が無ければ`false`（デフォルト）。
+    async fn find_hide_from_unauthenticated(&self, actor_id: i64) -> Result<bool, sqlx::Error>;
+
+    /// 設定画面「プライバシー」から、ログアウトしたユーザーに表示しないよう求めるかを更新する。
+    async fn update_hide_from_unauthenticated(
+        &self,
+        actor_id: i64,
+        hide: bool,
+    ) -> Result<(), sqlx::Error>;
+
+    /// 投稿の通知を許可する範囲（`followers`/`mutuals`/`none`）。行が無ければ`followers`。
+    async fn find_allow_activity_subscriptions(&self, actor_id: i64)
+        -> Result<String, sqlx::Error>;
+
+    /// 設定画面「プライバシー」から、投稿の通知を許可する範囲を更新する。
+    async fn update_allow_activity_subscriptions(
+        &self,
+        actor_id: i64,
+        allow: &str,
+    ) -> Result<(), sqlx::Error>;
 
     /// フォロー承認制（鍵アカウント）を設定する。
     async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error>;
@@ -585,6 +627,75 @@ impl ActorRepository for PgActorRepository {
         .fetch_optional(&self.pool)
         .await
         .map(|r| r.unwrap_or(false))
+    }
+
+    async fn update_atp_self_settings(
+        &self,
+        actor_id: i64,
+        settings: &AtpSelfSettings,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors SET hide_from_unauthenticated = $1, allow_activity_subscriptions = $2, \
+             hide_from_algorithmic_recommendations = $3, updated_at = NOW() WHERE id = $4",
+        )
+        .bind(settings.hide_from_unauthenticated)
+        .bind(settings.allow_activity_subscriptions)
+        .bind(settings.hide_from_algorithmic_recommendations)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn find_hide_from_unauthenticated(&self, actor_id: i64) -> Result<bool, sqlx::Error> {
+        sqlx::query_scalar::<_, bool>("SELECT hide_from_unauthenticated FROM actors WHERE id = $1")
+            .bind(actor_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map(|r| r.unwrap_or(false))
+    }
+
+    async fn update_hide_from_unauthenticated(
+        &self,
+        actor_id: i64,
+        hide: bool,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors SET hide_from_unauthenticated = $1, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(hide)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
+    }
+
+    async fn find_allow_activity_subscriptions(
+        &self,
+        actor_id: i64,
+    ) -> Result<String, sqlx::Error> {
+        sqlx::query_scalar::<_, String>(
+            "SELECT allow_activity_subscriptions FROM actors WHERE id = $1",
+        )
+        .bind(actor_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map(|r| r.unwrap_or_else(|| "followers".to_string()))
+    }
+
+    async fn update_allow_activity_subscriptions(
+        &self,
+        actor_id: i64,
+        allow: &str,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            "UPDATE actors SET allow_activity_subscriptions = $1, updated_at = NOW() WHERE id = $2",
+        )
+        .bind(allow)
+        .bind(actor_id)
+        .execute(&self.pool)
+        .await
+        .map(|_| ())
     }
 
     async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error> {

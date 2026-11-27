@@ -1,5 +1,4 @@
 use super::*;
-use profile_material::sync_bsky_pinned_post;
 
 /// POST /api/notes/:id/pin
 /// 自分の投稿をピン留めする（#61）。5件を超えると最古のピン留めが自動的に外れる。
@@ -32,7 +31,7 @@ pub async fn pin_note(
         return ApiError::Internal(format!("pinned_posts INSERT 失敗: {}", e)).into_response();
     }
 
-    sync_bsky_pinned_post(&state, me.actor_id).await;
+    recommit_bsky_profile(&state, me.actor_id).await;
 
     respond_with_pinned_ids(&state, me.actor_id).await
 }
@@ -57,7 +56,7 @@ pub async fn unpin_note(
         }
     }
 
-    sync_bsky_pinned_post(&state, me.actor_id).await;
+    recommit_bsky_profile(&state, me.actor_id).await;
 
     respond_with_pinned_ids(&state, me.actor_id).await
 }

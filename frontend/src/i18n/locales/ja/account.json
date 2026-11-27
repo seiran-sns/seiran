@@ -48,6 +48,18 @@
     "hideFromAlgorithmicRecommendationsLabel": "投稿をBskyのおすすめ機能（Discoverフィード等）に表示しない",
     "hideFromAlgorithmicRecommendationsDescription": "有効にすると、Blueskyではフォロワー以外のユーザーにDiscoverフィードで投稿が表示されなくなります。この設定はアカウント単位でPDSに記録され、他のAT Protocolアプリからも参照できますが、実際に尊重するかどうかは各アプリの実装次第です。反映まで最大1時間ほどかかる場合があります。",
     "saved": "設定を保存しました。",
+    "loggedOutVisibilityTitle": "ログアウト時の表示",
+    "hideFromUnauthenticatedLabel": "ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める",
+    "hideFromUnauthenticatedDescription": "有効にすると、ログインしていない人に自分のプロフィールと投稿を見せないよう、対応するアプリやサイトに求めます。この設定はアカウント単位でPDSに記録されますが、実際に尊重するかどうかは各アプリの実装次第です。",
+    "blueskyClientsOnlyNote": "現在はBlueskyのクライアントでのみ有効です（seiranの画面とFediverseには反映されません）。",
+    "activitySubscriptionsTitle": "投稿の通知",
+    "activitySubscriptionsLabel": "他のユーザーにあなたの投稿の通知を許可する",
+    "activitySubscriptionsDescription": "許可した相手は、あなたが新しく投稿したときに通知を受け取るよう設定できます。",
+    "activitySubscriptionsOptions": {
+      "followers": "自分をフォローしているユーザー",
+      "mutuals": "自分がフォローしているフォロワーのみ",
+      "none": "誰にも許可しない"
+    },
     "followApprovalTitle": "承認制フォロー",
     "lockedAccountLabel": "新規フォローを承認制にする",
     "lockedAccountDescription": "有効にすると、新しいフォローリクエストは自動では成立せず、設定の「承認待ちフォロー」から承認/拒否するまで保留されます。この設定はフォローの成立にのみ影響し、公開投稿を誰が見られるかは変わりません。OFFにすると、その時点で残っていた承認待ちフォローリクエストはすべて自動的に承認されます。"

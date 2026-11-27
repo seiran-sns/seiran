@@ -1018,11 +1018,12 @@ pub fn encode_bsky_actor_profile(
     avatar: Option<(&str, &str, i64)>,
     banner: Option<(&str, &str, i64)>,
     pinned_post: Option<(&str, &str)>,
+    self_labels: &[&str],
     created_at_rfc3339: &str,
 ) -> Result<(Vec<u8>, Cid), RepoError> {
-    // canonical 順: $type(5) < avatar(6) < banner(6) < createdAt(9) < pinnedPost(10) <
-    // description(11) < displayName(11)
-    // 6文字キー同士: "avatar"(a=0x61) < "banner"(b=0x62)
+    // canonical 順: $type(5) < avatar(6) < banner(6) < labels(6) < createdAt(9) <
+    // pinnedPost(10) < description(11) < displayName(11)
+    // 6文字キー同士: "avatar"(a=0x61) < "banner"(b=0x62) < "labels"(l=0x6c)
     // 11文字キー同士: "description"(e=0x65) < "displayName"(i=0x69)
     #[derive(Serialize)]
     struct BskyActorProfile {
@@ -1032,6 +1033,8 @@ pub fn encode_bsky_actor_profile(
         avatar: Option<Ipld>,
         #[serde(skip_serializing_if = "Option::is_none")]
         banner: Option<Ipld>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        labels: Option<BskySelfLabels>,
         #[serde(rename = "createdAt")]
         created_at: String,
         #[serde(rename = "pinnedPost", skip_serializing_if = "Option::is_none")]
@@ -1053,6 +1056,15 @@ pub fn encode_bsky_actor_profile(
         kind: "app.bsky.actor.profile".to_string(),
         avatar: avatar_ipld,
         banner: banner_ipld,
+        labels: (!self_labels.is_empty()).then(|| BskySelfLabels {
+            kind: "com.atproto.label.defs#selfLabels".to_string(),
+            values: self_labels
+                .iter()
+                .map(|val| BskySelfLabel {
+                    val: val.to_string(),
+                })
+                .collect(),
+        }),
         created_at: created_at_rfc3339.to_string(),
         pinned_post: pinned_post.map(|(uri, cid)| BskyRefRecord {
             cid: cid.to_string(),
@@ -1106,6 +1118,29 @@ pub fn encode_seiran_actor_declaration(ap_actor_uri: &str) -> Result<(Vec<u8>, C
     let record = SeiranActorDeclaration {
         kind: "org.seiran.actor.declaration".to_string(),
         ap_actor_uri: ap_actor_uri.to_string(),
+    };
+    let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
+    let cid = cid_from_dagcbor(&cbor);
+    Ok((cbor, cid))
+}
+
+/// `app.bsky.notification.declaration` レコード（他のユーザーに投稿の通知を許可する範囲、
+/// rkey固定`self`）の DAG-CBOR バイト列と CID を生成する。`allow_subscriptions` は
+/// `"followers"`/`"mutuals"`/`"none"`。レコードが無ければ `followers` とみなされる。
+pub fn encode_notification_declaration(
+    allow_subscriptions: &str,
+) -> Result<(Vec<u8>, Cid), RepoError> {
+    // canonical順: $type(5) < allowSubscriptions(18)
+    #[derive(Serialize)]
+    struct NotificationDeclaration {
+        #[serde(rename = "$type")]
+        kind: String,
+        #[serde(rename = "allowSubscriptions")]
+        allow_subscriptions: String,
+    }
+    let record = NotificationDeclaration {
+        kind: "app.bsky.notification.declaration".to_string(),
+        allow_subscriptions: allow_subscriptions.to_string(),
     };
     let cbor = serde_ipld_dagcbor::to_vec(&record).map_err(|e| RepoError::Cbor(e.to_string()))?;
     let cid = cid_from_dagcbor(&cbor);
@@ -1583,6 +1618,35 @@ mod tests {
             panic!("value must be map")
         };
         assert_eq!(first.get("val"), Some(&Ipld::String("sexual".to_string())));
+    }
+
+    #[test]
+    fn test_encode_bsky_actor_profile_self_labels_are_canonical() {
+        let encode = |labels: &[&str]| {
+            encode_bsky_actor_profile(
+                "name",
+                Some("bio"),
+                None,
+                None,
+                None,
+                labels,
+                "2024-01-01T00:00:00.000Z",
+            )
+            .unwrap()
+        };
+        let (plain, _) = encode(&[]);
+        assert!(!decode_dagcbor_to_json(&plain)
+            .unwrap()
+            .as_object()
+            .unwrap()
+            .contains_key("labels"));
+
+        let (cbor, cid) = encode(&["!no-unauthenticated"]);
+        let json = decode_dagcbor_to_json(&cbor).unwrap();
+        assert_eq!(json["labels"]["values"][0]["val"], "!no-unauthenticated");
+        // 汎用エンコード（キーを canonical 順に並べ直す）と同じ CID になること
+        let (_, generic_cid) = encode_generic_record(&json).unwrap();
+        assert_eq!(cid, generic_cid);
     }
 
     #[test]

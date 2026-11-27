@@ -956,6 +956,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
     let state = state.clone();
     tokio::spawn(async move {
         backfill_post_record_blobs(&state).await;
+        backfill_atp_self_settings(&state).await;
         resume_running_follow_imports(&state).await;
         resume_running_emoji_imports(&state).await;
         resume_running_migrations(&state).await;
@@ -983,6 +984,54 @@ pub fn spawn_startup_tasks(state: &AppState) {
         .await;
         backfill_remote_instance_meta(&state).await;
     });
+}
+
+/// 既存ユーザーが bsky.app 等で self レコードに書いたプライバシー設定（ログアウト時の非表示・
+/// 投稿通知の許可・おすすめからの除外）を actors へ反映する。レコードの CBOR は SQL で読めない
+/// ため、マイグレーションが積んだ対象をここで1人ずつ読む。反映前に seiran でプロフィールを
+/// 編集すると `!no-unauthenticated` が外れるので、起動直後の最初に行う。
+async fn backfill_atp_self_settings(state: &AppState) {
+    use seiran_common::repository::maintenance;
+
+    let mut done = 0usize;
+    loop {
+        let batch = match maintenance::atp_self_settings_backfill_batch(&state.db, 500).await {
+            Ok(batch) => batch,
+            Err(e) => {
+                tracing::error!("[startup] プライバシー設定バックフィル対象取得失敗: {}", e);
+                return;
+            }
+        };
+        if batch.is_empty() {
+            break;
+        }
+        for actor_id in batch {
+            if let Err(e) =
+                seiran_common::atp::self_settings::sync_from_repo(&state.db, actor_id).await
+            {
+                // 読めないレコードで止まり続けないよう、失敗しても対象から外す
+                tracing::error!(
+                    "[startup] プライバシー設定バックフィル失敗 actor_id={}: {}",
+                    actor_id,
+                    e
+                );
+            }
+            if let Err(e) =
+                maintenance::finish_atp_self_settings_backfill(&state.db, actor_id).await
+            {
+                tracing::error!(
+                    "[startup] プライバシー設定バックフィル対象の削除失敗 actor_id={}: {}",
+                    actor_id,
+                    e
+                );
+                return;
+            }
+            done += 1;
+        }
+    }
+    if done > 0 {
+        tracing::info!("[startup] プライバシー設定バックフィル完了: {} 件", done);
+    }
 }
 
 /// `post_record_blobs` 導入前の投稿について、ATP レコードの blob 参照を記録する。

@@ -434,6 +434,11 @@ fn auth_account_routes() -> Router<AppState> {
                 .post(handlers::account::update_content_visibility),
         )
         .route(
+            "/api/account/bluesky-privacy",
+            get(handlers::account::get_bluesky_privacy)
+                .post(handlers::account::update_bluesky_privacy),
+        )
+        .route(
             "/api/account/lock",
             get(handlers::account::get_lock).post(handlers::account::update_lock),
         )

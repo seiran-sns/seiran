@@ -37,8 +37,8 @@ pub use dto::{to_reaction_event_response, ProfileFeedItem, ReactionEventResponse
 pub use dto::{AttachmentResponse, LinkCardResponse, NoteResponse, ReactRequest, ReactionSummary};
 pub use pins::{pin_note, unpin_note};
 pub use poll::vote_poll;
-pub(crate) use profile_material::fetch_atp_profile_material;
 pub use profile_material::resolve_bsky_pinned_post;
+pub(crate) use profile_material::{fetch_atp_profile_material, recommit_bsky_profile};
 pub use queries::{
     attach_poll_votes, attach_relationship_flags, attach_remote_instance_info,
     attach_reply_quote_gates, build_instance_cache, build_note_responses, embed_quotes,

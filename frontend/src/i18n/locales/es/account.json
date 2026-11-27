@@ -48,6 +48,18 @@
     "hideFromAlgorithmicRecommendationsLabel": "Ocultar mis publicaciones de las recomendaciones algorítmicas (p. ej., el feed Discover de Bsky)",
     "hideFromAlgorithmicRecommendationsDescription": "Al activarlo, en Bluesky tus publicaciones solo aparecerán en el feed Discover para las personas que ya te siguen. Esta preferencia se registra a nivel de cuenta en tu PDS, por lo que otras apps de AT Protocol también pueden leerla, aunque respetarla o no depende de cada app. Puede tardar hasta una hora en aplicarse por completo.",
     "saved": "Configuración guardada.",
+    "loggedOutVisibilityTitle": "Visibilidad sin sesión iniciada",
+    "hideFromUnauthenticatedLabel": "Pedir a las apps y sitios web que no muestren mi cuenta a usuarios sin sesión iniciada",
+    "hideFromUnauthenticatedDescription": "Si se activa, se pide a las apps y sitios web compatibles que no muestren tu perfil ni tus publicaciones a quienes no hayan iniciado sesión. El ajuste se guarda en tu PDS para toda la cuenta, pero que se respete depende de cada app.",
+    "blueskyClientsOnlyNote": "Por ahora solo tiene efecto en los clientes de Bluesky (no se aplica a las pantallas de seiran ni al Fediverso).",
+    "activitySubscriptionsTitle": "Notificaciones de publicaciones",
+    "activitySubscriptionsLabel": "Permitir que otros reciban notificaciones de tus publicaciones",
+    "activitySubscriptionsDescription": "Las personas a las que lo permitas podrán recibir una notificación cuando publiques algo nuevo.",
+    "activitySubscriptionsOptions": {
+      "followers": "Cualquiera que me siga",
+      "mutuals": "Solo seguidores a los que sigo",
+      "none": "Nadie"
+    },
     "followApprovalTitle": "Solicitudes de seguimiento",
     "lockedAccountLabel": "Requerir aprobación para nuevos seguidores",
     "lockedAccountDescription": "Cuando está activado, las nuevas solicitudes de seguimiento no se aceptarán automáticamente; deberás aprobarlas o rechazarlas desde «Solicitudes de seguimiento» en Ajustes. Esto solo afecta a quién puede seguirte; no cambia quién puede ver tus publicaciones públicas. Al desactivarlo, se aprobarán automáticamente todas las solicitudes de seguimiento pendientes."

@@ -223,6 +223,29 @@ pub async fn post_record_blobs_backfill_batch(
     .await
 }
 
+/// self レコードのプライバシー設定を actors へまだ反映していないアクター（最大 `limit` 件）。
+pub async fn atp_self_settings_backfill_batch(
+    pool: &PgPool,
+    limit: i64,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar("SELECT actor_id FROM atp_self_settings_backfill ORDER BY actor_id LIMIT $1")
+        .bind(limit)
+        .fetch_all(pool)
+        .await
+}
+
+/// 反映し終えたアクターをバックフィル対象から外す。
+pub async fn finish_atp_self_settings_backfill(
+    pool: &PgPool,
+    actor_id: i64,
+) -> Result<(), sqlx::Error> {
+    sqlx::query("DELETE FROM atp_self_settings_backfill WHERE actor_id = $1")
+        .bind(actor_id)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
 /// 処理し終えた投稿をバックフィル対象から外す。
 pub async fn finish_post_record_blobs_backfill(
     pool: &PgPool,

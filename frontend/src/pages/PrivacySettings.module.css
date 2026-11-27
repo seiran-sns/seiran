@@ -33,6 +33,27 @@
   margin: 10px 0 0;
 }
 
+.lead {
+  font-size: 0.9rem;
+  color: var(--text);
+  margin: 0 0 8px;
+}
+
+.radioGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.note {
+  font-size: 0.82rem;
+  color: var(--text-dim);
+  line-height: 1.5;
+  margin: 8px 0 0;
+  padding: 6px 10px;
+  border-left: 3px solid var(--border);
+}
+
 .success {
   color: var(--accent);
   font-size: 0.85rem;
