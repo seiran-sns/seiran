@@ -7,7 +7,10 @@
 //! クライアントは`{"type":"connect","body":{"channel":"localTimeline","id":"<uuid>","params":{}}}`
 //! を送るとそのチャンネル該当のノートを`{"type":"channel","body":{"id":"<uuid>","type":"note","body":{...}}}`
 //! で受け取れる。`{"type":"disconnect","body":{"id":"<uuid>"}}`で購読解除する。
-//! 通知・DM・`noteUpdated`は従来通り`recipients`方式（購読不要、認証済み接続には自動配信）。
+//! 通知・DMは`recipients`方式（購読不要、認証済み接続には自動配信）。
+//! リアクションの増減（`noteUpdated`）は、`{"type":"subNote","body":{"id":"<noteId>"}}`で
+//! 購読したノートにも届く（本家 Misskey の`subNote`/`unsubNote`と同じ。画面に出している
+//! ノートを購読すれば、投稿者をフォローしていなくても更新が届く。`streaming::NoteSubscribers`）。
 
 use std::collections::HashMap;
 use std::time::Duration;
@@ -19,7 +22,7 @@ use axum::{
     },
     response::IntoResponse,
 };
-use seiran_common::streaming::{ChannelBroadcast, ChannelKind};
+use seiran_common::streaming::{ChannelBroadcast, ChannelKind, NoteSubscriptions};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -41,6 +44,12 @@ enum ClientMessage {
         params: serde_json::Value,
     },
     Disconnect {
+        id: String,
+    },
+    SubNote {
+        id: String,
+    },
+    UnsubNote {
         id: String,
     },
     #[serde(other)]
@@ -113,6 +122,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
     let mut ping = tokio::time::interval(Duration::from_secs(30));
     // クライアント指定の subscription id（uuid文字列）-> 購読チャンネル。
     let mut subscriptions: HashMap<String, ChannelKind> = HashMap::new();
+    let mut note_subscriptions = NoteSubscriptions::default();
 
     loop {
         tokio::select! {
@@ -122,7 +132,9 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
-                    if (ev.broadcast_all || ev.recipients.contains(&actor_id))
+                    if (ev.broadcast_all
+                        || ev.recipients.contains(&actor_id)
+                        || note_subscriptions.admits(&ev, Some(actor_id)))
                         && socket.send(Message::Text((*ev.payload).clone())).await.is_err()
                     {
                         break;
@@ -202,6 +214,8 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
                         ClientMessage::Disconnect { id } => {
                             subscriptions.remove(&id);
                         }
+                        ClientMessage::SubNote { id } => note_subscriptions.subscribe(&id),
+                        ClientMessage::UnsubNote { id } => note_subscriptions.unsubscribe(&id),
                         ClientMessage::Unknown => {}
                     }
                 }

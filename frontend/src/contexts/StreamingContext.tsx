@@ -281,8 +281,12 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     user?.id ?? null,
     // 再接続のたびに、現在購読中の全チャンネルを再度 connect し直す
     // （WebSocket再接続でサーバー側の購読状態は失われるため）。あわせて各購読の`onResync`を
-    // 呼び、切断中に取りこぼした可能性のある更新の補完を呼び出し元に促す。
+    // 呼び、切断中に取りこぼした可能性のある更新の補完を呼び出し元に促す。表示中ノートの
+    // `subNote`も同じ理由で送り直す（接続前に登録されたぶんもここで届く）。
     useCallback(() => {
+      reactionListeners.current.forEach((_, noteId) => {
+        sendRef.current({ type: "subNote", body: { id: noteId } });
+      });
       channelSubs.current.forEach(({ spec, onResync }, id) => {
         sendRef.current({
           type: "connect",
@@ -307,18 +311,25 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
     [send]
   );
 
+  // 表示中のノートをサーバーへ`subNote`で購読する。投稿者をフォローしていないノート
+  // （ローカル・グローバル・リスト・リポスト等）のリアクション更新は購読しないと届かない。
+  // 同じノートを複数のカードで出していても、購読はノートごとに1つにまとめる。
   const registerReaction = useCallback((noteId: string, cb: ReactionListener) => {
     let set = reactionListeners.current.get(noteId);
     if (!set) {
       set = new Set();
       reactionListeners.current.set(noteId, set);
+      sendRef.current({ type: "subNote", body: { id: noteId } });
     }
     set.add(cb);
     return () => {
       const s = reactionListeners.current.get(noteId);
       if (!s) return;
       s.delete(cb);
-      if (s.size === 0) reactionListeners.current.delete(noteId);
+      if (s.size === 0) {
+        reactionListeners.current.delete(noteId);
+        sendRef.current({ type: "unsubNote", body: { id: noteId } });
+      }
     };
   }, []);
 

@@ -243,6 +243,32 @@ async fn reaction_upsert_returns_previous_and_delete_returns_removed_row() {
     assert_eq!(removed.ap_activity_id.as_deref(), Some("act-2"));
 }
 
+/// `noteUpdated` の配信先の材料（可視性は enum 列なので文字列で読めること）が取れる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn note_update_targets_reads_visibility_and_author_locality() {
+    let pool = test_db_pool().await;
+    let repo = PgReactionRepository::new(pool.clone());
+    let author = create_fixture_local_actor(&pool, "nuauthor").await;
+    let post = create_fixture_post(
+        &pool,
+        author,
+        FixturePost {
+            body: "nu",
+            visibility: Some("followers_only"),
+            ..Default::default()
+        },
+    )
+    .await;
+
+    let targets = repo.note_update_targets(post).await.unwrap();
+    assert_eq!(targets.len(), 1);
+    assert_eq!(targets[0].post_id, post);
+    assert_eq!(targets[0].author_id, author);
+    assert_eq!(targets[0].visibility, "followers_only");
+    assert!(targets[0].author_is_local);
+}
+
 /// よく使う絵文字の順位付け（メモリ上、`handlers::notes::frequent_ranking`）に渡す、自分が付けている
 /// リアクションの内容と時刻が取れる。
 #[tokio::test]
