@@ -4008,7 +4008,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-api"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "async-trait",
  "axum",
@@ -4052,7 +4052,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-atp-repo"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "chrono",
  "dotenvy",
@@ -4070,7 +4070,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-common"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "aes-gcm",
  "ammonia",
@@ -4123,7 +4123,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-federation-inbox"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4142,7 +4142,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-federation-worker"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "dotenvy",
  "seiran-common",
@@ -4153,7 +4153,7 @@ dependencies = [
 
 [[package]]
 name = "seiran-server"
-version = "1.0.21"
+version = "1.0.22"
 dependencies = [
  "axum",
  "dotenvy",
