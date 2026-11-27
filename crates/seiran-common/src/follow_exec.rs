@@ -21,8 +21,8 @@ use crate::generate_snowflake_id;
 use crate::jetstream_control::touch_jetstream_wanted_dids;
 use crate::queue::worker::{priority, FollowExecConfig};
 use crate::repository::follow::PendingFollowUpsert;
-use crate::repository::FediActorProfile;
 use crate::repository::NotificationKind;
+use crate::repository::{FediActorProfile, FollowRepository};
 use crate::traits::{Job, JobQueue};
 
 #[derive(Debug, Clone)]
@@ -46,7 +46,6 @@ pub enum FollowError {
     NotFound(&'static str),
     SelfFollow,
     Blocked,
-    NoAtDid,
     /// Fediフォロー経路にローカルユーザーの target_uri を指定した場合のガード（#110対策）
     LocalViaFediGuard,
     BadGateway(String),
@@ -59,7 +58,6 @@ impl std::fmt::Display for FollowError {
             FollowError::NotFound(msg) => write!(f, "{}", msg),
             FollowError::SelfFollow => write!(f, "自分自身はフォローできません"),
             FollowError::Blocked => write!(f, "BLOCKED"),
-            FollowError::NoAtDid => write!(f, "ターゲットに ATP DID がありません"),
             FollowError::LocalViaFediGuard => {
                 write!(f, "ローカルユーザーはFediフォロー経路で指定できません")
             }
@@ -178,7 +176,8 @@ async fn establish_atp_follow(
         .await
         .map_err(|e| FollowError::Internal(format!("[{log_tag}] atp_rkey 記録失敗: {e}")))?;
     if !recorded {
-        // 確保からコミットまでの間にアンフォローされた。ATP 側に残ったレコードを取り消す。
+        // 確保からコミットまでの間にアンフォローされたか、DID 確定後の後追い記録が先に
+        // 記録した。こちらが作ったレコードを取り消す。
         if let Err(e) = config
             .atp_service
             .commit_delete_follow(follower_actor_id, &rkey, chrono::Utc::now())
@@ -277,15 +276,25 @@ async fn follow_local(
         });
     }
 
-    let target_did = target_actor.at_did.clone().ok_or(FollowError::NoAtDid)?;
-    let inserted = establish_atp_follow(
-        config,
-        local_actor_id,
-        target_actor.id,
-        &target_did,
-        "follow/local",
-    )
-    .await?;
+    let inserted = match local_follow_atp_subject(config, local_actor_id, &target_actor).await? {
+        Some(target_did) => {
+            establish_atp_follow(
+                config,
+                local_actor_id,
+                target_actor.id,
+                &target_did,
+                "follow/local",
+            )
+            .await?
+        }
+        None => config
+            .follows
+            .insert_accepted_with_rkey(local_actor_id, target_actor.id, None)
+            .await
+            .map_err(|e| {
+                FollowError::Internal(format!("[follow/local] follows INSERT 失敗: {e}"))
+            })?,
+    };
 
     if inserted {
         let notif_id = generate_snowflake_id(chrono::Utc::now());
@@ -316,6 +325,74 @@ async fn follow_local(
         target_uri: format!("https://{}/users/{}", config.local_domain, username),
         already_following: !inserted,
     })
+}
+
+/// ローカル同士のフォローを ATP に記録するときの相手の DID。どちらかが DID を持たない
+/// （シングルホストモード・DNS TXT 登録完了待ち）なら `None` で、フォローは ATP に記録せずに
+/// 成立させる。DID が確定したら [`record_missing_local_follows`] が後から記録する。
+async fn local_follow_atp_subject(
+    config: &FollowExecConfig,
+    follower_actor_id: i64,
+    target_actor: &crate::repository::Actor,
+) -> Result<Option<String>, FollowError> {
+    let Some(target_did) = target_actor.at_did.clone() else {
+        return Ok(None);
+    };
+    let follower_has_did = config
+        .actors
+        .find_by_id(follower_actor_id)
+        .await
+        .map_err(|e| FollowError::Internal(format!("[follow/local] 実行者取得失敗: {e}")))?
+        .is_some_and(|a| a.at_did.is_some());
+    Ok(follower_has_did.then_some(target_did))
+}
+
+/// ATP に記録されていないローカル同士のフォローを記録する（DID 確定時と起動時）。`actor_id` を
+/// 渡すとその人が関わるものだけ。通常のフォローや同じ処理と並行しても、rkey は空のときだけ
+/// 書く（`set_atp_rkey`）ので、書けなかった側が自分の作ったレコードを取り消して1件に収まる。
+pub async fn record_missing_local_follows(
+    pool: &PgPool,
+    follows: &dyn FollowRepository,
+    atp_service: &crate::atp::AtpCommitService,
+    actor_id: Option<i64>,
+) {
+    let rows =
+        match crate::repository::follow::local_follows_missing_atp_record(pool, actor_id).await {
+            Ok(rows) => rows,
+            Err(e) => {
+                tracing::error!("[follow/atp-backfill] 対象取得失敗: {e}");
+                return;
+            }
+        };
+    for (follower_id, target_id, target_did) in rows {
+        let rkey = match atp_service
+            .commit_follow(follower_id, &target_did, chrono::Utc::now())
+            .await
+        {
+            Ok(rkey) => rkey,
+            Err(e) => {
+                tracing::error!(
+                    "[follow/atp-backfill] {follower_id} → {target_id} の ATP コミット失敗: {e}"
+                );
+                continue;
+            }
+        };
+        let recorded = match follows.set_atp_rkey(follower_id, target_id, &rkey).await {
+            Ok(recorded) => recorded,
+            Err(e) => {
+                tracing::error!("[follow/atp-backfill] atp_rkey 記録失敗: {e}");
+                false
+            }
+        };
+        if !recorded {
+            if let Err(e) = atp_service
+                .commit_delete_follow(follower_id, &rkey, chrono::Utc::now())
+                .await
+            {
+                tracing::error!("[follow/atp-backfill] 取り残された ATP follow の削除失敗: {e}");
+            }
+        }
+    }
 }
 
 /// `actor_id_or_handle`（DIDまたはハンドル）をAppViewの`getProfile`で解決し、既存の

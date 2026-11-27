@@ -126,9 +126,6 @@ fn follow_error_response(e: FollowError) -> Response {
             ApiError::BadRequest("自分自身はフォローできません".to_owned()).into_response()
         }
         FollowError::Blocked => ApiError::Forbidden("BLOCKED").into_response(),
-        FollowError::NoAtDid => {
-            ApiError::BadRequest("ターゲットに ATP DID がありません".to_owned()).into_response()
-        }
         FollowError::LocalViaFediGuard => {
             ApiError::BadRequest("ローカルユーザーはFediフォロー経路で指定できません".to_owned())
                 .into_response()

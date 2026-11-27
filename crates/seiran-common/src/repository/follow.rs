@@ -123,7 +123,9 @@ pub trait FollowRepository: Send + Sync {
     ) -> Result<HashMap<i64, String>, sqlx::Error>;
 
     /// 先取りした accepted フォロー行（`insert_accepted_with_rkey(.., None)`）へ、ATP コミット後の
-    /// rkey を記録する。行が既に無い（先取りから記録までの間にアンフォローされた）場合は false。
+    /// rkey を記録する。rkey がまだ空のときだけ書き、書けなければ false（先取りから記録までの間に
+    /// アンフォローされたか、DID 確定後の後追い記録 [`local_follows_missing_atp_record`] が
+    /// 先に記録した。どちらの場合も呼び出し側は自分が作った ATP レコードを取り消す）。
     async fn set_atp_rkey(
         &self,
         follower_actor_id: i64,
@@ -488,7 +490,8 @@ impl FollowRepository for PgFollowRepository {
     ) -> Result<bool, sqlx::Error> {
         sqlx::query(
             "UPDATE follows SET atp_rkey = $3
-             WHERE follower_actor_id = $1 AND target_actor_id = $2",
+             WHERE follower_actor_id = $1 AND target_actor_id = $2
+               AND status = 'accepted' AND atp_rkey IS NULL",
         )
         .bind(follower_actor_id)
         .bind(target_actor_id)
@@ -746,4 +749,27 @@ pub async fn follower_ids_of(pool: &PgPool, target_actor_id: i64) -> Result<Vec<
         .bind(target_actor_id)
         .fetch_all(pool)
         .await
+}
+
+/// ATP の follow レコードがまだ無いローカル同士の accepted フォロー（フォロー側, 相手, 相手の DID）。
+/// どちらかが DID を持たない間（シングルホストモード・DNS TXT 登録完了待ち）に成立したフォローは
+/// ATP に記録されないので、両者が DID を持ったあとにこれで拾って記録する。`actor_id` を渡すと
+/// その人がフォロー側か相手側のものだけ、`None` なら全件。
+pub async fn local_follows_missing_atp_record(
+    pool: &PgPool,
+    actor_id: Option<i64>,
+) -> Result<Vec<(i64, i64, String)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT f.follower_actor_id, f.target_actor_id, t.at_did
+         FROM follows f
+         JOIN actors fa ON fa.id = f.follower_actor_id
+         JOIN actors t ON t.id = f.target_actor_id
+         WHERE f.status = 'accepted' AND f.atp_rkey IS NULL
+           AND fa.actor_type = 'local' AND fa.at_did IS NOT NULL
+           AND t.actor_type = 'local' AND t.at_did IS NOT NULL
+           AND ($1::bigint IS NULL OR f.follower_actor_id = $1 OR f.target_actor_id = $1)",
+    )
+    .bind(actor_id)
+    .fetch_all(pool)
+    .await
 }

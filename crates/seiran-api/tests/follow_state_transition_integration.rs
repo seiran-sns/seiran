@@ -215,3 +215,80 @@ async fn find_statuses_by_followers_among_returns_reverse_direction_statuses() {
 
     cleanup_test_actors(&pool, follower_id, target_id).await;
 }
+
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn set_atp_rkey_writes_only_once() {
+    let pool = test_db_pool().await;
+    let (follower_id, target_id) = create_test_actor_pair(&pool, "rkey_once").await;
+    let repo = PgFollowRepository::new(pool.clone());
+
+    assert!(repo
+        .insert_accepted_with_rkey(follower_id, target_id, None)
+        .await
+        .unwrap());
+    // 先に書いた側だけが記録でき、後から来た側は false（自分のレコードを取り消す合図）。
+    assert!(repo
+        .set_atp_rkey(follower_id, target_id, "first")
+        .await
+        .unwrap());
+    assert!(!repo
+        .set_atp_rkey(follower_id, target_id, "second")
+        .await
+        .unwrap());
+    assert_eq!(
+        repo.find_atp_rkey(follower_id, target_id)
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("first")
+    );
+
+    cleanup_test_actors(&pool, follower_id, target_id).await;
+}
+
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn local_follows_missing_atp_record_requires_both_dids() {
+    let pool = test_db_pool().await;
+    let (follower_id, target_id) = create_test_actor_pair(&pool, "missing_record").await;
+    let repo = PgFollowRepository::new(pool.clone());
+    sqlx::query("UPDATE actors SET actor_type = 'local' WHERE id = ANY($1)")
+        .bind([follower_id, target_id])
+        .execute(&pool)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE actors SET at_did = 'did:plc:test-follower-' || id WHERE id = $1")
+        .bind(follower_id)
+        .execute(&pool)
+        .await
+        .unwrap();
+    repo.insert_accepted_with_rkey(follower_id, target_id, None)
+        .await
+        .unwrap();
+
+    let find = || async {
+        seiran_common::repository::follow::local_follows_missing_atp_record(&pool, Some(target_id))
+            .await
+            .unwrap()
+    };
+    // 相手がまだ DID を持たない間は対象にしない。
+    assert!(find().await.is_empty());
+
+    let target_did = format!("did:plc:test-target-{target_id}");
+    sqlx::query("UPDATE actors SET at_did = $2 WHERE id = $1")
+        .bind(target_id)
+        .bind(&target_did)
+        .execute(&pool)
+        .await
+        .unwrap();
+    assert_eq!(find().await, vec![(follower_id, target_id, target_did)]);
+
+    // 記録済みになれば対象から外れる。
+    repo.set_atp_rkey(follower_id, target_id, "rkey")
+        .await
+        .unwrap();
+    assert!(find().await.is_empty());
+
+    cleanup_test_actors(&pool, follower_id, target_id).await;
+}

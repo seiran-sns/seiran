@@ -43,18 +43,19 @@ pub async fn approve_pending_follow(
     target: &Actor,
 ) -> Result<(), String> {
     if follower.actor_type == "local" {
-        let target_did = target
-            .at_did
-            .clone()
-            .ok_or_else(|| "ターゲットに ATP DID がありません".to_string())?;
-        let now = chrono::Utc::now();
-        let rkey = cfg
-            .atp_service
-            .commit_follow(follower.id, &target_did, now)
-            .await
-            .map_err(|e| format!("ATP コミット失敗: {}", e))?;
+        // どちらかが DID を持たない間は ATP に記録せずに承認する（DID 確定後に
+        // `follow_exec::record_missing_local_follows` が記録する）。
+        let rkey = match (&follower.at_did, &target.at_did) {
+            (Some(_), Some(target_did)) => Some(
+                cfg.atp_service
+                    .commit_follow(follower.id, target_did, chrono::Utc::now())
+                    .await
+                    .map_err(|e| format!("ATP コミット失敗: {}", e))?,
+            ),
+            _ => None,
+        };
         cfg.follows
-            .accept_and_set_rkey(follower.id, target.id, Some(&rkey))
+            .accept_and_set_rkey(follower.id, target.id, rkey.as_deref())
             .await
             .map_err(|e| format!("follows UPDATE 失敗: {}", e))?;
         touch_jetstream_wanted_dids(cfg.db).await;
