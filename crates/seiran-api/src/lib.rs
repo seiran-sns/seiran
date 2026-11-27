@@ -973,6 +973,14 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
         backfill_seiran_actor_declarations(&state).await;
+        // DID 確定時の記録が途中で止まった分を補う。
+        seiran_common::follow_exec::record_missing_local_follows(
+            &state.db,
+            state.follows.as_ref(),
+            &state.atp_service,
+            None,
+        )
+        .await;
         backfill_remote_instance_meta(&state).await;
     });
 }

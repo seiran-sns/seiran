@@ -278,6 +278,14 @@ impl DidProvisioner {
         tracing::info!("[did_provision] DID 確定: {} ({})", row.at_did, handle);
         self.publish_initial_atp_records(row.actor_id, &row.username, &row.at_did)
             .await;
+        // DID が無い間に成立したローカル同士のフォローを ATP に記録する。
+        crate::follow_exec::record_missing_local_follows(
+            &self.pool,
+            &crate::repository::PgFollowRepository::new(self.pool.clone()),
+            &self.atp_service,
+            Some(row.actor_id),
+        )
+        .await;
         Ok(())
     }
 

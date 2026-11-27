@@ -13,7 +13,7 @@
 use chrono::{DateTime, Duration, Utc};
 
 use seiran_common::crypto::keyed_hash;
-use seiran_common::rate_limit::CheckFollowRateLimitError;
+use seiran_common::rate_limit::{CheckFollowRateLimitError, FollowLimitUse};
 
 use crate::error::ApiError;
 use crate::middleware::ClientIp;
@@ -142,12 +142,14 @@ pub async fn check_post_rate_limit(state: &AppState, actor_id: i64) -> Result<()
 /// user/emoji-editorロールの24時間あたり新規フォロー数を制限する（既定100人、moderatorは既定300人）。
 /// フォロー成立状態（accepted/pending問わず）を`follows`テーブルの行数でカウントする。
 /// フォローインポートジョブ（`jobs::follow_import`）も同じチェックを共有する
-/// （`seiran_common::rate_limit::check_follow_rate_limit`、`AppState` 非依存版）。
+/// （`seiran_common::rate_limit::check_follow_rate_limit`、`AppState` 非依存版。
+/// インポート側は上限の1割を残して止まる）。
 pub async fn check_follow_rate_limit(state: &AppState, actor_id: i64) -> Result<(), ApiError> {
     seiran_common::rate_limit::check_follow_rate_limit(
         &state.db,
         state.site_settings.as_ref(),
         actor_id,
+        FollowLimitUse::Interactive,
     )
     .await
     .map_err(|e| match e {

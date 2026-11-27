@@ -90,6 +90,8 @@ pending のまま留まる経路は2つ。どちらも承認待ち通知（`Noti
 
 承認・拒否は `seiran_common::follow_approval::{approve_pending_follow, reject_pending_follow}`（単発API `POST /api/follow-requests/:follower_actor_id/{accept,reject}` と、承認制OFF時の一括承認 `Job::FollowRequestsBulkAccept` から呼ぶ）。承認時、フォロワーがローカルならここで ATP フォローをコミットし（`accept_and_set_rkey`）、Fedi なら保存済みアクティビティを `object` に `Accept` を送る（無ければ最小限の Follow を組み立てる）。拒否時は Fedi なら `Reject` を送り、行を削除する。
 
+ローカル同士のフォローは、両者が DID を持っていれば成立と同時に（承認制なら承認時に）フォロー側の ATP リポジトリへ `app.bsky.graph.follow` をコミットする。どちらかが DID を持たない間（シングルホストモード・DNS TXT 登録完了待ち）は ATP に記録せず（`atp_rkey` NULL）にフォローだけ成立させ、DID が確定した時点でその人が関わる分を `follow_exec::record_missing_local_follows` が記録する（起動時にも全件を補う）。DID を待たせてフォローを断ると、登録直後の人や DID を持たない運用では誰からもフォローされなくなるため。rkey は空のときだけ書き（`set_atp_rkey`）、通常のフォローと後追いの記録が重なったら、書けなかった側が自分のレコードを取り消す。
+
 AT Protocol には非公開アカウントの概念が無いため、Bluesky 側から直接 DID をフォローされるのは防げない。
 
 ### 公開エンドポイント

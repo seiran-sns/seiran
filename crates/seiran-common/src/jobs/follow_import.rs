@@ -5,7 +5,8 @@
 //! 自分自身を再度キューへ積む。対象が尽きるか `follow_import_requests.status` が
 //! `running` でなくなったら（完了/キャンセル）再enqueueせず終了する。
 //!
-//! レート制限（`check_follow_rate_limit`）に引っかかった場合は該当itemを`pending`の
+//! レート制限（`check_follow_rate_limit`、インポート用に上限の1割を残した値で判定）に
+//! 引っかかった場合は該当itemを`pending`の
 //! まま [`RATE_LIMIT_POLL_SECS`] 秒後の `enqueue_retry` で自分自身を再投入する。
 //! これは WorkerEngine の指数バックオフ（`attempt`）を経由しない独自の再試行であり、
 //! `Err` を返す通常のジョブ失敗（真のDBエラー等）とは意図的に区別している
@@ -38,7 +39,7 @@ use sqlx::PgPool;
 
 use crate::follow_exec::{execute_follow, FollowOutcome};
 use crate::queue::worker::{priority, JobContext};
-use crate::rate_limit::{check_follow_rate_limit, CheckFollowRateLimitError};
+use crate::rate_limit::{check_follow_rate_limit, CheckFollowRateLimitError, FollowLimitUse};
 use crate::repository::{
     FollowImportItemOutcome, FollowImportRepository, PgFollowImportRepository,
     PgSiteSettingsRepository,
@@ -148,9 +149,17 @@ async fn process_locked(
         return Ok(NextAction::Stop);
     };
 
-    // レート制限チェック（フォロー全体で合算カウント、通常のフォローと同じ制限をそのまま適用）。
+    // レート制限チェック（フォロー全体で合算カウント）。インポートは上限の1割を残して止まり、
+    // その分を手動のフォローに空けておく。
     let site_settings = PgSiteSettingsRepository::new(pool.clone());
-    match check_follow_rate_limit(pool, &site_settings, request.actor_id).await {
+    match check_follow_rate_limit(
+        pool,
+        &site_settings,
+        request.actor_id,
+        FollowLimitUse::Import,
+    )
+    .await
+    {
         Ok(()) => {}
         Err(CheckFollowRateLimitError::Exceeded { .. }) => {
             tracing::info!(
