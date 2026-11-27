@@ -3,6 +3,22 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use super::TimelinePost;
+use crate::edit_diff::{Edit, EditConflict};
+
+/// リストの名前・公開設定の編集（`crate::edit_diff`）。
+/// `None` の項目は変えない。
+pub struct ListEdit {
+    pub name: Option<Edit<String>>,
+    pub is_public: Option<Edit<bool>>,
+}
+
+/// 差分を当てた結果。`was_public` はロック中に読んだ変更前の公開設定（ATP レコードの
+/// 公開・取り下げを決めるのに使う）。
+pub struct ListUpdated {
+    pub name: String,
+    pub was_public: bool,
+    pub is_public: bool,
+}
 
 /// リストの1行。
 #[derive(Debug, Clone, sqlx::FromRow)]
@@ -50,13 +66,14 @@ pub trait ListRepository: Send + Sync {
     ) -> Result<(), sqlx::Error>;
 
     /// リストの名前・公開設定を更新する（所有者本人のみ）。更新できた行数を返す。
+    /// 行をロックして名前・公開設定の差分を当てる（所有者本人のみ、`crate::edit_diff`）。
+    /// 無ければ `Ok(Ok(None))`、当たらなければ何も変えず `Ok(Err(EditConflict))`。
     async fn update(
         &self,
         id: i64,
         owner_actor_id: i64,
-        name: &str,
-        is_public: bool,
-    ) -> Result<u64, sqlx::Error>;
+        edit: ListEdit,
+    ) -> Result<Result<Option<ListUpdated>, EditConflict>, sqlx::Error>;
 
     /// リストを削除する（所有者本人のみ）。削除できた行数を返す。
     async fn delete(&self, id: i64, owner_actor_id: i64) -> Result<u64, sqlx::Error>;
@@ -189,20 +206,44 @@ impl ListRepository for PgListRepository {
         &self,
         id: i64,
         owner_actor_id: i64,
-        name: &str,
-        is_public: bool,
-    ) -> Result<u64, sqlx::Error> {
-        let result = sqlx::query(
-            "UPDATE lists SET name = $3, is_public = $4, updated_at = NOW()
-             WHERE id = $1 AND owner_actor_id = $2",
+        edit: ListEdit,
+    ) -> Result<Result<Option<ListUpdated>, EditConflict>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let current: Option<(String, bool)> = sqlx::query_as(
+            "SELECT name, is_public FROM lists
+             WHERE id = $1 AND owner_actor_id = $2 FOR UPDATE",
         )
         .bind(id)
         .bind(owner_actor_id)
-        .bind(name)
-        .bind(is_public)
-        .execute(&self.pool)
+        .fetch_optional(&mut *tx)
         .await?;
-        Ok(result.rows_affected())
+        let Some((name, was_public)) = current else {
+            return Ok(Ok(None));
+        };
+        fn apply<T: PartialEq + Clone>(
+            edit: Option<Edit<T>>,
+            current: T,
+        ) -> Result<T, EditConflict> {
+            edit.map_or(Ok(current.clone()), |e| e.apply_value(&current))
+        }
+        let applied =
+            apply(edit.name, name).and_then(|name| Ok((name, apply(edit.is_public, was_public)?)));
+        let (name, is_public) = match applied {
+            Ok(v) => v,
+            Err(conflict) => return Ok(Err(conflict)),
+        };
+        sqlx::query("UPDATE lists SET name = $2, is_public = $3, updated_at = NOW() WHERE id = $1")
+            .bind(id)
+            .bind(&name)
+            .bind(is_public)
+            .execute(&mut *tx)
+            .await?;
+        tx.commit().await?;
+        Ok(Ok(Some(ListUpdated {
+            name,
+            was_public,
+            is_public,
+        })))
     }
 
     async fn delete(&self, id: i64, owner_actor_id: i64) -> Result<u64, sqlx::Error> {

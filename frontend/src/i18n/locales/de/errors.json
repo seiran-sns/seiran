@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "Die Autorisierungsanfrage wurde nicht gefunden oder ist abgelaufen. Bitte starte erneut in der App.",
   "OAUTH_CLIENT_UNAVAILABLE": "Die App-Informationen konnten nicht geladen werden. Bitte versuche es später erneut.",
   "OAUTH_INVALID_SCOPE": "Die von der App angeforderten Berechtigungen sind ungültig",
-  "OAUTH_SESSION_NOT_FOUND": "Autorisierung nicht gefunden"
+  "OAUTH_SESSION_NOT_FOUND": "Autorisierung nicht gefunden",
+  "EDIT_CONFLICT": "Diese Einstellungen wurden anscheinend in einem anderen Fenster geändert. Bitte laden Sie die Seite neu"
 }

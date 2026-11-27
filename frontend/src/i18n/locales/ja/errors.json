@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "認可要求が見つからないか、期限が切れています。アプリからやり直してください。",
   "OAUTH_CLIENT_UNAVAILABLE": "アプリの情報を取得できませんでした。しばらくしてからやり直してください。",
   "OAUTH_INVALID_SCOPE": "アプリが求めた権限が不正です",
-  "OAUTH_SESSION_NOT_FOUND": "連携が見つかりません"
+  "OAUTH_SESSION_NOT_FOUND": "連携が見つかりません",
+  "EDIT_CONFLICT": "他の画面から変更されているようです。リロードしてください"
 }

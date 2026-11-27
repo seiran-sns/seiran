@@ -1,3 +1,4 @@
+use crate::edit_diff::{Edit, EditConflict};
 use async_trait::async_trait;
 use chrono::{DateTime, NaiveDate, Utc};
 use sqlx::PgPool;
@@ -176,6 +177,10 @@ const ACTOR_COLS: &str = "id, user_id, actor_type::text AS actor_type, username,
     birth_date, birth_date_public, is_locked, claimed_ap_uri, claimed_at_did, withdrawn_at, suspended_at, \
     at_rotation_key_pem, did_moved_out_at";
 
+/// `ActorRepository::update_profile_with` に渡す、ロック中の現在値から書き込む値を決める関数。
+pub type ProfileEdit =
+    Box<dyn FnOnce(ActorProfileRow) -> Result<ActorProfileRow, EditConflict> + Send>;
+
 /// プロフィール編集画面（`PATCH /api/users/me/profile`）が読み書きする行の部分集合。
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ActorProfileRow {
@@ -272,6 +277,16 @@ pub trait ActorRepository: Send + Sync {
         update: &LocalProfileUpdate<'_>,
     ) -> Result<(), sqlx::Error>;
 
+    /// プロフィールの行をロックして読み、`edit` が返した値を書き込むまでを1トランザクションで
+    /// 行い、書き込んだ値を返す（プロフィール編集画面の保存。別の画面の保存と直列化して差分を
+    /// 当てるため、`crate::edit_diff`）。`id`・`username` は書き込まない。行が無ければ
+    /// `Ok(Ok(None))`、`edit` が衝突を返したら何も書かない。
+    async fn update_profile_with(
+        &self,
+        user_id: i64,
+        edit: ProfileEdit,
+    ) -> Result<Result<Option<ActorProfileRow>, EditConflict>, sqlx::Error>;
+
     /// `actor_id` から生年月日を直接更新する（ATP `putPreferences`
     /// の`#personalDetailsPref`同期用）。公開設定（`birth_date_public`）は変更しない。
     async fn update_birth_date_by_actor_id(
@@ -321,11 +336,13 @@ pub trait ActorRepository: Send + Sync {
         -> Result<String, sqlx::Error>;
 
     /// 設定画面「プライバシー」から、投稿の通知を許可する範囲を更新する。
+    /// 投稿の通知を許可する範囲の差分を当てる（`crate::edit_diff`）。現在値が編集前・
+    /// 編集後のどちらでもなければ変えずに `Err(EditConflict)`。
     async fn update_allow_activity_subscriptions(
         &self,
         actor_id: i64,
-        allow: &str,
-    ) -> Result<(), sqlx::Error>;
+        allow: &Edit<String>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error>;
 
     /// フォロー承認制（鍵アカウント）を設定する。
     async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error>;
@@ -559,25 +576,49 @@ impl ActorRepository for PgActorRepository {
         user_id: i64,
         update: &LocalProfileUpdate<'_>,
     ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE actors \
-             SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
-                 profile_fields = $5, emoji_map = $6, birth_date = $7, birth_date_public = $8, \
-                 updated_at = NOW() \
-             WHERE user_id = $9 AND actor_type = 'local'",
+        let mut conn = self.pool.acquire().await?;
+        write_local_profile(&mut conn, user_id, update).await
+    }
+
+    async fn update_profile_with(
+        &self,
+        user_id: i64,
+        edit: ProfileEdit,
+    ) -> Result<Result<Option<ActorProfileRow>, EditConflict>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let current = sqlx::query_as::<_, ActorProfileRow>(
+            "SELECT id, username, display_name, bio, avatar_media_id, banner_media_id, \
+                    profile_fields, emoji_map, birth_date, birth_date_public \
+             FROM actors WHERE user_id = $1 AND actor_type = 'local' LIMIT 1 FOR UPDATE",
         )
-        .bind(update.display_name)
-        .bind(update.bio)
-        .bind(update.avatar_media_id)
-        .bind(update.banner_media_id)
-        .bind(update.profile_fields)
-        .bind(update.emoji_map)
-        .bind(update.birth_date)
-        .bind(update.birth_date_public)
         .bind(user_id)
-        .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some(current) = current else {
+            return Ok(Ok(None));
+        };
+        let updated = match edit(current) {
+            Ok(updated) => updated,
+            Err(conflict) => return Ok(Err(conflict)),
+        };
+        let empty_emoji_map = serde_json::json!({});
+        write_local_profile(
+            &mut tx,
+            user_id,
+            &LocalProfileUpdate {
+                display_name: updated.display_name.as_deref(),
+                bio: updated.bio.as_deref(),
+                avatar_media_id: updated.avatar_media_id,
+                banner_media_id: updated.banner_media_id,
+                profile_fields: &updated.profile_fields,
+                emoji_map: updated.emoji_map.as_ref().unwrap_or(&empty_emoji_map),
+                birth_date: updated.birth_date,
+                birth_date_public: updated.birth_date_public,
+            },
+        )
+        .await?;
+        tx.commit().await?;
+        Ok(Ok(Some(updated)))
     }
 
     async fn update_birth_date_by_actor_id(
@@ -686,16 +727,26 @@ impl ActorRepository for PgActorRepository {
     async fn update_allow_activity_subscriptions(
         &self,
         actor_id: i64,
-        allow: &str,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query(
-            "UPDATE actors SET allow_activity_subscriptions = $1, updated_at = NOW() WHERE id = $2",
+        allow: &Edit<String>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error> {
+        if allow.is_unchanged() {
+            return Ok(Ok(()));
+        }
+        let result = sqlx::query(
+            "UPDATE actors SET allow_activity_subscriptions = $2, updated_at = NOW() WHERE id = $1
+               AND (NOT $3 OR allow_activity_subscriptions = $4 OR allow_activity_subscriptions = $2)",
         )
-        .bind(allow)
         .bind(actor_id)
+        .bind(allow.target())
+        .bind(allow.expected().is_some())
+        .bind(allow.expected())
         .execute(&self.pool)
-        .await
-        .map(|_| ())
+        .await?;
+        Ok(if result.rows_affected() > 0 {
+            Ok(())
+        } else {
+            Err(EditConflict)
+        })
     }
 
     async fn update_is_locked(&self, actor_id: i64, is_locked: bool) -> Result<(), sqlx::Error> {
@@ -1002,4 +1053,30 @@ pub async fn mark_bsky_followers_baseline_done(
         .execute(pool)
         .await
         .map(|_| ())
+}
+
+async fn write_local_profile(
+    conn: &mut sqlx::PgConnection,
+    user_id: i64,
+    update: &LocalProfileUpdate<'_>,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "UPDATE actors \
+         SET display_name = $1, bio = $2, avatar_media_id = $3, banner_media_id = $4, \
+             profile_fields = $5, emoji_map = $6, birth_date = $7, birth_date_public = $8, \
+             updated_at = NOW() \
+         WHERE user_id = $9 AND actor_type = 'local'",
+    )
+    .bind(update.display_name)
+    .bind(update.bio)
+    .bind(update.avatar_media_id)
+    .bind(update.banner_media_id)
+    .bind(update.profile_fields)
+    .bind(update.emoji_map)
+    .bind(update.birth_date)
+    .bind(update.birth_date_public)
+    .bind(user_id)
+    .execute(conn)
+    .await
+    .map(|_| ())
 }

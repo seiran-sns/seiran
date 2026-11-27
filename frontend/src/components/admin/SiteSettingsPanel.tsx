@@ -3,9 +3,29 @@ import { useTranslation } from "react-i18next";
 import type { TFunction } from "i18next";
 import { api, getErrorMessage } from "../../api/client";
 import type { SmtpTestResult, TurnstileTestResult } from "../../api/admin";
+import type { SiteSettings } from "../../api/types";
+import { diffEdits } from "../../lib/editDiff";
 import Turnstile from "../Turnstile";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
+
+/** この画面が編集する項目（書き込み専用の項目と `*_set` を除く）。 */
+const FORM_KEYS = [
+  "smtp_host", "smtp_port", "smtp_username", "smtp_from", "require_email_verification",
+  "site_name", "site_color", "site_icon_url", "site_icon_sha256", "site_icon_media_file_id",
+  "media_proxy_url", "site_description", "terms_of_service_text", "operator_name",
+  "operator_url", "contact_email", "login_bg_url", "login_bg_type", "login_bg_media_file_id",
+  "auth_bruteforce_window_minutes", "auth_bruteforce_max_variants",
+  "auth_ip_block_window_minutes", "auth_ip_block_threshold", "auth_ip_block_duration_hours",
+  "turnstile_site_key", "cloudflare_zone_id", "password_reset_max_active",
+  "account_creation_ip_window_minutes", "account_creation_ip_max", "oembed_allowed_domains",
+  "max_user_accounts", "registration_closed",
+] as const satisfies readonly (keyof SiteSettings)[];
+type FormValues = Record<(typeof FORM_KEYS)[number], string>;
+
+function formFromSettings(s: SiteSettings | null): FormValues {
+  return Object.fromEntries(FORM_KEYS.map((k) => [k, s?.[k] ?? ""])) as FormValues;
+}
 
 export default function SiteSettingsPanel() {
   const { t } = useTranslation();
@@ -79,46 +99,92 @@ export default function SiteSettingsPanel() {
   // URLカード埋め込みプレーヤー（oEmbed discovery）の許可ドメイン
   const [oembedAllowedDomains, setOembedAllowedDomains] = useState("");
 
+  /** 開いた（最後に保存した）時点のサーバーの値。保存はここからの差分で送る。 */
+  const baseline = useRef<FormValues>(formFromSettings(null));
+
+  /** 画面の値（書き込み専用の項目を除く）。キーはサイト設定の項目名。 */
+  function formValues(): FormValues {
+    return {
+      smtp_host: host,
+      smtp_port: port,
+      smtp_username: username,
+      smtp_from: from,
+      require_email_verification: requireVerify ? "true" : "false",
+      site_name: siteName,
+      site_color: siteColor,
+      site_icon_url: siteIconUrl,
+      site_icon_sha256: siteIconSha256,
+      site_icon_media_file_id: siteIconMediaFileId,
+      media_proxy_url: mediaProxyUrl,
+      site_description: siteDescription,
+      terms_of_service_text: termsOfServiceText,
+      operator_name: operatorName,
+      operator_url: operatorUrl,
+      contact_email: contactEmail,
+      login_bg_url: loginBgUrl,
+      login_bg_type: loginBgType,
+      login_bg_media_file_id: loginBgMediaFileId,
+      auth_bruteforce_window_minutes: bruteforceWindowMinutes,
+      auth_bruteforce_max_variants: bruteforceMaxVariants,
+      auth_ip_block_window_minutes: ipBlockWindowMinutes,
+      auth_ip_block_threshold: ipBlockThreshold,
+      auth_ip_block_duration_hours: ipBlockDurationHours,
+      turnstile_site_key: turnstileSiteKey,
+      cloudflare_zone_id: cloudflareZoneId,
+      password_reset_max_active: passwordResetMaxActive,
+      account_creation_ip_window_minutes: accountCreationIpWindowMinutes,
+      account_creation_ip_max: accountCreationIpMax,
+      oembed_allowed_domains: oembedAllowedDomains,
+      max_user_accounts: maxUserAccounts,
+      registration_closed: registrationClosed ? "true" : "false",
+    };
+  }
+
+  /** サーバーの値を画面に出し、差分の基準にする。 */
+  function applySettings(s: SiteSettings) {
+    const f = formFromSettings(s);
+    baseline.current = f;
+    setHost(f.smtp_host);
+    setPort(f.smtp_port);
+    setUsername(f.smtp_username);
+    setFrom(f.smtp_from);
+    setRequireVerify(f.require_email_verification === "true");
+    setSiteName(f.site_name);
+    setSiteColor(f.site_color);
+    setSiteIconUrl(f.site_icon_url);
+    setSiteIconSha256(f.site_icon_sha256);
+    setSiteIconMediaFileId(f.site_icon_media_file_id);
+    setMediaProxyUrl(f.media_proxy_url);
+    setSiteDescription(f.site_description);
+    setTermsOfServiceText(f.terms_of_service_text);
+    setOperatorName(f.operator_name);
+    setOperatorUrl(f.operator_url);
+    setContactEmail(f.contact_email);
+    setLoginBgUrl(f.login_bg_url);
+    setLoginBgType(f.login_bg_type);
+    setLoginBgMediaFileId(f.login_bg_media_file_id);
+    setBruteforceWindowMinutes(f.auth_bruteforce_window_minutes);
+    setBruteforceMaxVariants(f.auth_bruteforce_max_variants);
+    setIpBlockWindowMinutes(f.auth_ip_block_window_minutes);
+    setIpBlockThreshold(f.auth_ip_block_threshold);
+    setIpBlockDurationHours(f.auth_ip_block_duration_hours);
+    setTurnstileSiteKey(f.turnstile_site_key);
+    setCloudflareZoneId(f.cloudflare_zone_id);
+    setPasswordResetMaxActive(f.password_reset_max_active);
+    setAccountCreationIpWindowMinutes(f.account_creation_ip_window_minutes);
+    setAccountCreationIpMax(f.account_creation_ip_max);
+    setOembedAllowedDomains(f.oembed_allowed_domains);
+    setMaxUserAccounts(f.max_user_accounts);
+    setRegistrationClosed(f.registration_closed === "true");
+    setPasswordSet(s.smtp_password_set);
+    setTurnstileSecretKeySet(s.turnstile_secret_key_set);
+    setCloudflareApiTokenSet(s.cloudflare_api_token_set);
+  }
+
   useEffect(() => {
     api.admin
       .getSiteSettings()
-      .then((s) => {
-        setHost(s.smtp_host);
-        setPort(s.smtp_port);
-        setUsername(s.smtp_username);
-        setFrom(s.smtp_from);
-        setPasswordSet(s.smtp_password_set);
-        setRequireVerify(s.require_email_verification === "true");
-        setSiteName(s.site_name);
-        setSiteColor(s.site_color);
-        setSiteIconUrl(s.site_icon_url);
-        setSiteIconSha256(s.site_icon_sha256);
-        setSiteIconMediaFileId(s.site_icon_media_file_id);
-        setMediaProxyUrl(s.media_proxy_url);
-        setSiteDescription(s.site_description);
-        setTermsOfServiceText(s.terms_of_service_text);
-        setOperatorName(s.operator_name);
-        setOperatorUrl(s.operator_url);
-        setContactEmail(s.contact_email);
-        setLoginBgUrl(s.login_bg_url);
-        setLoginBgType(s.login_bg_type);
-        setLoginBgMediaFileId(s.login_bg_media_file_id);
-        setBruteforceWindowMinutes(s.auth_bruteforce_window_minutes);
-        setBruteforceMaxVariants(s.auth_bruteforce_max_variants);
-        setIpBlockWindowMinutes(s.auth_ip_block_window_minutes);
-        setIpBlockThreshold(s.auth_ip_block_threshold);
-        setIpBlockDurationHours(s.auth_ip_block_duration_hours);
-        setTurnstileSiteKey(s.turnstile_site_key);
-        setTurnstileSecretKeySet(s.turnstile_secret_key_set);
-        setCloudflareApiTokenSet(s.cloudflare_api_token_set);
-        setCloudflareZoneId(s.cloudflare_zone_id);
-        setPasswordResetMaxActive(s.password_reset_max_active);
-        setAccountCreationIpWindowMinutes(s.account_creation_ip_window_minutes);
-        setAccountCreationIpMax(s.account_creation_ip_max);
-        setOembedAllowedDomains(s.oembed_allowed_domains);
-        setMaxUserAccounts(s.max_user_accounts);
-        setRegistrationClosed(s.registration_closed === "true");
-      })
+      .then(applySettings)
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
     api.admin
@@ -236,48 +302,17 @@ export default function SiteSettingsPanel() {
     setError("");
     setSaved(false);
     try {
-      const patch: Record<string, string> = {
-        smtp_host: host,
-        smtp_port: port,
-        smtp_username: username,
-        smtp_from: from,
-        require_email_verification: requireVerify ? "true" : "false",
-        site_name: siteName,
-        site_color: siteColor,
-        site_icon_url: siteIconUrl,
-        site_icon_sha256: siteIconSha256,
-        site_icon_media_file_id: siteIconMediaFileId,
-        media_proxy_url: mediaProxyUrl,
-        site_description: siteDescription,
-        terms_of_service_text: termsOfServiceText,
-        operator_name: operatorName,
-        operator_url: operatorUrl,
-        contact_email: contactEmail,
-        login_bg_url: loginBgUrl,
-        login_bg_type: loginBgType,
-        login_bg_media_file_id: loginBgMediaFileId,
-        auth_bruteforce_window_minutes: bruteforceWindowMinutes,
-        auth_bruteforce_max_variants: bruteforceMaxVariants,
-        auth_ip_block_window_minutes: ipBlockWindowMinutes,
-        auth_ip_block_threshold: ipBlockThreshold,
-        auth_ip_block_duration_hours: ipBlockDurationHours,
-        turnstile_site_key: turnstileSiteKey,
-        cloudflare_zone_id: cloudflareZoneId,
-        password_reset_max_active: passwordResetMaxActive,
-        account_creation_ip_window_minutes: accountCreationIpWindowMinutes,
-        account_creation_ip_max: accountCreationIpMax,
-        oembed_allowed_domains: oembedAllowedDomains,
-        max_user_accounts: maxUserAccounts,
-        registration_closed: registrationClosed ? "true" : "false",
-      };
+      // 開いた（最後に保存した）時点から変えた項目だけを差分で送る
+      const patch: Parameters<typeof api.admin.updateSiteSettings>[0] = diffEdits(
+        baseline.current,
+        formValues(),
+      );
       // パスワード/シークレットは入力があったときだけ送る（未入力なら既存値を維持）。
       if (password) patch.smtp_password = password;
       if (turnstileSecretKey) patch.turnstile_secret_key = turnstileSecretKey;
       if (cloudflareApiToken) patch.cloudflare_api_token = cloudflareApiToken;
-      const s = await api.admin.updateSiteSettings(patch);
-      setPasswordSet(s.smtp_password_set);
-      setTurnstileSecretKeySet(s.turnstile_secret_key_set);
-      setCloudflareApiTokenSet(s.cloudflare_api_token_set);
+      // 別の画面の変更も取り込んだ保存後の値を表示し直す
+      applySettings(await api.admin.updateSiteSettings(patch));
       setPassword("");
       setTurnstileSecretKey("");
       setCloudflareApiToken("");

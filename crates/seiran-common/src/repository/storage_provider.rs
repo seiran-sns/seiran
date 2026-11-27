@@ -3,6 +3,7 @@ use chrono::{DateTime, Utc};
 use sqlx::PgPool;
 
 use crate::crypto::{decrypt, encrypt, CryptoError};
+use crate::edit_diff::{Edit, EditConflict};
 
 #[derive(Debug, Clone)]
 pub struct StorageProvider {
@@ -31,15 +32,18 @@ pub struct CreateStorageProvider {
     pub capacity_mb: Option<i64>,
 }
 
+/// 項目ごとの差分（`crate::edit_diff`）。`None` の項目は変えない。
 pub struct UpdateStorageProvider {
-    pub name: Option<String>,
-    pub endpoint: Option<String>,
-    pub bucket: Option<String>,
-    pub region: Option<String>,
-    pub access_key: Option<String>,
+    pub name: Option<Edit<String>>,
+    pub endpoint: Option<Edit<String>>,
+    pub bucket: Option<Edit<String>>,
+    pub region: Option<Edit<String>>,
+    pub access_key: Option<Edit<String>>,
+    /// 書き込み専用（画面は現在値を知らない）なので差分ではなく上書き。
     pub secret_key: Option<String>,
-    pub public_url: Option<String>,
-    pub capacity_mb: Option<Option<i64>>,
+    pub public_url: Option<Edit<String>>,
+    pub capacity_mb: Option<Edit<Option<i64>>>,
+    /// 一覧の「有効/無効」切り替え。押した時点の表示と逆の値にするだけで衝突しようがないので上書き。
     pub is_active: Option<bool>,
 }
 
@@ -51,6 +55,8 @@ pub enum StorageProviderError {
     Crypto(#[from] CryptoError),
     #[error("参照中のメディアファイルが存在するため削除できません")]
     HasMediaFiles,
+    #[error(transparent)]
+    EditConflict(#[from] EditConflict),
 }
 
 #[async_trait]
@@ -191,11 +197,34 @@ impl StorageProviderRepository for PgStorageProviderRepository {
         id: i64,
         req: UpdateStorageProvider,
     ) -> Result<Option<StorageProvider>, StorageProviderError> {
-        // 現在の値を取得
-        let current = match self.find_by_id(id).await? {
-            Some(p) => p,
-            None => return Ok(None),
+        // 行をロックして現在値に差分を当てる（別の画面の保存と直列化する）
+        let mut tx = self.pool.begin().await?;
+        let Some(row) = sqlx::query_as::<_, StorageProviderRow>(
+            "SELECT id, name, endpoint, bucket, region, access_key,
+                    secret_key AS secret_key_enc, public_url, capacity_mb, is_active, created_at
+             FROM storage_providers WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?
+        else {
+            return Ok(None);
         };
+        let current = self.decrypt_row(&row)?;
+
+        fn apply<T: PartialEq + Clone>(
+            edit: Option<Edit<T>>,
+            current: &T,
+        ) -> Result<T, EditConflict> {
+            edit.map_or_else(|| Ok(current.clone()), |e| e.apply_value(current))
+        }
+        let name = apply(req.name, &current.name)?;
+        let endpoint = apply(req.endpoint, &current.endpoint)?;
+        let bucket = apply(req.bucket, &current.bucket)?;
+        let region = apply(req.region, &current.region)?;
+        let access_key = apply(req.access_key, &current.access_key)?;
+        let public_url = apply(req.public_url, &current.public_url)?;
+        let capacity_mb = apply(req.capacity_mb, &current.capacity_mb)?;
 
         let new_secret_key = req.secret_key.as_deref().unwrap_or(&current.secret_key);
         let secret_key_enc = encrypt(new_secret_key.as_bytes(), &self.encryption_key)?;
@@ -216,18 +245,19 @@ impl StorageProviderRepository for PgStorageProviderRepository {
                        secret_key AS secret_key_enc, public_url, capacity_mb, is_active, created_at",
         )
         .bind(id)
-        .bind(req.name.as_deref().unwrap_or(&current.name))
-        .bind(req.endpoint.as_deref().unwrap_or(&current.endpoint))
-        .bind(req.bucket.as_deref().unwrap_or(&current.bucket))
-        .bind(req.region.as_deref().unwrap_or(&current.region))
-        .bind(req.access_key.as_deref().unwrap_or(&current.access_key))
+        .bind(&name)
+        .bind(&endpoint)
+        .bind(&bucket)
+        .bind(&region)
+        .bind(&access_key)
         .bind(&secret_key_enc)
-        .bind(req.public_url.as_deref().unwrap_or(&current.public_url))
-        .bind(req.capacity_mb.unwrap_or(current.capacity_mb))
+        .bind(&public_url)
+        .bind(capacity_mb)
         .bind(req.is_active.unwrap_or(current.is_active))
-        .fetch_optional(&self.pool)
+        .fetch_one(&mut *tx)
         .await?;
-        row.as_ref().map(|r| self.decrypt_row(r)).transpose()
+        tx.commit().await?;
+        self.decrypt_row(&row).map(Some)
     }
 
     async fn delete(&self, id: i64) -> Result<(), StorageProviderError> {

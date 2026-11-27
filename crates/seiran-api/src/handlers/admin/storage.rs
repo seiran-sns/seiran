@@ -9,6 +9,8 @@ use seiran_common::repository::{
     CreateStorageProvider, StorageProvider, StorageProviderError, UpdateStorageProvider,
 };
 
+use seiran_common::edit_diff::Edit;
+
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -68,16 +70,18 @@ fn default_region() -> String {
 }
 
 #[derive(Deserialize)]
+/// 項目ごとに差分 `{"from": 編集前, "to": 編集後}` か編集後の値だけ（上書き）
+/// （`seiran_common::edit_diff`）。
 pub struct UpdateStorageProviderRequest {
-    pub name: Option<String>,
-    pub endpoint: Option<String>,
-    pub bucket: Option<String>,
-    pub region: Option<String>,
-    pub access_key: Option<String>,
+    pub name: Option<Edit<String>>,
+    pub endpoint: Option<Edit<String>>,
+    pub bucket: Option<Edit<String>>,
+    pub region: Option<Edit<String>>,
+    pub access_key: Option<Edit<String>>,
     pub secret_key: Option<String>,
-    pub public_url: Option<String>,
-    /// `null` を明示すると capacity_mb が NULL になる
-    pub capacity_mb: Option<Option<i64>>,
+    pub public_url: Option<Edit<String>>,
+    /// 上限を外すときは `{"from": 現在値, "to": null}`。
+    pub capacity_mb: Option<Edit<Option<i64>>>,
     pub is_active: Option<bool>,
 }
 
@@ -86,6 +90,7 @@ pub struct UpdateStorageProviderRequest {
 fn sp_err(e: StorageProviderError) -> ApiError {
     match e {
         StorageProviderError::HasMediaFiles => ApiError::Conflict("HAS_MEDIA_FILES"),
+        StorageProviderError::EditConflict(e) => e.into(),
         StorageProviderError::Db(e) => ApiError::Internal(e.to_string()),
         StorageProviderError::Crypto(e) => ApiError::Internal(e.to_string()),
     }

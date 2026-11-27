@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "No se encontró la solicitud de autorización o ha caducado. Vuelve a empezar desde la aplicación.",
   "OAUTH_CLIENT_UNAVAILABLE": "No se pudo cargar la información de la aplicación. Inténtalo más tarde.",
   "OAUTH_INVALID_SCOPE": "Los permisos solicitados por la aplicación no son válidos",
-  "OAUTH_SESSION_NOT_FOUND": "No se encontró la autorización"
+  "OAUTH_SESSION_NOT_FOUND": "No se encontró la autorización",
+  "EDIT_CONFLICT": "Parece que esta configuración se cambió desde otra pantalla. Vuelva a cargar la página"
 }

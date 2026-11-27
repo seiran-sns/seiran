@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, AdminUser, getErrorMessage } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
@@ -6,6 +6,7 @@ import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 import { isPrivilegedRole } from "../../lib/roles";
+import { isEditConflict } from "../../lib/editDiff";
 import ConfirmModal from "../common/ConfirmModal";
 import DisplayName from "../common/DisplayName";
 
@@ -19,6 +20,9 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** 別の画面との衝突で保存できなかったユーザーの、サーバーに保存されているロール。画面には
+   * 選んだロールを残すので、選び直しの差分の基準はこちらを使う（一覧を取り直したら消す）。 */
+  const savedRoles = useRef(new Map<string, string>());
 
   const fetchPage = useCallback(
     (afterId: string) =>
@@ -56,6 +60,7 @@ export default function UserManagement() {
       .listUsers({ q: query || undefined, limit: PAGE_SIZE })
       .then((rows) => {
         if (cancelled) return;
+        savedRoles.current.clear();
         setUsers(rows);
         setHasMore(rows.length >= PAGE_SIZE);
       })
@@ -103,10 +108,17 @@ export default function UserManagement() {
     if (role === u.role) return;
     setBusyId(u.id);
     setError("");
+    const from = savedRoles.current.get(u.id) ?? u.role;
     try {
-      await api.admin.changeUserRole(u.id, role);
+      await api.admin.changeUserRole(u.id, { from, to: role });
+      savedRoles.current.delete(u.id);
       setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, role } : x)));
     } catch (e) {
+      if (isEditConflict(e)) {
+        // 別の画面でロールが変えられていた: 選んだロールは画面に残してエラーだけ出す
+        savedRoles.current.set(u.id, from);
+        setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, role } : x)));
+      }
       setError(getErrorMessage(e));
     } finally {
       setBusyId(null);

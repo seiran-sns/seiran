@@ -50,6 +50,7 @@ redis = { version = "0.27", features = ["tokio-comp", "connection-manager"] }
 tokio-util = "0.7"
 futures-util = "0.3"
 totp-rs = { version = "5.7.2", features = ["gen_secret", "otpauth"] }
+diffy = "0.5.2"
 
 [build-dependencies]
 toml = "1.1.2"

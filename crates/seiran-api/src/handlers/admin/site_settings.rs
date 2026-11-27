@@ -2,6 +2,8 @@ use axum::{extract::State, Json};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+use seiran_common::edit_diff::Edit;
+
 use crate::error::ApiError;
 use crate::AppState;
 
@@ -91,230 +93,479 @@ pub struct SiteSettingsResponse {
 
 fn build_response(settings: &HashMap<String, String>) -> SiteSettingsResponse {
     SiteSettingsResponse {
-        smtp_host: settings.get("smtp_host").cloned().unwrap_or_default(),
-        smtp_port: settings.get("smtp_port").cloned().unwrap_or_default(),
-        smtp_username: settings.get("smtp_username").cloned().unwrap_or_default(),
-        smtp_password_set: settings
-            .get("smtp_password")
-            .map(|v| !v.is_empty())
-            .unwrap_or(false),
-        smtp_from: settings.get("smtp_from").cloned().unwrap_or_default(),
-        require_email_verification: settings
-            .get("require_email_verification")
-            .cloned()
-            .unwrap_or_else(|| "false".to_string()),
-        site_name: settings.get("site_name").cloned().unwrap_or_default(),
-        site_color: settings.get("site_color").cloned().unwrap_or_default(),
-        site_icon_url: settings.get("site_icon_url").cloned().unwrap_or_default(),
-        site_icon_sha256: settings
-            .get("site_icon_sha256")
-            .cloned()
-            .unwrap_or_default(),
-        site_icon_media_file_id: settings
-            .get("site_icon_media_file_id")
-            .cloned()
-            .unwrap_or_default(),
-        media_proxy_url: settings.get("media_proxy_url").cloned().unwrap_or_default(),
-        site_description: settings
-            .get("site_description")
-            .cloned()
-            .unwrap_or_default(),
-        terms_of_service_text: settings
-            .get("terms_of_service_text")
-            .cloned()
-            .unwrap_or_default(),
-        operator_name: settings.get("operator_name").cloned().unwrap_or_default(),
-        operator_url: settings.get("operator_url").cloned().unwrap_or_default(),
-        contact_email: settings.get("contact_email").cloned().unwrap_or_default(),
-        login_bg_url: settings.get("login_bg_url").cloned().unwrap_or_default(),
-        login_bg_type: settings.get("login_bg_type").cloned().unwrap_or_default(),
-        login_bg_media_file_id: settings
-            .get("login_bg_media_file_id")
-            .cloned()
-            .unwrap_or_default(),
-        auth_bruteforce_window_minutes: settings
-            .get("auth_bruteforce_window_minutes")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        auth_bruteforce_max_variants: settings
-            .get("auth_bruteforce_max_variants")
-            .cloned()
-            .unwrap_or_else(|| "5".to_string()),
-        auth_ip_block_window_minutes: settings
-            .get("auth_ip_block_window_minutes")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        auth_ip_block_threshold: settings
-            .get("auth_ip_block_threshold")
-            .cloned()
-            .unwrap_or_else(|| "5".to_string()),
-        auth_ip_block_duration_hours: settings
-            .get("auth_ip_block_duration_hours")
-            .cloned()
-            .unwrap_or_else(|| "24".to_string()),
-        turnstile_site_key: settings
-            .get("turnstile_site_key")
-            .cloned()
-            .unwrap_or_default(),
-        turnstile_secret_key_set: settings
-            .get("turnstile_secret_key")
-            .map(|v| !v.is_empty())
-            .unwrap_or(false),
-        cloudflare_api_token_set: settings
-            .get("cloudflare_api_token")
-            .map(|v| !v.is_empty())
-            .unwrap_or(false),
-        cloudflare_zone_id: settings
-            .get("cloudflare_zone_id")
-            .cloned()
-            .unwrap_or_default(),
-        password_reset_max_active: settings
-            .get("password_reset_max_active")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        account_creation_ip_window_minutes: settings
-            .get("account_creation_ip_window_minutes")
-            .cloned()
-            .unwrap_or_else(|| "60".to_string()),
-        account_creation_ip_max: settings
-            .get("account_creation_ip_max")
-            .cloned()
-            .unwrap_or_else(|| "5".to_string()),
-        post_rate_limit_window_minutes: settings
-            .get("post_rate_limit_window_minutes")
-            .cloned()
-            .unwrap_or_else(|| "60".to_string()),
-        post_rate_limit_max_user: settings
-            .get("post_rate_limit_max_user")
-            .cloned()
-            .unwrap_or_else(|| "30".to_string()),
-        post_rate_limit_max_moderator: settings
-            .get("post_rate_limit_max_moderator")
-            .cloned()
-            .unwrap_or_else(|| "100".to_string()),
-        follow_rate_limit_window_hours: settings
-            .get("follow_rate_limit_window_hours")
-            .cloned()
-            .unwrap_or_else(|| "24".to_string()),
-        follow_rate_limit_max_user: settings
-            .get("follow_rate_limit_max_user")
-            .cloned()
-            .unwrap_or_else(|| "100".to_string()),
-        follow_rate_limit_max_moderator: settings
-            .get("follow_rate_limit_max_moderator")
-            .cloned()
-            .unwrap_or_else(|| "300".to_string()),
-        follow_rate_limit_max_quarantine: settings
-            .get("follow_rate_limit_max_quarantine")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        list_max_count_user: settings
-            .get("list_max_count_user")
-            .cloned()
-            .unwrap_or_else(|| "5".to_string()),
-        list_max_count_moderator: settings
-            .get("list_max_count_moderator")
-            .cloned()
-            .unwrap_or_else(|| "30".to_string()),
-        list_member_max_user: settings
-            .get("list_member_max_user")
-            .cloned()
-            .unwrap_or_else(|| "50".to_string()),
-        scheduled_post_max_user: settings
-            .get("scheduled_post_max_user")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        scheduled_post_max_moderator: settings
-            .get("scheduled_post_max_moderator")
-            .cloned()
-            .unwrap_or_else(|| "30".to_string()),
-        list_member_max_moderator: settings
-            .get("list_member_max_moderator")
-            .cloned()
-            .unwrap_or_else(|| "300".to_string()),
-        search_rate_limit_window_minutes: settings
-            .get("search_rate_limit_window_minutes")
-            .cloned()
-            .unwrap_or_else(|| "60".to_string()),
-        search_rate_limit_max_user: settings
-            .get("search_rate_limit_max_user")
-            .cloned()
-            .unwrap_or_else(|| "10".to_string()),
-        search_rate_limit_max_moderator: settings
-            .get("search_rate_limit_max_moderator")
-            .cloned()
-            .unwrap_or_else(|| "50".to_string()),
-        oembed_allowed_domains: settings
-            .get("oembed_allowed_domains")
-            .cloned()
-            .unwrap_or_default(),
-        max_user_accounts: settings
-            .get("max_user_accounts")
-            .cloned()
-            .unwrap_or_else(|| "100".to_string()),
-        registration_closed: settings
-            .get("registration_closed")
-            .cloned()
-            .unwrap_or_else(|| "false".to_string()),
+        smtp_host: value(settings, "smtp_host"),
+        smtp_port: value(settings, "smtp_port"),
+        smtp_username: value(settings, "smtp_username"),
+        smtp_password_set: !value(settings, "smtp_password").is_empty(),
+        smtp_from: value(settings, "smtp_from"),
+        require_email_verification: value(settings, "require_email_verification"),
+        site_name: value(settings, "site_name"),
+        site_color: value(settings, "site_color"),
+        site_icon_url: value(settings, "site_icon_url"),
+        site_icon_sha256: value(settings, "site_icon_sha256"),
+        site_icon_media_file_id: value(settings, "site_icon_media_file_id"),
+        media_proxy_url: value(settings, "media_proxy_url"),
+        site_description: value(settings, "site_description"),
+        terms_of_service_text: value(settings, "terms_of_service_text"),
+        operator_name: value(settings, "operator_name"),
+        operator_url: value(settings, "operator_url"),
+        contact_email: value(settings, "contact_email"),
+        login_bg_url: value(settings, "login_bg_url"),
+        login_bg_type: value(settings, "login_bg_type"),
+        login_bg_media_file_id: value(settings, "login_bg_media_file_id"),
+        auth_bruteforce_window_minutes: value(settings, "auth_bruteforce_window_minutes"),
+        auth_bruteforce_max_variants: value(settings, "auth_bruteforce_max_variants"),
+        auth_ip_block_window_minutes: value(settings, "auth_ip_block_window_minutes"),
+        auth_ip_block_threshold: value(settings, "auth_ip_block_threshold"),
+        auth_ip_block_duration_hours: value(settings, "auth_ip_block_duration_hours"),
+        turnstile_site_key: value(settings, "turnstile_site_key"),
+        turnstile_secret_key_set: !value(settings, "turnstile_secret_key").is_empty(),
+        cloudflare_api_token_set: !value(settings, "cloudflare_api_token").is_empty(),
+        cloudflare_zone_id: value(settings, "cloudflare_zone_id"),
+        password_reset_max_active: value(settings, "password_reset_max_active"),
+        account_creation_ip_window_minutes: value(settings, "account_creation_ip_window_minutes"),
+        account_creation_ip_max: value(settings, "account_creation_ip_max"),
+        post_rate_limit_window_minutes: value(settings, "post_rate_limit_window_minutes"),
+        post_rate_limit_max_user: value(settings, "post_rate_limit_max_user"),
+        post_rate_limit_max_moderator: value(settings, "post_rate_limit_max_moderator"),
+        follow_rate_limit_window_hours: value(settings, "follow_rate_limit_window_hours"),
+        follow_rate_limit_max_user: value(settings, "follow_rate_limit_max_user"),
+        follow_rate_limit_max_moderator: value(settings, "follow_rate_limit_max_moderator"),
+        follow_rate_limit_max_quarantine: value(settings, "follow_rate_limit_max_quarantine"),
+        list_max_count_user: value(settings, "list_max_count_user"),
+        list_max_count_moderator: value(settings, "list_max_count_moderator"),
+        list_member_max_user: value(settings, "list_member_max_user"),
+        list_member_max_moderator: value(settings, "list_member_max_moderator"),
+        scheduled_post_max_user: value(settings, "scheduled_post_max_user"),
+        scheduled_post_max_moderator: value(settings, "scheduled_post_max_moderator"),
+        search_rate_limit_window_minutes: value(settings, "search_rate_limit_window_minutes"),
+        search_rate_limit_max_user: value(settings, "search_rate_limit_max_user"),
+        search_rate_limit_max_moderator: value(settings, "search_rate_limit_max_moderator"),
+        oembed_allowed_domains: value(settings, "oembed_allowed_domains"),
+        max_user_accounts: value(settings, "max_user_accounts"),
+        registration_closed: value(settings, "registration_closed"),
     }
+}
+
+// ─── 設定項目の表 ──────────────────────────────────────────────────────────
+
+/// 差分の当て方（`seiran_common::edit_diff`）。
+#[derive(Clone, Copy, PartialEq)]
+enum Kind {
+    /// 現在値が編集前か編集後の値なら当てる。
+    Value,
+    /// 複数行のテキスト。3-way マージで当てる。
+    Text,
+    /// 書き込み専用（レスポンスでは設定の有無だけを返す）。画面は現在値を知らないので、
+    /// 入力があれば上書きする。
+    Secret,
+}
+
+/// 保存する値の検証。空文字列（未設定に戻す）は常に通す。
+#[derive(Clone, Copy)]
+enum Check {
+    None,
+    /// 正の整数。
+    PositiveInt,
+    /// 0 以上の整数（0 は無制限）。
+    NonNegativeInt,
+    /// http/https の URL。値はエラーコード。
+    HttpUrl(&'static str),
+    Email,
+}
+
+#[derive(Clone, Copy)]
+enum Normalize {
+    None,
+    Trim,
+    TrimTrailingSlash,
+}
+
+struct Field {
+    key: &'static str,
+    kind: Kind,
+    /// 行が無いときの値。レスポンスにも差分の突き合わせにもこの値を使う。
+    default: &'static str,
+    check: Check,
+    normalize: Normalize,
+}
+
+const FIELDS: &[Field] = &[
+    Field {
+        key: "smtp_host",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "smtp_port",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "smtp_username",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "smtp_password",
+        kind: Kind::Secret,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "smtp_from",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "require_email_verification",
+        kind: Kind::Value,
+        default: "false",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "site_name",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "site_color",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "site_icon_url",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "site_icon_sha256",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "site_icon_media_file_id",
+        kind: Kind::Value,
+        default: "",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "media_proxy_url",
+        kind: Kind::Value,
+        default: "",
+        check: Check::HttpUrl("INVALID_MEDIA_PROXY_URL"),
+        normalize: Normalize::TrimTrailingSlash,
+    },
+    Field {
+        key: "site_description",
+        kind: Kind::Text,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "terms_of_service_text",
+        kind: Kind::Text,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "operator_name",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::Trim,
+    },
+    Field {
+        key: "operator_url",
+        kind: Kind::Value,
+        default: "",
+        check: Check::HttpUrl("INVALID_OPERATOR_URL"),
+        normalize: Normalize::Trim,
+    },
+    Field {
+        key: "contact_email",
+        kind: Kind::Value,
+        default: "",
+        check: Check::Email,
+        normalize: Normalize::Trim,
+    },
+    Field {
+        key: "login_bg_url",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "login_bg_type",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "login_bg_media_file_id",
+        kind: Kind::Value,
+        default: "",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "auth_bruteforce_window_minutes",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "auth_bruteforce_max_variants",
+        kind: Kind::Value,
+        default: "5",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "auth_ip_block_window_minutes",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "auth_ip_block_threshold",
+        kind: Kind::Value,
+        default: "5",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "auth_ip_block_duration_hours",
+        kind: Kind::Value,
+        default: "24",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "turnstile_site_key",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "turnstile_secret_key",
+        kind: Kind::Secret,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "cloudflare_api_token",
+        kind: Kind::Secret,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::Trim,
+    },
+    Field {
+        key: "cloudflare_zone_id",
+        kind: Kind::Value,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::Trim,
+    },
+    Field {
+        key: "password_reset_max_active",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "account_creation_ip_window_minutes",
+        kind: Kind::Value,
+        default: "60",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "account_creation_ip_max",
+        kind: Kind::Value,
+        default: "5",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "post_rate_limit_window_minutes",
+        kind: Kind::Value,
+        default: "60",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "post_rate_limit_max_user",
+        kind: Kind::Value,
+        default: "30",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "post_rate_limit_max_moderator",
+        kind: Kind::Value,
+        default: "100",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "follow_rate_limit_window_hours",
+        kind: Kind::Value,
+        default: "24",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "follow_rate_limit_max_user",
+        kind: Kind::Value,
+        default: "100",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "follow_rate_limit_max_moderator",
+        kind: Kind::Value,
+        default: "300",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "follow_rate_limit_max_quarantine",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "list_max_count_user",
+        kind: Kind::Value,
+        default: "5",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "list_max_count_moderator",
+        kind: Kind::Value,
+        default: "30",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "list_member_max_user",
+        kind: Kind::Value,
+        default: "50",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "list_member_max_moderator",
+        kind: Kind::Value,
+        default: "300",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "scheduled_post_max_user",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "scheduled_post_max_moderator",
+        kind: Kind::Value,
+        default: "30",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "search_rate_limit_window_minutes",
+        kind: Kind::Value,
+        default: "60",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "search_rate_limit_max_user",
+        kind: Kind::Value,
+        default: "10",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "search_rate_limit_max_moderator",
+        kind: Kind::Value,
+        default: "50",
+        check: Check::PositiveInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "oembed_allowed_domains",
+        kind: Kind::Text,
+        default: "",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "max_user_accounts",
+        kind: Kind::Value,
+        default: "100",
+        check: Check::NonNegativeInt,
+        normalize: Normalize::None,
+    },
+    Field {
+        key: "registration_closed",
+        kind: Kind::Value,
+        default: "false",
+        check: Check::None,
+        normalize: Normalize::None,
+    },
+];
+
+/// 設定の現在値（行が無ければ既定値）。
+fn value(settings: &HashMap<String, String>, key: &str) -> String {
+    settings.get(key).cloned().unwrap_or_else(|| {
+        FIELDS
+            .iter()
+            .find(|f| f.key == key)
+            .map(|f| f.default.to_string())
+            .unwrap_or_default()
+    })
 }
 
 // ─── リクエスト DTO ────────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
-pub struct UpdateSiteSettingsRequest {
-    pub smtp_host: Option<String>,
-    pub smtp_port: Option<String>,
-    pub smtp_username: Option<String>,
-    pub smtp_password: Option<String>,
-    pub smtp_from: Option<String>,
-    pub require_email_verification: Option<String>,
-    pub site_name: Option<String>,
-    pub site_color: Option<String>,
-    pub site_icon_url: Option<String>,
-    pub site_icon_sha256: Option<String>,
-    pub site_icon_media_file_id: Option<String>,
-    pub media_proxy_url: Option<String>,
-    pub site_description: Option<String>,
-    pub terms_of_service_text: Option<String>,
-    pub operator_name: Option<String>,
-    pub operator_url: Option<String>,
-    pub contact_email: Option<String>,
-    pub login_bg_url: Option<String>,
-    pub login_bg_type: Option<String>,
-    pub login_bg_media_file_id: Option<String>,
-    pub auth_bruteforce_window_minutes: Option<String>,
-    pub auth_bruteforce_max_variants: Option<String>,
-    pub auth_ip_block_window_minutes: Option<String>,
-    pub auth_ip_block_threshold: Option<String>,
-    pub auth_ip_block_duration_hours: Option<String>,
-    pub turnstile_site_key: Option<String>,
-    pub turnstile_secret_key: Option<String>,
-    pub cloudflare_api_token: Option<String>,
-    pub cloudflare_zone_id: Option<String>,
-    pub password_reset_max_active: Option<String>,
-    pub account_creation_ip_window_minutes: Option<String>,
-    pub account_creation_ip_max: Option<String>,
-    pub post_rate_limit_window_minutes: Option<String>,
-    pub post_rate_limit_max_user: Option<String>,
-    pub post_rate_limit_max_moderator: Option<String>,
-    pub follow_rate_limit_window_hours: Option<String>,
-    pub follow_rate_limit_max_user: Option<String>,
-    pub follow_rate_limit_max_moderator: Option<String>,
-    pub follow_rate_limit_max_quarantine: Option<String>,
-    pub list_max_count_user: Option<String>,
-    pub list_max_count_moderator: Option<String>,
-    pub list_member_max_user: Option<String>,
-    pub list_member_max_moderator: Option<String>,
-    pub scheduled_post_max_user: Option<String>,
-    pub scheduled_post_max_moderator: Option<String>,
-    pub search_rate_limit_window_minutes: Option<String>,
-    pub search_rate_limit_max_user: Option<String>,
-    pub search_rate_limit_max_moderator: Option<String>,
-    pub oembed_allowed_domains: Option<String>,
-    pub max_user_accounts: Option<String>,
-    pub registration_closed: Option<String>,
-}
+/// キーは `FIELDS` の `key`。値は差分 `{"from": 編集前, "to": 編集後}` か、編集後の値だけ
+/// （上書き）。表に無いキーは無視する。
+pub type UpdateSiteSettingsRequest = HashMap<String, Edit<String>>;
 
 /// `mailto:` リンクにしても壊れない程度のメールアドレスか（`@` の前後が空でなく、空白や
 /// `mailto:` の区切りになる文字を含まない）。厳密な検証はしない。
@@ -347,311 +598,77 @@ pub async fn get_site_settings(
     Ok(Json(build_response(&settings)))
 }
 
+fn normalize(field: &Field, v: String) -> String {
+    match field.normalize {
+        Normalize::None => v,
+        Normalize::Trim => v.trim().to_string(),
+        Normalize::TrimTrailingSlash => v.trim_end_matches('/').to_string(),
+    }
+}
+
+fn check(field: &Field, v: &str) -> Result<(), ApiError> {
+    if v.trim().is_empty() {
+        return Ok(());
+    }
+    let invalid = || ApiError::BadRequest(format!("INVALID_{}", field.key.to_uppercase()));
+    match field.check {
+        Check::None => Ok(()),
+        Check::PositiveInt => match v.parse::<i64>() {
+            Ok(n) if n > 0 => Ok(()),
+            _ => Err(invalid()),
+        },
+        Check::NonNegativeInt => match v.parse::<i64>() {
+            Ok(n) if n >= 0 => Ok(()),
+            _ => Err(invalid()),
+        },
+        // `/about` 等でリンクにするので、`javascript:` 等を入れさせない
+        Check::HttpUrl(code) => match url::Url::parse(v) {
+            Ok(url) if matches!(url.scheme(), "http" | "https") && url.host_str().is_some() => {
+                Ok(())
+            }
+            _ => Err(ApiError::BadRequest(code.to_string())),
+        },
+        Check::Email if is_plausible_email(v) => Ok(()),
+        Check::Email => Err(ApiError::BadRequest("INVALID_CONTACT_EMAIL".to_string())),
+    }
+}
+
 /// PATCH /api/admin/site-settings
+///
+/// 項目ごとの差分をロック中の現在値に当てて保存する（`seiran_common::edit_diff`）。どれか
+/// 1つでも当たらなければ何も保存せず `EDIT_CONFLICT` を返す。
 pub async fn update_site_settings(
     State(state): State<AppState>,
     Json(req): Json<UpdateSiteSettingsRequest>,
 ) -> Result<Json<SiteSettingsResponse>, ApiError> {
-    if let Some(value) = req
-        .media_proxy_url
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        let url = url::Url::parse(value)
-            .map_err(|_| ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()))?;
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err(ApiError::BadRequest("INVALID_MEDIA_PROXY_URL".to_string()));
-        }
-    }
-
-    if let Some(value) = req
-        .operator_url
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        // `/about` でリンクにするので、`javascript:` 等を入れさせない
-        let url = url::Url::parse(value)
-            .map_err(|_| ApiError::BadRequest("INVALID_OPERATOR_URL".to_string()))?;
-        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-            return Err(ApiError::BadRequest("INVALID_OPERATOR_URL".to_string()));
-        }
-    }
-    if let Some(value) = req
-        .contact_email
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-    {
-        if !is_plausible_email(value) {
-            return Err(ApiError::BadRequest("INVALID_CONTACT_EMAIL".to_string()));
-        }
-    }
-
-    for (field, value) in [
-        (
-            "auth_bruteforce_window_minutes",
-            &req.auth_bruteforce_window_minutes,
-        ),
-        (
-            "auth_bruteforce_max_variants",
-            &req.auth_bruteforce_max_variants,
-        ),
-        (
-            "auth_ip_block_window_minutes",
-            &req.auth_ip_block_window_minutes,
-        ),
-        ("auth_ip_block_threshold", &req.auth_ip_block_threshold),
-        (
-            "auth_ip_block_duration_hours",
-            &req.auth_ip_block_duration_hours,
-        ),
-        ("password_reset_max_active", &req.password_reset_max_active),
-        (
-            "account_creation_ip_window_minutes",
-            &req.account_creation_ip_window_minutes,
-        ),
-        ("account_creation_ip_max", &req.account_creation_ip_max),
-        (
-            "post_rate_limit_window_minutes",
-            &req.post_rate_limit_window_minutes,
-        ),
-        ("post_rate_limit_max_user", &req.post_rate_limit_max_user),
-        (
-            "post_rate_limit_max_moderator",
-            &req.post_rate_limit_max_moderator,
-        ),
-        (
-            "follow_rate_limit_window_hours",
-            &req.follow_rate_limit_window_hours,
-        ),
-        (
-            "follow_rate_limit_max_user",
-            &req.follow_rate_limit_max_user,
-        ),
-        (
-            "follow_rate_limit_max_moderator",
-            &req.follow_rate_limit_max_moderator,
-        ),
-        (
-            "follow_rate_limit_max_quarantine",
-            &req.follow_rate_limit_max_quarantine,
-        ),
-        ("list_max_count_user", &req.list_max_count_user),
-        ("list_max_count_moderator", &req.list_max_count_moderator),
-        ("list_member_max_user", &req.list_member_max_user),
-        ("list_member_max_moderator", &req.list_member_max_moderator),
-        ("scheduled_post_max_user", &req.scheduled_post_max_user),
-        (
-            "scheduled_post_max_moderator",
-            &req.scheduled_post_max_moderator,
-        ),
-        (
-            "search_rate_limit_window_minutes",
-            &req.search_rate_limit_window_minutes,
-        ),
-        (
-            "search_rate_limit_max_user",
-            &req.search_rate_limit_max_user,
-        ),
-        (
-            "search_rate_limit_max_moderator",
-            &req.search_rate_limit_max_moderator,
-        ),
-        ("site_icon_media_file_id", &req.site_icon_media_file_id),
-        ("login_bg_media_file_id", &req.login_bg_media_file_id),
-    ] {
-        if let Some(v) = value.as_deref().filter(|v| !v.is_empty()) {
-            if !matches!(v.parse::<i64>(), Ok(n) if n > 0) {
-                return Err(ApiError::BadRequest(format!(
-                    "INVALID_{}",
-                    field.to_uppercase()
-                )));
-            }
-        }
-    }
-
-    // 0は無制限。他の数値設定と違い0を許す。
-    if let Some(v) = req.max_user_accounts.as_deref().filter(|v| !v.is_empty()) {
-        if !matches!(v.parse::<i64>(), Ok(n) if n >= 0) {
-            return Err(ApiError::BadRequest(
-                "INVALID_MAX_USER_ACCOUNTS".to_string(),
-            ));
-        }
-    }
-
-    let pairs: Vec<(&str, String)> = [
-        req.smtp_host
-            .as_deref()
-            .map(|v| ("smtp_host", v.to_string())),
-        req.smtp_port
-            .as_deref()
-            .map(|v| ("smtp_port", v.to_string())),
-        req.smtp_username
-            .as_deref()
-            .map(|v| ("smtp_username", v.to_string())),
-        req.smtp_password
-            .as_deref()
-            .map(|v| ("smtp_password", v.to_string())),
-        req.smtp_from
-            .as_deref()
-            .map(|v| ("smtp_from", v.to_string())),
-        req.require_email_verification
-            .as_deref()
-            .map(|v| ("require_email_verification", v.to_string())),
-        req.site_name
-            .as_deref()
-            .map(|v| ("site_name", v.to_string())),
-        req.site_color
-            .as_deref()
-            .map(|v| ("site_color", v.to_string())),
-        req.site_icon_url
-            .as_deref()
-            .map(|v| ("site_icon_url", v.to_string())),
-        req.site_icon_sha256
-            .as_deref()
-            .map(|v| ("site_icon_sha256", v.to_string())),
-        req.site_icon_media_file_id
-            .as_deref()
-            .map(|v| ("site_icon_media_file_id", v.to_string())),
-        req.media_proxy_url
-            .as_deref()
-            .map(|v| ("media_proxy_url", v.trim_end_matches('/').to_string())),
-        req.site_description
-            .as_deref()
-            .map(|v| ("site_description", v.to_string())),
-        req.terms_of_service_text
-            .as_deref()
-            .map(|v| ("terms_of_service_text", v.to_string())),
-        req.operator_name
-            .as_deref()
-            .map(|v| ("operator_name", v.trim().to_string())),
-        req.operator_url
-            .as_deref()
-            .map(|v| ("operator_url", v.trim().to_string())),
-        req.contact_email
-            .as_deref()
-            .map(|v| ("contact_email", v.trim().to_string())),
-        req.login_bg_url
-            .as_deref()
-            .map(|v| ("login_bg_url", v.to_string())),
-        req.login_bg_type
-            .as_deref()
-            .map(|v| ("login_bg_type", v.to_string())),
-        req.login_bg_media_file_id
-            .as_deref()
-            .map(|v| ("login_bg_media_file_id", v.to_string())),
-        req.auth_bruteforce_window_minutes
-            .as_deref()
-            .map(|v| ("auth_bruteforce_window_minutes", v.to_string())),
-        req.auth_bruteforce_max_variants
-            .as_deref()
-            .map(|v| ("auth_bruteforce_max_variants", v.to_string())),
-        req.auth_ip_block_window_minutes
-            .as_deref()
-            .map(|v| ("auth_ip_block_window_minutes", v.to_string())),
-        req.auth_ip_block_threshold
-            .as_deref()
-            .map(|v| ("auth_ip_block_threshold", v.to_string())),
-        req.auth_ip_block_duration_hours
-            .as_deref()
-            .map(|v| ("auth_ip_block_duration_hours", v.to_string())),
-        req.turnstile_site_key
-            .as_deref()
-            .map(|v| ("turnstile_site_key", v.to_string())),
-        req.turnstile_secret_key
-            .as_deref()
-            .map(|v| ("turnstile_secret_key", v.to_string())),
-        req.cloudflare_api_token
-            .as_deref()
-            .map(|v| ("cloudflare_api_token", v.trim().to_string())),
-        req.cloudflare_zone_id
-            .as_deref()
-            .map(|v| ("cloudflare_zone_id", v.trim().to_string())),
-        req.password_reset_max_active
-            .as_deref()
-            .map(|v| ("password_reset_max_active", v.to_string())),
-        req.account_creation_ip_window_minutes
-            .as_deref()
-            .map(|v| ("account_creation_ip_window_minutes", v.to_string())),
-        req.account_creation_ip_max
-            .as_deref()
-            .map(|v| ("account_creation_ip_max", v.to_string())),
-        req.post_rate_limit_window_minutes
-            .as_deref()
-            .map(|v| ("post_rate_limit_window_minutes", v.to_string())),
-        req.post_rate_limit_max_user
-            .as_deref()
-            .map(|v| ("post_rate_limit_max_user", v.to_string())),
-        req.post_rate_limit_max_moderator
-            .as_deref()
-            .map(|v| ("post_rate_limit_max_moderator", v.to_string())),
-        req.follow_rate_limit_window_hours
-            .as_deref()
-            .map(|v| ("follow_rate_limit_window_hours", v.to_string())),
-        req.follow_rate_limit_max_user
-            .as_deref()
-            .map(|v| ("follow_rate_limit_max_user", v.to_string())),
-        req.follow_rate_limit_max_moderator
-            .as_deref()
-            .map(|v| ("follow_rate_limit_max_moderator", v.to_string())),
-        req.follow_rate_limit_max_quarantine
-            .as_deref()
-            .map(|v| ("follow_rate_limit_max_quarantine", v.to_string())),
-        req.list_max_count_user
-            .as_deref()
-            .map(|v| ("list_max_count_user", v.to_string())),
-        req.list_max_count_moderator
-            .as_deref()
-            .map(|v| ("list_max_count_moderator", v.to_string())),
-        req.list_member_max_user
-            .as_deref()
-            .map(|v| ("list_member_max_user", v.to_string())),
-        req.list_member_max_moderator
-            .as_deref()
-            .map(|v| ("list_member_max_moderator", v.to_string())),
-        req.scheduled_post_max_user
-            .as_deref()
-            .map(|v| ("scheduled_post_max_user", v.to_string())),
-        req.scheduled_post_max_moderator
-            .as_deref()
-            .map(|v| ("scheduled_post_max_moderator", v.to_string())),
-        req.search_rate_limit_window_minutes
-            .as_deref()
-            .map(|v| ("search_rate_limit_window_minutes", v.to_string())),
-        req.search_rate_limit_max_user
-            .as_deref()
-            .map(|v| ("search_rate_limit_max_user", v.to_string())),
-        req.search_rate_limit_max_moderator
-            .as_deref()
-            .map(|v| ("search_rate_limit_max_moderator", v.to_string())),
-        req.oembed_allowed_domains
-            .as_deref()
-            .map(|v| ("oembed_allowed_domains", v.to_string())),
-        req.max_user_accounts
-            .as_deref()
-            .map(|v| ("max_user_accounts", v.to_string())),
-        req.registration_closed
-            .as_deref()
-            .map(|v| ("registration_closed", v.to_string())),
-    ]
-    .into_iter()
-    .flatten()
-    .collect();
-
-    for (key, value) in &pairs {
-        state
-            .site_settings
-            .set(key, value)
-            .await
-            .map_err(|e| ApiError::Internal(e.to_string()))?;
+    let mut edits: Vec<(&'static Field, Edit<String>)> = Vec::new();
+    for field in FIELDS {
+        let Some(edit) = req.get(field.key) else {
+            continue;
+        };
+        let edit = edit.clone().map_target(|v| normalize(field, v));
+        check(field, edit.target())?;
+        edits.push((field, edit));
     }
 
     let settings = state
         .site_settings
-        .get_all()
+        .update_with(Box::new(move |current| {
+            edits
+                .into_iter()
+                .map(|(field, edit)| {
+                    let now = value(current, field.key);
+                    let merged = match field.kind {
+                        Kind::Value => edit.apply_value(&now)?,
+                        Kind::Text => edit.apply_text(&now)?,
+                        Kind::Secret => edit.target().clone(),
+                    };
+                    Ok((field.key.to_string(), merged))
+                })
+                .collect()
+        }))
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))??;
 
     Ok(Json(build_response(&settings)))
 }

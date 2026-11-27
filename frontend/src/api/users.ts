@@ -1,4 +1,5 @@
 import { cursorParams, mailLanguage, request } from "./core";
+import type { Edit } from "../lib/editDiff";
 import type { ActorSuggestion, AlsoKnownAsItem, BlueskyPrivacy, FollowListItem, MutedOrBlockedActor, PasskeySummary, ProfileField, ProfileFeedItem, RawNote, RawProfileFeedItem, RemoteFollowSummaryResponse, UserProfile } from "./types";
 import { normalizeNote, normalizeProfileFeedItem } from "./types";
 import { credentialJson, registrationOptions } from "./webauthn";
@@ -82,16 +83,18 @@ export const users = {
       `/users/remote-follow-summary?${q.toString()}`,
     );
   },
+  /** 変えた項目だけを差分で送る（別の画面の変更と重なったら `EDIT_CONFLICT`）。 */
   updateProfile(patch: {
-    display_name?: string;
-    bio?: string;
-    avatar_media_id?: string | null;
-    banner_media_id?: string | null;
-    profile_fields?: ProfileField[];
+    display_name?: Edit<string>;
+    /** 別の画面の変更と行単位で 3-way マージされる。 */
+    bio?: Edit<string>;
+    avatar_media_id?: Edit<string | null>;
+    banner_media_id?: Edit<string | null>;
+    profile_fields?: Edit<ProfileField[]>;
     /** `YYYY-MM-DD`、`null`で削除。 */
-    birthday?: string | null;
+    birthday?: Edit<string | null>;
     /** `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`）。 */
-    birthday_public?: boolean;
+    birthday_public?: Edit<boolean>;
   }) {
     return request<{
       username: string;
@@ -226,8 +229,9 @@ export const account = {
   revokeAllSessions() {
     return request<void>("POST", "/account/revoke-all-sessions");
   },
-  /** 設定画面「表示」から表示言語を変更する（#55、`null` で自動に戻す）。 */
-  updateLanguage(language: string | null) {
+  /** 設定画面「表示」から表示言語を変更する（#55、`null` で自動に戻す）。選ぶ前の値からの
+   * 差分で、別の画面で変えられていたら `EDIT_CONFLICT`。 */
+  updateLanguage(language: Edit<string | null>) {
     return request<void>("POST", "/account/language", { language });
   },
   /** 設定画面「表示」からワンタッチリアクションバーの表示を切り替える。 */
@@ -258,8 +262,13 @@ export const account = {
   getBlueskyPrivacy() {
     return request<BlueskyPrivacy>("GET", "/account/bluesky-privacy");
   },
-  /** 設定画面「プライバシー」の Bluesky 向け設定を、指定した項目だけ更新する。 */
-  updateBlueskyPrivacy(update: Partial<BlueskyPrivacy>) {
+  /** 設定画面「プライバシー」の Bluesky 向け設定を、指定した項目だけ更新する。ラジオボタンの
+   * `allow_activity_subscriptions` は選ぶ前の値からの差分（別の画面で変えられていたら
+   * `EDIT_CONFLICT`）、スイッチの `hide_from_unauthenticated` は値だけ。 */
+  updateBlueskyPrivacy(update: {
+    hide_from_unauthenticated?: boolean;
+    allow_activity_subscriptions?: Edit<BlueskyPrivacy["allow_activity_subscriptions"]>;
+  }) {
     return request<BlueskyPrivacy>("POST", "/account/bluesky-privacy", update);
   },
   /** 設定画面「プライバシー」の承認制フォロー（鍵アカウント）の現在値を取得する。

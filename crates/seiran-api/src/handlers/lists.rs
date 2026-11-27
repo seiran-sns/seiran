@@ -14,9 +14,10 @@ use axum::{
 };
 use serde::{Deserialize, Serialize};
 
+use seiran_common::edit_diff::Edit;
 use seiran_common::generate_snowflake_id;
 use seiran_common::jetstream_control::touch_jetstream_wanted_dids;
-use seiran_common::repository::{Actor, ListMemberRow, ListRow};
+use seiran_common::repository::{Actor, ListEdit, ListMemberRow, ListRow, ListUpdated};
 
 use crate::error::ApiError;
 use crate::handlers::notes::build_note_responses;
@@ -33,9 +34,11 @@ pub struct CreateListRequest {
 }
 
 #[derive(Deserialize)]
+/// 差分 `{"from": 編集前, "to": 編集後}` か編集後の値だけ（上書き）
+/// （`seiran_common::edit_diff`）。
 pub struct UpdateListRequest {
-    pub name: String,
-    pub is_public: bool,
+    pub name: Option<Edit<String>>,
+    pub is_public: Option<Edit<bool>>,
 }
 
 #[derive(Deserialize)]
@@ -329,10 +332,14 @@ pub async fn update_list(
         Ok(v) => v,
         Err(e) => return e.into_response(),
     };
-    let name = req.name.trim();
-    if name.is_empty() || name.chars().count() > 100 {
-        return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string())
-            .into_response();
+    let name_edit = req
+        .name
+        .map(|edit| edit.map_target(|name| name.trim().to_string()));
+    if let Some(name) = name_edit.as_ref().map(Edit::target) {
+        if name.is_empty() || name.chars().count() > 100 {
+            return ApiError::BadRequest("リスト名は1〜100文字で入力してください".to_string())
+                .into_response();
+        }
     }
 
     let before = match state.lists.find_by_id(id).await {
@@ -342,15 +349,21 @@ pub async fn update_list(
         Err(e) => return ApiError::Internal(format!("リスト取得失敗: {}", e)).into_response(),
     };
 
-    match state
-        .lists
-        .update(id, user.actor_id, name, req.is_public)
-        .await
-    {
-        Ok(0) => ApiError::NotFound("LIST_NOT_FOUND").into_response(),
-        Ok(_) => {
+    let edit = ListEdit {
+        name: name_edit,
+        is_public: req.is_public,
+    };
+    match state.lists.update(id, user.actor_id, edit).await {
+        Ok(Ok(None)) => ApiError::NotFound("LIST_NOT_FOUND").into_response(),
+        Ok(Err(conflict)) => ApiError::from(conflict).into_response(),
+        Ok(Ok(Some(ListUpdated {
+            name,
+            was_public,
+            is_public,
+        }))) => {
+            let name = name.as_str();
             let now = chrono::Utc::now();
-            if !before.is_public && req.is_public {
+            if !was_public && is_public {
                 // 非公開→公開: リスト本体をコミットし、既存メンバー（Bsky可視のみ）も
                 // まとめてlistitemコミットする。
                 publish_list_to_atp(&state, id, user.actor_id, name, now).await;
@@ -371,7 +384,7 @@ pub async fn update_list(
                         }
                     }
                 }
-            } else if before.is_public && !req.is_public {
+            } else if was_public && !is_public {
                 // 公開→非公開: 全listitem + list本体のATPレコードを削除する。
                 unpublish_list_from_atp(&state, id, user.actor_id, before.at_rkey.as_deref(), now)
                     .await;

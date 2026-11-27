@@ -150,6 +150,13 @@ mod tests {
         async fn get_all(&self) -> Result<HashMap<String, String>, sqlx::Error> {
             unreachable!()
         }
+        async fn update_with(
+            &self,
+            _edit: crate::repository::site_settings::SiteSettingsEdit,
+        ) -> Result<Result<HashMap<String, String>, crate::edit_diff::EditConflict>, sqlx::Error>
+        {
+            unreachable!()
+        }
     }
 
     fn whitelist(value: &str) -> OembedWhitelist {

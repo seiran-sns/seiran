@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, StorageProvider, getErrorMessage } from "../../api/client";
+import { diffEdits } from "../../lib/editDiff";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 
@@ -77,15 +78,27 @@ export default function StorageProvidersPanel() {
     setSaving(true);
     setError("");
     try {
-      const patch: Record<string, unknown> = {
-        name: editForm.name,
-        endpoint: editForm.endpoint,
-        bucket: editForm.bucket,
-        region: editForm.region || "auto",
-        access_key: editForm.access_key,
-        public_url: editForm.public_url,
-        capacity_mb: editForm.capacity_mb ? Number(editForm.capacity_mb) : null,
-      };
+      // 編集を始めた時点（一覧を読み込んだ時点）の値から変えた項目だけを差分で送る
+      const patch: Parameters<typeof api.admin.updateStorageProvider>[1] = diffEdits(
+        {
+          name: p.name,
+          endpoint: p.endpoint,
+          bucket: p.bucket,
+          region: p.region,
+          access_key: p.access_key,
+          public_url: p.public_url,
+          capacity_mb: p.capacity_mb ?? null,
+        },
+        {
+          name: editForm.name,
+          endpoint: editForm.endpoint,
+          bucket: editForm.bucket,
+          region: editForm.region || "auto",
+          access_key: editForm.access_key,
+          public_url: editForm.public_url,
+          capacity_mb: editForm.capacity_mb ? Number(editForm.capacity_mb) : null,
+        },
+      );
       if (editForm.secret_key) {
         patch.secret_key = editForm.secret_key;
       }

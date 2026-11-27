@@ -1,3 +1,4 @@
+use crate::edit_diff::{Edit, EditConflict};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -126,6 +127,14 @@ pub struct EmojiRow {
     pub url: Option<String>,
 }
 
+/// 管理画面での絵文字の編集。`None` の項目は変えない。`category`・`license` の未設定
+/// （NULL）は空文字列と同じに扱う。`license` は複数行のテキストとして 3-way マージする。
+pub struct EmojiEdit {
+    pub category: Option<Edit<String>>,
+    pub tags: Option<Edit<Vec<String>>>,
+    pub license: Option<Edit<String>>,
+}
+
 #[async_trait]
 pub trait EmojiRepository: Send + Sync {
     /// 全カスタム絵文字を ID 昇順で返す。
@@ -143,14 +152,13 @@ pub trait EmojiRepository: Send + Sync {
         license: Option<&str>,
     ) -> Result<EmojiRow, sqlx::Error>;
 
-    /// category / tags / license を更新する（`None` は現在値を保持）。
+    /// 行をロックして category / tags / license の差分を当てる（`crate::edit_diff`）。
+    /// 無ければ `Ok(Ok(None))`、当たらなければ何も変えず `Ok(Err(EditConflict))`。
     async fn update(
         &self,
         id: i64,
-        category: Option<&str>,
-        tags: Option<&[String]>,
-        license: Option<&str>,
-    ) -> Result<Option<EmojiRow>, sqlx::Error>;
+        edit: EmojiEdit,
+    ) -> Result<Result<Option<EmojiRow>, EditConflict>, sqlx::Error>;
 
     /// 削除する。削除できたら true。
     async fn delete(&self, id: i64) -> Result<bool, sqlx::Error>;
@@ -233,15 +241,43 @@ impl EmojiRepository for PgEmojiRepository {
     async fn update(
         &self,
         id: i64,
-        category: Option<&str>,
-        tags: Option<&[String]>,
-        license: Option<&str>,
-    ) -> Result<Option<EmojiRow>, sqlx::Error> {
-        sqlx::query_as::<_, EmojiRow>(
+        edit: EmojiEdit,
+    ) -> Result<Result<Option<EmojiRow>, EditConflict>, sqlx::Error> {
+        let mut tx = self.pool.begin().await?;
+        let current: Option<(Option<String>, Vec<String>, Option<String>)> = sqlx::query_as(
+            "SELECT category, tags, license FROM custom_emojis WHERE id = $1 FOR UPDATE",
+        )
+        .bind(id)
+        .fetch_optional(&mut *tx)
+        .await?;
+        let Some((category, tags, license)) = current else {
+            return Ok(Ok(None));
+        };
+        let optional = |edit: Option<Edit<String>>, current: Option<String>| match edit {
+            None => Ok(current),
+            Some(e) => e.apply_value(&current.unwrap_or_default()).map(Some),
+        };
+        let applied = (|| {
+            Ok::<_, EditConflict>((
+                optional(edit.category, category)?,
+                match edit.tags {
+                    None => tags,
+                    Some(e) => e.apply_value(&tags)?,
+                },
+                // ライセンスは条文を貼る複数行のテキストなので 3-way マージ
+                match edit.license {
+                    None => license,
+                    Some(e) => Some(e.apply_text(&license.unwrap_or_default())?),
+                },
+            ))
+        })();
+        let (category, tags, license) = match applied {
+            Ok(v) => v,
+            Err(conflict) => return Ok(Err(conflict)),
+        };
+        let row = sqlx::query_as::<_, EmojiRow>(
             "UPDATE custom_emojis
-             SET category = COALESCE($2, category),
-                 tags     = COALESCE($3, tags),
-                 license  = COALESCE($4, license)
+             SET category = $2, tags = $3, license = $4
              WHERE id = $1
              RETURNING id, shortcode, media_file_id, category, tags, license, created_at, NULL::text AS url",
         )
@@ -249,8 +285,10 @@ impl EmojiRepository for PgEmojiRepository {
         .bind(category)
         .bind(tags)
         .bind(license)
-        .fetch_optional(&self.pool)
-        .await
+        .fetch_one(&mut *tx)
+        .await?;
+        tx.commit().await?;
+        Ok(Ok(Some(row)))
     }
 
     async fn delete(&self, id: i64) -> Result<bool, sqlx::Error> {

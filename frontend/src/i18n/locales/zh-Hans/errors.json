@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "找不到授权请求或已过期。请从应用重新开始。",
   "OAUTH_CLIENT_UNAVAILABLE": "无法获取应用信息。请稍后重试。",
   "OAUTH_INVALID_SCOPE": "应用请求的权限无效",
-  "OAUTH_SESSION_NOT_FOUND": "找不到该授权"
+  "OAUTH_SESSION_NOT_FOUND": "找不到该授权",
+  "EDIT_CONFLICT": "这些设置似乎已在其他界面中被更改。请重新加载页面"
 }

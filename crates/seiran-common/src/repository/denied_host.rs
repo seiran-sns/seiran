@@ -3,6 +3,8 @@
 
 use sqlx::PgPool;
 
+use crate::edit_diff::EditConflict;
+
 /// 登録済みの拒否ホストをホスト名順に返す。
 pub async fn list_hosts(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
     sqlx::query_scalar("SELECT host FROM denied_hosts ORDER BY host")
@@ -10,20 +12,37 @@ pub async fn list_hosts(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
         .await
 }
 
-/// 拒否ホストの一覧を丸ごと置き換える（管理画面の textarea 保存）。
-pub async fn replace_hosts(pool: &PgPool, hosts: &[String]) -> Result<(), sqlx::Error> {
+/// 拒否ホストの一覧を読んで `edit` が決めた一覧で丸ごと置き換えるまでを1トランザクションで
+/// 行い、置き換えた一覧を返す（管理画面の textarea 保存）。テーブルを `SHARE ROW EXCLUSIVE`
+/// でロックして書き込み同士を直列化する（判定の `SELECT` は待たせない）。`edit` はホスト名順の
+/// 現在の一覧を受け取り、衝突を返したら何も変えない。
+pub async fn replace_hosts_with(
+    pool: &PgPool,
+    edit: impl FnOnce(&[String]) -> Result<Vec<String>, EditConflict>,
+) -> Result<Result<Vec<String>, EditConflict>, sqlx::Error> {
     let mut tx = pool.begin().await?;
+    sqlx::query("LOCK TABLE denied_hosts IN SHARE ROW EXCLUSIVE MODE")
+        .execute(&mut *tx)
+        .await?;
+    let current: Vec<String> = sqlx::query_scalar("SELECT host FROM denied_hosts ORDER BY host")
+        .fetch_all(&mut *tx)
+        .await?;
+    let hosts = match edit(&current) {
+        Ok(hosts) => hosts,
+        Err(conflict) => return Ok(Err(conflict)),
+    };
     sqlx::query("DELETE FROM denied_hosts WHERE NOT (host = ANY($1))")
-        .bind(hosts)
+        .bind(&hosts)
         .execute(&mut *tx)
         .await?;
     sqlx::query(
         "INSERT INTO denied_hosts (host) SELECT unnest($1::text[]) ON CONFLICT (host) DO NOTHING",
     )
-    .bind(hosts)
+    .bind(&hosts)
     .execute(&mut *tx)
     .await?;
-    tx.commit().await
+    tx.commit().await?;
+    Ok(Ok(hosts))
 }
 
 /// アクターが拒否サーバーに属するか（`actor_is_denied`）。

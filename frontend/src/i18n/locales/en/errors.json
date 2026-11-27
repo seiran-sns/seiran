@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "The authorization request was not found or has expired. Please start again from the app.",
   "OAUTH_CLIENT_UNAVAILABLE": "Could not load the app's information. Please try again later.",
   "OAUTH_INVALID_SCOPE": "The permissions requested by the app are invalid",
-  "OAUTH_SESSION_NOT_FOUND": "Authorization not found"
+  "OAUTH_SESSION_NOT_FOUND": "Authorization not found",
+  "EDIT_CONFLICT": "These settings seem to have been changed from another screen. Please reload the page"
 }

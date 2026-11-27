@@ -95,3 +95,9 @@ impl IntoResponse for ApiError {
         response
     }
 }
+
+impl From<seiran_common::edit_diff::EditConflict> for ApiError {
+    fn from(_: seiran_common::edit_diff::EditConflict) -> Self {
+        ApiError::Conflict("EDIT_CONFLICT")
+    }
+}

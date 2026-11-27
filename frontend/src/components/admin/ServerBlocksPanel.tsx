@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
@@ -6,12 +6,21 @@ import styles from "../../pages/Admin.module.css";
 
 /**
  * 管理画面「サーバーブロック」タブ。拒否サーバーを1行1ドメインの textarea で読み書きする
- * （サブドメインも対象。扱いはバックエンドの`seiran_common::denied_host`）。保存後は
- * バックエンドが正規化した一覧で textarea を置き換える。
+ * （サブドメインも対象。扱いはバックエンドの`seiran_common::denied_host`）。保存は開いた時点
+ * からの差分で送り、別の画面での変更と行単位でマージされる。保存後はバックエンドが正規化した
+ * 一覧で textarea を置き換える。
  */
 export default function ServerBlocksPanel() {
   const { t } = useTranslation();
   const [text, setText] = useState("");
+  /** 開いた（最後に保存した）時点の一覧。保存はここからの差分で送り、サーバーが別の画面の
+   * 変更と 3-way マージする。 */
+  const baseline = useRef("");
+
+  function applyHosts(hosts: string[]) {
+    baseline.current = hosts.join("\n");
+    setText(baseline.current);
+  }
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -20,7 +29,7 @@ export default function ServerBlocksPanel() {
   useEffect(() => {
     api.admin
       .getDeniedHosts()
-      .then((res) => setText(res.hosts.join("\n")))
+      .then((res) => applyHosts(res.hosts))
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -31,8 +40,8 @@ export default function ServerBlocksPanel() {
     setError("");
     setSaved(false);
     try {
-      const res = await api.admin.updateDeniedHosts(text);
-      setText(res.hosts.join("\n"));
+      const res = await api.admin.updateDeniedHosts({ from: baseline.current, to: text });
+      applyHosts(res.hosts);
       setSaved(true);
     } catch (err) {
       setError(getErrorMessage(err));

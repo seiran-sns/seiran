@@ -610,19 +610,23 @@ pub async fn update_credentials(
             )),
             None => None,
         };
+        // Mastodon の update_credentials は編集前の値を送らないので、指定された項目の上書き
+        use seiran_common::edit_diff::Edit;
         let req = crate::handlers::users::UpdateProfileRequest {
-            display_name: params.display_name,
-            bio: params.note,
-            avatar_media_id,
-            banner_media_id,
+            display_name: params.display_name.map(Edit::Set),
+            bio: params.note.map(Edit::Set),
+            avatar_media_id: avatar_media_id.map(Edit::Set),
+            banner_media_id: banner_media_id.map(Edit::Set),
             profile_fields: params.fields_attributes.map(|v| {
-                field_attributes(v)
-                    .into_iter()
-                    .map(|f| crate::handlers::users::ProfileField {
-                        name: f.name,
-                        value: f.value,
-                    })
-                    .collect()
+                Edit::Set(
+                    field_attributes(v)
+                        .into_iter()
+                        .map(|f| crate::handlers::users::ProfileField {
+                            name: f.name,
+                            value: f.value,
+                        })
+                        .collect(),
+                )
             }),
             birthday: None,
             birthday_public: None,

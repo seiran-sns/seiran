@@ -76,7 +76,7 @@ pub mod user;
 
 pub use actor::{
     Actor, ActorProfileRow, ActorRepository, AtpSelfSettings, BskyActorProfile, FediActorProfile,
-    LocalProfileUpdate, NewLocalActor, PgActorRepository,
+    LocalProfileUpdate, NewLocalActor, PgActorRepository, ProfileEdit,
 };
 pub use also_known_as::{AlsoKnownAsRepository, AlsoKnownAsRow, PgAlsoKnownAsRepository};
 pub use app_token::{AppTokenRepository, AppTokenRow, PgAppTokenRepository};
@@ -101,7 +101,7 @@ pub use emoji::{
     is_valid_emoji_shortcode, parse_custom_emoji_shortcode, parse_reaction_shortcode_and_host,
     with_poll_option_names,
 };
-pub use emoji::{EmojiRepository, EmojiRow, PgEmojiRepository};
+pub use emoji::{EmojiEdit, EmojiRepository, EmojiRow, PgEmojiRepository};
 pub use follow::{FollowListRow, FollowRepository, PgFollowRepository};
 pub use follow_import::{
     FollowImportItemOutcome, FollowImportProgress, FollowImportRepository, FollowImportRequestRow,
@@ -112,7 +112,7 @@ pub use instance_domain::{ConfirmOutcome, InstanceDomainRepository, PgInstanceDo
 pub use link_resolution::{
     LinkResolutionRepository, LinkResolutionRow, PgLinkResolutionRepository,
 };
-pub use list::{ListMemberRow, ListRepository, ListRow, PgListRepository};
+pub use list::{ListEdit, ListMemberRow, ListRepository, ListRow, ListUpdated, PgListRepository};
 pub use media_file::{
     CreateMediaFile, MediaFile, MediaFileError, MediaFileRepository, PgMediaFileRepository,
     ResolvedMediaFile,
