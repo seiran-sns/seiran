@@ -134,7 +134,6 @@ export default function AppearanceSettingsPage() {
         <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.languageTitle")}
         </h3>
-        {error && <p className={styles.error}>{error}</p>}
         <select
           className={styles.select}
           value={selected}
@@ -149,6 +148,8 @@ export default function AppearanceSettingsPage() {
             ),
           )}
         </select>
+        {/* 選んだ時点で保存するので、失敗（別の画面との衝突等）は選んだ欄のすぐ下に出す */}
+        {error && <p className={styles.error}>{error}</p>}
         {saved && (
           <p className={styles.success}>
             {t("account:appearanceSettings.saved")}
