@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import type { ActivitySubscriptionAllowance, BlueskyPrivacy } from "../api/types";
 import AppShell from "../components/layout/AppShell";
+import SwitchField from "../components/common/SwitchField";
 import styles from "./PrivacySettings.module.css";
 
 /** 設定画面「プライバシー」。Bsky Discoverフィード等のアルゴリズムレコメンドからの
@@ -118,18 +119,13 @@ export default function PrivacySettingsPage() {
           {t("account:privacySettings.discoverabilityTitle")}
         </h3>
         {error && <p className={styles.error}>{error}</p>}
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={hideFromAlgorithmicRecommendations}
-            disabled={loading || saving}
-            onChange={(e) => onToggle(e.target.checked)}
-          />
+        <SwitchField
+          checked={hideFromAlgorithmicRecommendations}
+          disabled={loading || saving}
+          onChange={onToggle}
+        >
           {t("account:privacySettings.hideFromAlgorithmicRecommendationsLabel")}
-        </label>
-        <p className={styles.description}>
-          {t("account:privacySettings.hideFromAlgorithmicRecommendationsDescription")}
-        </p>
+        </SwitchField>
         {saved && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>
         )}
@@ -139,17 +135,13 @@ export default function PrivacySettingsPage() {
         <h3 className={styles.sectionTitle}>
           {t("account:privacySettings.loggedOutVisibilityTitle")}
         </h3>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={blueskyPrivacy.hide_from_unauthenticated}
-            disabled={loading || blueskySaving}
-            onChange={(e) =>
-              onUpdateBlueskyPrivacy({ hide_from_unauthenticated: e.target.checked })
-            }
-          />
+        <SwitchField
+          checked={blueskyPrivacy.hide_from_unauthenticated}
+          disabled={loading || blueskySaving}
+          onChange={(checked) => onUpdateBlueskyPrivacy({ hide_from_unauthenticated: checked })}
+        >
           {t("account:privacySettings.hideFromUnauthenticatedLabel")}
-        </label>
+        </SwitchField>
         <p className={styles.note}>{t("account:privacySettings.blueskyClientsOnlyNote")}</p>
         {blueskySaved === "hide_from_unauthenticated" && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>
@@ -163,7 +155,7 @@ export default function PrivacySettingsPage() {
         <p className={styles.lead}>{t("account:privacySettings.activitySubscriptionsLabel")}</p>
         <div className={styles.radioGroup} role="radiogroup">
           {ACTIVITY_SUBSCRIPTION_OPTIONS.map((option) => (
-            <label key={option} className={styles.checkboxLabel}>
+            <label key={option} className={styles.radioLabel}>
               <input
                 type="radio"
                 name="allow_activity_subscriptions"
@@ -184,15 +176,9 @@ export default function PrivacySettingsPage() {
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>{t("account:privacySettings.followApprovalTitle")}</h3>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            checked={isLocked}
-            disabled={loading || lockSaving}
-            onChange={(e) => onToggleLock(e.target.checked)}
-          />
+        <SwitchField checked={isLocked} disabled={loading || lockSaving} onChange={onToggleLock}>
           {t("account:privacySettings.lockedAccountLabel")}
-        </label>
+        </SwitchField>
         <p className={styles.description}>{t("account:privacySettings.lockedAccountDescription")}</p>
         {lockSaved && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>

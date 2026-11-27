@@ -46,7 +46,6 @@
     "title": "Datenschutzeinstellungen",
     "discoverabilityTitle": "Auffindbarkeit",
     "hideFromAlgorithmicRecommendationsLabel": "Meine Beiträge aus algorithmischen Empfehlungen (z. B. dem Bsky-Discover-Feed) ausblenden",
-    "hideFromAlgorithmicRecommendationsDescription": "Wenn aktiviert, erscheinen deine Beiträge auf Bluesky im Discover-Feed nur noch für Personen, die dir bereits folgen. Diese Einstellung wird auf Kontoebene in deinem PDS gespeichert, sodass auch andere AT-Protocol-Apps sie auslesen können – ob sie sie berücksichtigen, entscheidet jede App selbst. Es kann bis zu einer Stunde dauern, bis die Änderung vollständig wirksam ist.",
     "saved": "Einstellung gespeichert.",
     "loggedOutVisibilityTitle": "Sichtbarkeit für abgemeldete Nutzer",
     "hideFromUnauthenticatedLabel": "Apps und Websites bitten, mein Konto abgemeldeten Nutzern nicht anzuzeigen",
@@ -60,7 +59,7 @@
     },
     "followApprovalTitle": "Follow-Anfragen",
     "lockedAccountLabel": "Genehmigung für neue Follower erforderlich",
-    "lockedAccountDescription": "Wenn aktiviert, werden neue Follow-Anfragen nicht automatisch angenommen — Sie müssen sie unter „Follow-Anfragen“ in den Einstellungen genehmigen oder ablehnen. Dies wirkt sich nur darauf aus, wer Ihnen folgen kann; es ändert nicht, wer Ihre öffentlichen Beiträge sehen kann. Wenn Sie dies deaktivieren, werden alle ausstehenden Follow-Anfragen automatisch genehmigt."
+    "lockedAccountDescription": "Wenn Sie dies deaktivieren, werden alle ausstehenden Follow-Anfragen automatisch genehmigt."
   },
   "guidesSettings": {
     "title": "Aufdringliche Hinweise ausblenden",

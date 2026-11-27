@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
+import SwitchField from "../components/common/SwitchField";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme, type ThemePreference } from "../contexts/ThemeContext";
 import i18n, {
@@ -154,17 +155,13 @@ export default function AppearanceSettingsPage() {
           {t("account:appearanceSettings.emojiReactionsTitle")}
         </h3>
         {emojiReactionsError && <p className={styles.error}>{emojiReactionsError}</p>}
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            role="switch"
-            className={styles.switch}
-            checked={useEmojiReactions}
-            disabled={emojiReactionsSaving}
-            onChange={(e) => toggleEmojiReactions(e.target.checked)}
-          />
+        <SwitchField
+          checked={useEmojiReactions}
+          disabled={emojiReactionsSaving}
+          onChange={toggleEmojiReactions}
+        >
           {t("account:appearanceSettings.emojiReactionsLabel")}
-        </label>
+        </SwitchField>
       </div>
 
       {/* 絵文字リアクションを使わない間はワンタッチリアクションバーも出ないので、選べないことを示す。 */}
@@ -176,17 +173,13 @@ export default function AppearanceSettingsPage() {
           {t("account:appearanceSettings.quickReactionsTitle")}
         </h3>
         {quickReactionsError && <p className={styles.error}>{quickReactionsError}</p>}
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            role="switch"
-            className={styles.switch}
-            checked={showQuickReactions}
-            disabled={quickReactionsSaving || !useEmojiReactions}
-            onChange={(e) => toggleQuickReactions(e.target.checked)}
-          />
+        <SwitchField
+          checked={showQuickReactions}
+          disabled={quickReactionsSaving || !useEmojiReactions}
+          onChange={toggleQuickReactions}
+        >
           {t("account:appearanceSettings.quickReactionsLabel")}
-        </label>
+        </SwitchField>
       </div>
 
       <h2 className={styles.groupTitle}>
@@ -216,32 +209,18 @@ export default function AppearanceSettingsPage() {
         <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.lowContrastTitle")}
         </h3>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            role="switch"
-            className={styles.switch}
-            checked={lowContrast}
-            onChange={(e) => setLowContrast(e.target.checked)}
-          />
+        <SwitchField checked={lowContrast} onChange={setLowContrast}>
           {t("account:appearanceSettings.lowContrastLabel")}
-        </label>
+        </SwitchField>
       </div>
 
       <div className={styles.section}>
         <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.dataSaverTitle")}
         </h3>
-        <label className={styles.checkboxLabel}>
-          <input
-            type="checkbox"
-            role="switch"
-            className={styles.switch}
-            checked={dataSaver}
-            onChange={(e) => setDataSaver(e.target.checked)}
-          />
+        <SwitchField checked={dataSaver} onChange={setDataSaver}>
           {t("account:appearanceSettings.dataSaverLabel")}
-        </label>
+        </SwitchField>
       </div>
     </>
   );

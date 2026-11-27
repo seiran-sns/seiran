@@ -46,7 +46,6 @@
     "title": "プライバシー設定",
     "discoverabilityTitle": "おすすめ表示",
     "hideFromAlgorithmicRecommendationsLabel": "投稿をBskyのおすすめ機能（Discoverフィード等）に表示しない",
-    "hideFromAlgorithmicRecommendationsDescription": "有効にすると、Blueskyではフォロワー以外のユーザーにDiscoverフィードで投稿が表示されなくなります。この設定はアカウント単位でPDSに記録され、他のAT Protocolアプリからも参照できますが、実際に尊重するかどうかは各アプリの実装次第です。反映まで最大1時間ほどかかる場合があります。",
     "saved": "設定を保存しました。",
     "loggedOutVisibilityTitle": "ログアウト時の表示",
     "hideFromUnauthenticatedLabel": "ログアウトしたユーザーに自分のアカウントを表示しないようアプリやサイトに求める",
@@ -60,7 +59,7 @@
     },
     "followApprovalTitle": "承認制フォロー",
     "lockedAccountLabel": "新規フォローを承認制にする",
-    "lockedAccountDescription": "有効にすると、新しいフォローリクエストは自動では成立せず、設定の「承認待ちフォロー」から承認/拒否するまで保留されます。この設定はフォローの成立にのみ影響し、公開投稿を誰が見られるかは変わりません。OFFにすると、その時点で残っていた承認待ちフォローリクエストはすべて自動的に承認されます。"
+    "lockedAccountDescription": "OFFにすると、その時点で残っていた承認待ちフォローリクエストはすべて自動的に承認されます。"
   },
   "guidesSettings": {
     "title": "おせっかいなガイドの非表示",
