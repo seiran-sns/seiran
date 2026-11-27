@@ -19,8 +19,9 @@
 //!   通知 ID を持たず、通知の INSERT より先に送られることもあるため、少し待ってから読む。
 //!   取りこぼしは定期確認で拾う）。
 //! - `subNote`（`s`・`sr`）で購読したノートには、リアクションの増減を `noteUpdated` の
-//!   `reacted`/`unreacted` で送る。元は自分宛ての `noteUpdated`（配信先は投稿者とそのフォロワー、
-//!   DM は当事者）なので、それ以外の人のノートの変化は届かない。
+//!   `reacted`/`unreacted` で送る。元は seiran の `noteUpdated` で、公開・ホームの投稿なら購読者
+//!   全員、フォロワー限定・DM なら見られる人（投稿者とフォロワー、DM は当事者）にだけ届く
+//!   （`streaming::NoteSubscribers`）。
 //!
 //! 未対応のチャンネル名は本家と同じく黙って無視する（エラーを返すとクライアントが接続を
 //! 失敗扱いにすることがある）。
@@ -37,7 +38,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use seiran_common::repository::NotificationFilter;
-use seiran_common::streaming::{ChannelKind, NoteUpdatedBody, NOTE_UPDATED_EVENT};
+use seiran_common::streaming::{
+    ChannelKind, NoteSubscriptions, NoteUpdatedBody, NOTE_UPDATED_EVENT,
+};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -134,8 +137,8 @@ struct Connection {
     timelines: HashMap<String, TimelineSub>,
     /// `main` チャンネルの接続 ID。
     main_ids: Vec<String>,
-    /// `subNote` で購読中のノート ID → 購読数（本家と同じく `unsubNote` と対で数える）。
-    sub_notes: HashMap<String, u32>,
+    /// `subNote` で購読中のノート。
+    sub_notes: NoteSubscriptions,
     /// 送信済みの最新通知 ID（`main` 接続時点の最新から数える）。
     last_notification_id: Option<i64>,
 }
@@ -215,19 +218,6 @@ impl Connection {
         self.main_ids.retain(|m| m != id);
     }
 
-    fn sub_note(&mut self, id: String) {
-        *self.sub_notes.entry(id).or_insert(0) += 1;
-    }
-
-    fn unsub_note(&mut self, id: &str) {
-        if let Some(count) = self.sub_notes.get_mut(id) {
-            *count -= 1;
-            if *count == 0 {
-                self.sub_notes.remove(id);
-            }
-        }
-    }
-
     async fn apply_client_message(&mut self, text: &str) -> Vec<Message> {
         let Ok(msg) = serde_json::from_str::<ClientMessage>(text) else {
             return Vec::new();
@@ -247,11 +237,11 @@ impl Connection {
                 Vec::new()
             }
             ClientMessage::SubNote { id } => {
-                self.sub_note(id);
+                self.sub_notes.subscribe(&id);
                 Vec::new()
             }
             ClientMessage::UnsubNote { id } => {
-                self.unsub_note(&id);
+                self.sub_notes.unsubscribe(&id);
                 Vec::new()
             }
             ClientMessage::Unknown => Vec::new(),
@@ -349,7 +339,7 @@ impl Connection {
         frames
     }
 
-    /// 自分宛ての `noteUpdated` を、購読中のノートなら本家の `reacted`/`unreacted` にする。
+    /// この接続に届いた `noteUpdated` を、購読中のノートなら本家の `reacted`/`unreacted` にする。
     fn reaction_frames(&self, payload: &str) -> Vec<Message> {
         #[derive(Deserialize)]
         struct Envelope {
@@ -365,7 +355,11 @@ impl Connection {
             return Vec::new();
         };
         if envelope.kind != NOTE_UPDATED_EVENT
-            || !self.sub_notes.contains_key(&envelope.body.post_id)
+            || !envelope
+                .body
+                .post_id
+                .parse::<i64>()
+                .is_ok_and(|id| self.sub_notes.contains(id))
         {
             return Vec::new();
         }
@@ -433,7 +427,7 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
         viewer,
         timelines: HashMap::new(),
         main_ids: Vec::new(),
-        sub_notes: HashMap::new(),
+        sub_notes: NoteSubscriptions::default(),
         last_notification_id: None,
     };
 
@@ -450,11 +444,12 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
-                    if viewer.is_some_and(|v| ev.recipients.contains(&v)) {
-                        if !settle_armed && !conn.main_ids.is_empty() {
-                            settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
-                            settle_armed = true;
-                        }
+                    let addressed = viewer.is_some_and(|v| ev.recipients.contains(&v));
+                    if addressed && !settle_armed && !conn.main_ids.is_empty() {
+                        settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
+                        settle_armed = true;
+                    }
+                    if addressed || conn.sub_notes.admits(&ev, viewer) {
                         let frames = conn.reaction_frames(&ev.payload);
                         if !send_all(&mut socket, frames).await {
                             break;

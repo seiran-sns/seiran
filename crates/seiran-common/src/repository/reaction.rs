@@ -21,6 +21,15 @@ pub struct ReactionFeedRow {
 }
 
 /// 自分が付けているリアクション1件の内容と時刻（`ReactionRepository::list_uses_by_actor`）。
+/// `noteUpdated` を送る1投稿分の材料（`ReactionRepository::note_update_targets`）。
+#[derive(Debug, Clone, sqlx::FromRow)]
+pub struct NoteUpdateTarget {
+    pub post_id: i64,
+    pub author_id: i64,
+    pub visibility: String,
+    pub author_is_local: bool,
+}
+
 #[derive(Debug, Clone, sqlx::FromRow)]
 pub struct ReactionUse {
     pub content: String,
@@ -157,10 +166,11 @@ pub trait ReactionRepository: Send + Sync {
     /// 「過去の使用履歴」ではなく「現在も付いている自分のリアクション」になる。
     async fn list_uses_by_actor(&self, actor_id: i64) -> Result<Vec<ReactionUse>, sqlx::Error>;
 
-    /// 指定ポストとブリッジ関係にある他の投稿 `(post_id, 投稿者の actor_id)`（自分自身は含まない）。
-    /// リアクションの件数はグループで合算して見せるので、`noteUpdated` をそれらの投稿の表示にも
-    /// 届けるのに使う。
-    async fn bridge_siblings(&self, post_id: i64) -> Result<Vec<(i64, i64)>, sqlx::Error>;
+    /// 指定ポストと、ブリッジ関係にある投稿（指定ポスト自身を含む）の `noteUpdated` の配信先を
+    /// 決める材料。リアクションの件数はグループで合算して見せるので、`noteUpdated` をそれらの
+    /// 投稿の表示にも届けるのに使う。投稿が見つからなければ空。
+    async fn note_update_targets(&self, post_id: i64)
+        -> Result<Vec<NoteUpdateTarget>, sqlx::Error>;
 
     /// 指定 (post_id, content) にリアクションを付けたアクターを新しい順に返す
     /// （リアクションチップのホバーポップオーバー「誰が付けたか」一覧用）。件数
@@ -354,12 +364,16 @@ impl ReactionRepository for PgReactionRepository {
         .await
     }
 
-    async fn bridge_siblings(&self, post_id: i64) -> Result<Vec<(i64, i64)>, sqlx::Error> {
+    async fn note_update_targets(
+        &self,
+        post_id: i64,
+    ) -> Result<Vec<NoteUpdateTarget>, sqlx::Error> {
         sqlx::query_as(
-            "SELECT p.id, p.actor_id
+            "SELECT p.id AS post_id, p.actor_id AS author_id, p.visibility::text AS visibility,
+                    a.actor_type = 'local' AS author_is_local
              FROM unnest(bridge_group_post_ids($1)) AS g(member_id)
              JOIN posts p ON p.id = g.member_id
-             WHERE p.id <> $1",
+             JOIN actors a ON a.id = p.actor_id",
         )
         .bind(post_id)
         .fetch_all(&self.pool)

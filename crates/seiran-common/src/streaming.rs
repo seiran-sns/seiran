@@ -2,12 +2,14 @@
 //!
 //! ローカルで発生したイベント（新規ポスト・リアクション・フォロー等）を、
 //! 受け取るべきローカルアクターの WebSocket 接続へブロードキャストする。
-//! フィルタは各接続側で `recipients` を見て行う。
+//! フィルタは各接続側で `recipients` を見て行う。リアクションの増減（`noteUpdated`）と
+//! アンケートの票数（`pollUpdated`）は、それに加えてそのノートを `subNote` で購読している
+//! 接続にも届ける（`NoteSubscribers`）。
 //!
 //! 1プロセスにハブは1つで、そのプロセスの全ロールが共有する。Redis があればハブ同士を
 //! Redis でつなぎ、どのプロセスで起きたイベントもすべての接続へ届ける（`event_bus`）。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +17,7 @@ use tokio::sync::broadcast;
 
 use crate::event_bus::EventBus;
 
-use crate::repository::{DmRepository, FollowRepository, ReactionRepository};
+use crate::repository::{DmRepository, FollowRepository, NoteUpdateTarget, ReactionRepository};
 
 /// Misskey互換のタイムラインチャンネル種別。クライアントが`connect`で指定するチャンネル名
 /// （`"homeTimeline"`等）をパースした結果。
@@ -139,6 +141,89 @@ pub struct StreamEvent {
     pub payload: Arc<String>,
     pub channel: Option<ChannelBroadcast>,
     pub broadcast_all: bool,
+    /// `recipients` に加えて、このノートを `subNote` で購読している接続にも配る
+    /// （`NoteSubscriptions::admits`）。`None` なら `recipients` だけ。
+    /// 無停止更新の間は新旧のプロセスが同じ Redis チャンネルを読むので、この欄を持たない
+    /// 旧版のイベントも読めるよう既定値を置く。
+    #[serde(default)]
+    pub note_subscribers: Option<NoteSubscribers>,
+}
+
+/// `subNote` で購読している接続にイベントを配ってよい範囲。
+///
+/// 購読はクライアントが画面に出しているノートの ID を送るだけなので、閲覧者がそのノートを
+/// 見られるかはイベント側に載せた材料で決める（接続ごとに DB を引かない）。載せるのは、
+/// 見られる人を投稿者・フォロワーに限らない公開・ホーム（`unlisted`）の投稿だけ。
+/// フォロワー限定は見られる人（`post_is_visible_to`）が `recipients`（投稿者とフォロワー）と
+/// 同じで、DM は当事者だけに配るので、どちらも購読者へは広げない。
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct NoteSubscribers {
+    pub post_id: i64,
+    /// ログインしていない接続にも配るか。`post_is_visible_to` と同じく、未ログインの閲覧者に
+    /// 見せるのはローカルアクターの投稿だけ。
+    pub anonymous: bool,
+}
+
+impl NoteSubscribers {
+    /// 投稿の可視性から購読者へ配ってよい範囲を決める（配れなければ `None`）。
+    pub fn for_post(post_id: i64, visibility: &str, author_is_local: bool) -> Option<Self> {
+        matches!(visibility, "public" | "unlisted").then_some(Self {
+            post_id,
+            anonymous: author_is_local,
+        })
+    }
+}
+
+/// 1つの WebSocket 接続が `subNote` で購読しているノート。本家 Misskey と同じく、同じノートを
+/// 複数の場所に出していれば `subNote` と `unsubNote` を対で数える。
+#[derive(Debug, Default)]
+pub struct NoteSubscriptions {
+    counts: HashMap<i64, u32>,
+}
+
+/// 1接続で購読できるノートの数。表示中のノートを数えるだけなので通常は届かない。不正な
+/// クライアントが購読を積み上げてサーバーのメモリを使い続けないための上限。
+pub const MAX_NOTE_SUBSCRIPTIONS: usize = 2000;
+
+impl NoteSubscriptions {
+    /// `id` はクライアントが送ったノート ID の文字列。数値でなければ無視する。
+    pub fn subscribe(&mut self, id: &str) {
+        let Ok(post_id) = id.parse::<i64>() else {
+            return;
+        };
+        if let Some(count) = self.counts.get_mut(&post_id) {
+            *count += 1;
+        } else if self.counts.len() < MAX_NOTE_SUBSCRIPTIONS {
+            self.counts.insert(post_id, 1);
+        }
+    }
+
+    pub fn unsubscribe(&mut self, id: &str) {
+        let Ok(post_id) = id.parse::<i64>() else {
+            return;
+        };
+        if let Some(count) = self.counts.get_mut(&post_id) {
+            *count -= 1;
+            if *count == 0 {
+                self.counts.remove(&post_id);
+            }
+        }
+    }
+
+    pub fn contains(&self, post_id: i64) -> bool {
+        self.counts.contains_key(&post_id)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.counts.is_empty()
+    }
+
+    /// `ev` を購読者としてこの接続へ配ってよいか（`recipients` による配信とは別に判定する）。
+    /// `viewer` はこの接続の閲覧者（未ログインなら `None`）。
+    pub fn admits(&self, ev: &StreamEvent, viewer: Option<i64>) -> bool {
+        ev.note_subscribers
+            .is_some_and(|s| (viewer.is_some() || s.anonymous) && self.contains(s.post_id))
+    }
 }
 
 /// Redis でプロセス間の配信をつなぐときのチャンネル名。
@@ -184,7 +269,18 @@ impl StreamHub {
 
     /// 任意種別のイベントを送出する。`{"type":<kind>,"body":<body>}` として配信する。
     pub fn publish_event(&self, recipients: HashSet<i64>, kind: &str, body: serde_json::Value) {
-        if recipients.is_empty() {
+        self.publish_note_event(recipients, None, kind, body);
+    }
+
+    /// `publish_event` に加えて、`subscribers` の範囲でノートの購読者にも配る。
+    pub fn publish_note_event(
+        &self,
+        recipients: HashSet<i64>,
+        subscribers: Option<NoteSubscribers>,
+        kind: &str,
+        body: serde_json::Value,
+    ) {
+        if recipients.is_empty() && subscribers.is_none() {
             return;
         }
         let payload = serde_json::json!({ "type": kind, "body": body }).to_string();
@@ -193,6 +289,7 @@ impl StreamHub {
             payload: Arc::new(payload),
             channel: None,
             broadcast_all: false,
+            note_subscribers: subscribers,
         });
     }
 
@@ -206,6 +303,7 @@ impl StreamHub {
             payload: Arc::new(payload),
             channel: None,
             broadcast_all: true,
+            note_subscribers: None,
         });
     }
 
@@ -225,6 +323,7 @@ impl StreamHub {
                 note_json: Arc::new(note_json),
             }),
             broadcast_all: false,
+            note_subscribers: None,
         });
     }
 }
@@ -281,6 +380,7 @@ pub const NOTE_UPDATED_EVENT: &str = "noteUpdated";
 fn publish_reaction_update(
     stream_hub: &StreamHub,
     recipients: HashSet<i64>,
+    subscribers: Option<NoteSubscribers>,
     post_id: i64,
     reactions: Vec<ReactionCount>,
     reactor: Option<ReactorChange<'_>>,
@@ -295,14 +395,14 @@ fn publish_reaction_update(
     let Ok(body) = serde_json::to_value(&body) else {
         return;
     };
-    stream_hub.publish_event(recipients, NOTE_UPDATED_EVENT, body);
+    stream_hub.publish_note_event(recipients, subscribers, NOTE_UPDATED_EVENT, body);
 }
 
 /// リアクション追加/切替/取消（ローカル・AP 受信のいずれも）を `noteUpdated` イベントとして
-/// 送出する。配信先は投稿の著者 + 著者をフォロー中（承認済み・ローカル）のアクター
-/// （`broadcast_new_note` と同じ考え方。「今この投稿を見ている全員」を追跡する仕組みは
-/// まだ無いため、既存のリアルタイム配信の範囲に合わせている）。**`direct`可視性の投稿には
-/// 使わないこと**（フォロワーはDMの当事者ではなく、DMの存在・リアクション内容が無関係な
+/// 送出する。配信先は、そのノートを `subNote` で購読している（画面に出している）接続
+/// （`NoteSubscribers`、公開・ホームの投稿のみ）と、投稿の著者 + 著者をフォロー中（承認済み・
+/// ローカル）のアクター（購読を送らない旧版のクライアントにも届くよう残している）。
+/// **`direct`可視性の投稿には使わないこと**（フォロワーはDMの当事者ではなく、DMの存在・リアクション内容が無関係な
 /// 第三者のWS接続に漏れる。`direct`投稿には`broadcast_dm_reaction_update`を使う）。
 ///
 /// `reactor.emoji` は今回のイベント後の「reactor 自身がこの投稿に付けているリアクション」。
@@ -310,7 +410,7 @@ fn publish_reaction_update(
 /// 受信側はこれと自分の actor_id を比較して `reactedByMe` を再計算できる（他人のリアクションは
 /// 件数のみ更新すればよい）。
 ///
-/// 件数はブリッジ関係の投稿と合算した値なので、それらの投稿（`bridge_siblings`）の表示にも、
+/// 件数はブリッジ関係の投稿と合算した値なので、それらの投稿（`note_update_targets`）の表示にも、
 /// その投稿者とフォロワーへ同じ集計を送る。こちらは `reactorActorId` を null にする
 /// （reactor が付けたのは別の投稿なので、受信側でその投稿の `reactedByMe` を変えさせない）。
 pub async fn broadcast_reaction_update(
@@ -326,25 +426,39 @@ pub async fn broadcast_reaction_update(
         .await
         .unwrap_or_default();
     let counts = reaction_counts(agg);
+    let targets = reactions
+        .note_update_targets(post_id)
+        .await
+        .unwrap_or_else(|e| {
+            tracing::error!("[streaming] noteUpdated の配信先の取得に失敗: {}", e);
+            Vec::new()
+        });
 
+    // 対象の投稿が引けなくても（DB エラー）、著者とフォロワーには従来どおり届ける。
+    let own = targets.iter().find(|t| t.post_id == post_id);
     publish_reaction_update(
         stream_hub,
         author_and_followers(follows, post_author_id).await,
+        own.and_then(subscribers_of),
         post_id,
         counts.clone(),
         Some(reactor),
     );
 
-    let siblings = reactions.bridge_siblings(post_id).await.unwrap_or_default();
-    for (sibling_id, sibling_author_id) in siblings {
+    for sibling in targets.iter().filter(|t| t.post_id != post_id) {
         publish_reaction_update(
             stream_hub,
-            author_and_followers(follows, sibling_author_id).await,
-            sibling_id,
+            author_and_followers(follows, sibling.author_id).await,
+            subscribers_of(sibling),
+            sibling.post_id,
             counts.clone(),
             None,
         );
     }
+}
+
+fn subscribers_of(target: &NoteUpdateTarget) -> Option<NoteSubscribers> {
+    NoteSubscribers::for_post(target.post_id, &target.visibility, target.author_is_local)
 }
 
 async fn author_and_followers(follows: &dyn FollowRepository, author_id: i64) -> HashSet<i64> {
@@ -381,16 +495,17 @@ pub async fn broadcast_dm_reaction_update(
         recipients.extend(rows);
     }
 
-    publish_reaction_update(stream_hub, recipients, post_id, counts, Some(reactor));
+    publish_reaction_update(stream_hub, recipients, None, post_id, counts, Some(reactor));
 }
 
 /// アンケート投票結果の更新（ローカル投票・AP 受信のいずれも）を `pollUpdated` イベントとして
-/// 送出する。配信先・考え方は `broadcast_reaction_update` と同じ（投稿の著者 + 著者をフォロー中
-/// のローカルアクター）。`poll` は更新後の`posts.poll`そのもの（`votedByMe`は含まない。閲覧者
+/// 送出する。配信先・考え方は `broadcast_reaction_update` と同じ（ノートの購読者（公開・ホームの
+/// 投稿のみ）と、投稿の著者 + 著者をフォロー中のローカルアクター）。`poll` は更新後の`posts.poll`そのもの（`votedByMe`は含まない。閲覧者
 /// ごとに異なるため、受信側は自分の投票済み選択肢はローカル状態を保ったまま票数のみ更新する）。
 pub async fn broadcast_poll_update(
     stream_hub: &StreamHub,
     follows: &dyn FollowRepository,
+    db: &sqlx::PgPool,
     post_id: i64,
     post_author_id: i64,
     poll: &serde_json::Value,
@@ -403,9 +518,20 @@ pub async fn broadcast_poll_update(
     {
         recipients.extend(rows);
     }
+    let subscribers =
+        match crate::repository::post::visibility_and_author_locality(db, post_id).await {
+            Ok(found) => found.and_then(|(visibility, author_is_local)| {
+                NoteSubscribers::for_post(post_id, &visibility, author_is_local)
+            }),
+            Err(e) => {
+                tracing::error!("[streaming] pollUpdated の配信先の取得に失敗: {}", e);
+                None
+            }
+        };
 
-    stream_hub.publish_event(
+    stream_hub.publish_note_event(
         recipients,
+        subscribers,
         "pollUpdated",
         serde_json::json!({
             "postId": post_id.to_string(),
@@ -563,5 +689,76 @@ mod tests {
         assert!(!s.matches(&ChannelKind::Hashtag("seiran".to_string()), 7));
         assert!(s.matches(&ChannelKind::HomeTimeline, 7));
         assert!(s.matches(&ChannelKind::UserList(10), 7));
+    }
+}
+
+#[cfg(test)]
+mod note_subscription_tests {
+    use super::{NoteSubscribers, NoteSubscriptions, StreamEvent, MAX_NOTE_SUBSCRIPTIONS};
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    fn event(note_subscribers: Option<NoteSubscribers>) -> StreamEvent {
+        StreamEvent {
+            recipients: Arc::new(HashSet::new()),
+            payload: Arc::new(String::new()),
+            channel: None,
+            broadcast_all: false,
+            note_subscribers,
+        }
+    }
+
+    #[test]
+    fn only_public_and_unlisted_posts_reach_subscribers() {
+        assert!(NoteSubscribers::for_post(1, "public", false).is_some());
+        assert!(NoteSubscribers::for_post(1, "unlisted", false).is_some());
+        assert!(NoteSubscribers::for_post(1, "followers_only", true).is_none());
+        assert!(NoteSubscribers::for_post(1, "direct", true).is_none());
+    }
+
+    #[test]
+    fn subscriptions_are_counted_in_pairs() {
+        let mut subs = NoteSubscriptions::default();
+        subs.subscribe("10");
+        subs.subscribe("10");
+        subs.unsubscribe("10");
+        assert!(subs.contains(10));
+        subs.unsubscribe("10");
+        assert!(!subs.contains(10));
+        subs.subscribe("not-a-number");
+        assert!(subs.is_empty());
+    }
+
+    #[test]
+    fn admits_subscribed_note_and_respects_anonymous_flag() {
+        let mut subs = NoteSubscriptions::default();
+        subs.subscribe("10");
+        let remote = event(NoteSubscribers::for_post(10, "public", false));
+        assert!(subs.admits(&remote, Some(1)));
+        assert!(!subs.admits(&remote, None));
+        let local = event(NoteSubscribers::for_post(10, "public", true));
+        assert!(subs.admits(&local, None));
+        assert!(!subs.admits(
+            &event(NoteSubscribers::for_post(11, "public", true)),
+            Some(1)
+        ));
+        assert!(!subs.admits(&event(None), Some(1)));
+    }
+
+    #[test]
+    fn subscription_count_is_capped() {
+        let mut subs = NoteSubscriptions::default();
+        for i in 0..(MAX_NOTE_SUBSCRIPTIONS as i64 + 10) {
+            subs.subscribe(&i.to_string());
+        }
+        assert!(!subs.contains(MAX_NOTE_SUBSCRIPTIONS as i64));
+        assert!(subs.contains(0));
+    }
+
+    #[test]
+    fn events_without_note_subscribers_field_still_deserialize() {
+        let json = r#"{"recipients":[1],"payload":"x","channel":null,"broadcast_all":false}"#;
+        let ev: StreamEvent = serde_json::from_str(json).unwrap();
+        assert!(ev.note_subscribers.is_none());
     }
 }
