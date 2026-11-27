@@ -312,7 +312,9 @@ export function StreamingProvider({ children }: { children: React.ReactNode }) {
   );
 
   // 表示中のノートをサーバーへ`subNote`で購読する。投稿者をフォローしていないノート
-  // （ローカル・グローバル・リスト・リポスト等）のリアクション更新は購読しないと届かない。
+  // （ローカル・グローバル・リスト・リポスト等）のリアクション（`noteUpdated`）とアンケートの
+  // 票数（`pollUpdated`）の更新は購読しないと届かない。NoteCard はどれもリアクションの
+  // リスナーを登録するので、アンケートの購読もこれで兼ねる。
   // 同じノートを複数のカードで出していても、購読はノートごとに1つにまとめる。
   const registerReaction = useCallback((noteId: string, cb: ReactionListener) => {
     let set = reactionListeners.current.get(noteId);

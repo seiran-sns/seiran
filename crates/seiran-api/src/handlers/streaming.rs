@@ -8,7 +8,7 @@
 //! を送るとそのチャンネル該当のノートを`{"type":"channel","body":{"id":"<uuid>","type":"note","body":{...}}}`
 //! で受け取れる。`{"type":"disconnect","body":{"id":"<uuid>"}}`で購読解除する。
 //! 通知・DMは`recipients`方式（購読不要、認証済み接続には自動配信）。
-//! リアクションの増減（`noteUpdated`）は、`{"type":"subNote","body":{"id":"<noteId>"}}`で
+//! リアクションの増減（`noteUpdated`）とアンケートの票数（`pollUpdated`）は、`{"type":"subNote","body":{"id":"<noteId>"}}`で
 //! 購読したノートにも届く（本家 Misskey の`subNote`/`unsubNote`と同じ。画面に出している
 //! ノートを購読すれば、投稿者をフォローしていなくても更新が届く。`streaming::NoteSubscribers`）。
 

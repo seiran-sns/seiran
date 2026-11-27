@@ -92,6 +92,7 @@ pub async fn vote_poll(
     broadcast_poll_update(
         &state.stream_hub,
         state.follows.as_ref(),
+        &state.db,
         note_id,
         vote.post_author_id,
         &vote.poll,

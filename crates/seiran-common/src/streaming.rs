@@ -2,8 +2,9 @@
 //!
 //! ローカルで発生したイベント（新規ポスト・リアクション・フォロー等）を、
 //! 受け取るべきローカルアクターの WebSocket 接続へブロードキャストする。
-//! フィルタは各接続側で `recipients` を見て行う。リアクションの増減（`noteUpdated`）は
-//! それに加えて、そのノートを `subNote` で購読している接続にも届ける（`NoteSubscribers`）。
+//! フィルタは各接続側で `recipients` を見て行う。リアクションの増減（`noteUpdated`）と
+//! アンケートの票数（`pollUpdated`）は、それに加えてそのノートを `subNote` で購読している
+//! 接続にも届ける（`NoteSubscribers`）。
 //!
 //! 1プロセスにハブは1つで、そのプロセスの全ロールが共有する。Redis があればハブ同士を
 //! Redis でつなぎ、どのプロセスで起きたイベントもすべての接続へ届ける（`event_bus`）。
@@ -498,12 +499,13 @@ pub async fn broadcast_dm_reaction_update(
 }
 
 /// アンケート投票結果の更新（ローカル投票・AP 受信のいずれも）を `pollUpdated` イベントとして
-/// 送出する。配信先・考え方は `broadcast_reaction_update` と同じ（投稿の著者 + 著者をフォロー中
-/// のローカルアクター）。`poll` は更新後の`posts.poll`そのもの（`votedByMe`は含まない。閲覧者
+/// 送出する。配信先・考え方は `broadcast_reaction_update` と同じ（ノートの購読者（公開・ホームの
+/// 投稿のみ）と、投稿の著者 + 著者をフォロー中のローカルアクター）。`poll` は更新後の`posts.poll`そのもの（`votedByMe`は含まない。閲覧者
 /// ごとに異なるため、受信側は自分の投票済み選択肢はローカル状態を保ったまま票数のみ更新する）。
 pub async fn broadcast_poll_update(
     stream_hub: &StreamHub,
     follows: &dyn FollowRepository,
+    db: &sqlx::PgPool,
     post_id: i64,
     post_author_id: i64,
     poll: &serde_json::Value,
@@ -516,9 +518,20 @@ pub async fn broadcast_poll_update(
     {
         recipients.extend(rows);
     }
+    let subscribers =
+        match crate::repository::post::visibility_and_author_locality(db, post_id).await {
+            Ok(found) => found.and_then(|(visibility, author_is_local)| {
+                NoteSubscribers::for_post(post_id, &visibility, author_is_local)
+            }),
+            Err(e) => {
+                tracing::error!("[streaming] pollUpdated の配信先の取得に失敗: {}", e);
+                None
+            }
+        };
 
-    stream_hub.publish_event(
+    stream_hub.publish_note_event(
         recipients,
+        subscribers,
         "pollUpdated",
         serde_json::json!({
             "postId": post_id.to_string(),

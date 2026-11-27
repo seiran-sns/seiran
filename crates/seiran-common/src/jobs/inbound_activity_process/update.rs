@@ -58,6 +58,7 @@ pub(super) async fn handle_update(
     broadcast_poll_update(
         &inbox.stream_hub,
         inbox.follow_repo.as_ref(),
+        &inbox.db_pool,
         post_id,
         post_author_id,
         &poll,

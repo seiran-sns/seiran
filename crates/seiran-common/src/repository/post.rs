@@ -2119,6 +2119,22 @@ pub async fn author_of(pool: &sqlx::PgPool, post_id: i64) -> Result<Option<i64>,
         .await
 }
 
+/// 投稿の可視性と、投稿者がローカルアクターか（`(visibility, author_is_local)`）。ストリーミングで
+/// ノートの購読者へ配ってよいかを決めるのに使う（`streaming::NoteSubscribers::for_post`）。
+pub async fn visibility_and_author_locality(
+    pool: &sqlx::PgPool,
+    post_id: i64,
+) -> Result<Option<(String, bool)>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT p.visibility::text, a.actor_type = 'local'
+         FROM posts p JOIN actors a ON a.id = p.actor_id
+         WHERE p.id = $1",
+    )
+    .bind(post_id)
+    .fetch_optional(pool)
+    .await
+}
+
 pub async fn is_direct(pool: &sqlx::PgPool, post_id: i64) -> Result<bool, sqlx::Error> {
     sqlx::query_scalar::<_, bool>("SELECT visibility = 'direct' FROM posts WHERE id = $1")
         .bind(post_id)
