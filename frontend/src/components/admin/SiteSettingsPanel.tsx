@@ -7,6 +7,7 @@ import type { SiteSettings } from "../../api/types";
 import { diffEdits } from "../../lib/editDiff";
 import Turnstile from "../Turnstile";
 import panel from "../common/Panel.module.css";
+import StickySaveBar from "../common/StickySaveBar";
 import styles from "../../pages/Admin.module.css";
 
 /** この画面が編集する項目（書き込み専用の項目と `*_set` を除く）。 */
@@ -688,14 +689,11 @@ export default function SiteSettingsPanel() {
           <p className={styles.hint}>{t("admin:siteSettingsPanel.oembedEndpointHint")}</p>
         </div>
 
-        <div className={styles.stickySaveBar}>
-          {/* 保存結果は押した場所の近くに出す（ボタンが下端固定のため、先頭に出すと見えない）。 */}
-          {error && <p className={styles.error}>{error}</p>}
-          {saved && <p className={styles.success}>{t("admin:siteSettingsPanel.savedMessage")}</p>}
-          <button className={styles.btn} type="submit" disabled={saving}>
-            {saving ? t("common:saving") : t("common:save")}
-          </button>
-        </div>
+        <StickySaveBar
+          saving={saving}
+          error={error}
+          savedMessage={saved ? t("admin:siteSettingsPanel.savedMessage") : ""}
+        />
       </form>
     </div>
   );

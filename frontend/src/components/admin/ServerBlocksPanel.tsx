@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import panel from "../common/Panel.module.css";
+import StickySaveBar from "../common/StickySaveBar";
 import styles from "../../pages/Admin.module.css";
 
 /**
@@ -76,11 +77,13 @@ export default function ServerBlocksPanel() {
             data-testid="denied-hosts-textarea"
           />
         </label>
-        {error && <p className={styles.error}>{error}</p>}
-        {saved && <p className={styles.success}>{t("admin:serverBlocksPanel.savedMessage")}</p>}
-        <button className={styles.btn} type="submit" disabled={saving}>
-          {saving ? t("admin:serverBlocksPanel.saving") : t("admin:serverBlocksPanel.saveButton")}
-        </button>
+        <StickySaveBar
+          saving={saving}
+          error={error}
+          savedMessage={saved ? t("admin:serverBlocksPanel.savedMessage") : ""}
+          label={t("admin:serverBlocksPanel.saveButton")}
+          savingLabel={t("admin:serverBlocksPanel.saving")}
+        />
       </form>
     </div>
   );

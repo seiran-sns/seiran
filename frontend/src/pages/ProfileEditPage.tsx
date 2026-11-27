@@ -9,6 +9,7 @@ import { diffEdits } from "../lib/editDiff";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
 import DisplayName from "../components/common/DisplayName";
+import StickySaveBar from "../components/common/StickySaveBar";
 
 /** プロフィール編集フォームで扱う固定スロット数（#62、Mastodon のデフォルト4件に合わせる）。 */
 const PROFILE_FIELD_SLOTS = 4;
@@ -235,8 +236,6 @@ export default function ProfileEditPage() {
         <p className={panel.message}>{t("common:loading")}</p>
       ) : (
         <form className={styles.form} onSubmit={save}>
-          {error && <p className={styles.error}>{error}</p>}
-          {saved && <p className={styles.success}>{t("profile:profileEditPage.savedMessage")}</p>}
 
           <div className={styles.bannerRow}>
             {(banner || currentBannerUrl) && (
@@ -446,9 +445,12 @@ export default function ProfileEditPage() {
             </ul>
           </div>
 
-          <button className={styles.save} type="submit" disabled={saving || overLimit}>
-            {saving ? t("common:saving") : t("common:save")}
-          </button>
+          <StickySaveBar
+            saving={saving}
+            disabled={overLimit}
+            error={error}
+            savedMessage={saved ? t("profile:profileEditPage.savedMessage") : ""}
+          />
         </form>
       )}
     </>
