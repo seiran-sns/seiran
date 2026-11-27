@@ -1,5 +1,6 @@
 .form {
   padding: 20px;
+  --save-bar-gutter: 20px;
   display: flex;
   flex-direction: column;
 }
@@ -137,12 +138,6 @@
 
 .error {
   color: var(--danger);
-  font-size: 0.85rem;
-  margin: 0 0 12px;
-}
-
-.success {
-  color: var(--accent);
   font-size: 0.85rem;
   margin: 0 0 12px;
 }

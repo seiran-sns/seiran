@@ -4,6 +4,7 @@ import { api, getErrorMessage } from "../../api/client";
 import type { SiteSettings } from "../../api/types";
 import { diffEdits } from "../../lib/editDiff";
 import panel from "../common/Panel.module.css";
+import StickySaveBar from "../common/StickySaveBar";
 import styles from "../../pages/Admin.module.css";
 import sheet from "./RoleRateLimitPanel.module.css";
 
@@ -188,13 +189,11 @@ export default function RoleRateLimitPanel() {
             </table>
           </div>
         </div>
-        <div className={styles.stickySaveBar}>
-          {error && <p className={styles.error}>{error}</p>}
-          {saved && <p className={styles.success}>{t("admin:roleRateLimitPanel.savedMessage")}</p>}
-          <button className={styles.btn} type="submit" disabled={saving}>
-            {saving ? t("common:saving") : t("common:save")}
-          </button>
-        </div>
+        <StickySaveBar
+          saving={saving}
+          error={error}
+          savedMessage={saved ? t("admin:roleRateLimitPanel.savedMessage") : ""}
+        />
       </form>
     </div>
   );
