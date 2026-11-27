@@ -53,8 +53,8 @@
     "activitySubscriptionsTitle": "投稿の通知",
     "activitySubscriptionsLabel": "他のユーザーにあなたの投稿の通知を許可する",
     "activitySubscriptionsOptions": {
-      "followers": "自分をフォローしているユーザー",
-      "mutuals": "自分がフォローしているフォロワーのみ",
+      "followers": "フォロワーに許可",
+      "mutuals": "相互フォロワーに許可",
       "none": "誰にも許可しない"
     },
     "followApprovalTitle": "承認制フォロー",
