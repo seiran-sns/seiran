@@ -1,4 +1,5 @@
 import { cursorParams, request } from "./core";
+import type { Edit } from "../lib/editDiff";
 import type { ListDetail, ListMember, ListMembership, ListSummary, RawNote } from "./types";
 import { normalizeNote } from "./types";
 
@@ -23,11 +24,9 @@ export const lists = {
   get(id: string) {
     return request<ListDetail>("GET", `/lists/${encodeURIComponent(id)}`);
   },
-  update(id: string, name: string, isPublic: boolean) {
-    return request<ListSummary>("PATCH", `/lists/${encodeURIComponent(id)}`, {
-      name,
-      is_public: isPublic,
-    });
+  /** 変えた項目だけを差分で送る（別の画面の変更と重なったら `EDIT_CONFLICT`）。 */
+  update(id: string, edits: { name?: Edit<string>; is_public?: Edit<boolean> }) {
+    return request<ListSummary>("PATCH", `/lists/${encodeURIComponent(id)}`, edits);
   },
   remove(id: string) {
     return request<void>("DELETE", `/lists/${encodeURIComponent(id)}`);

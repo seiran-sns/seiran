@@ -1,6 +1,7 @@
 import { ChangeEvent, FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, CustomEmoji, DriveFile, EmojiImportStatus, RemoteEmoji, getErrorMessage } from "../../api/client";
+import { diffEdits } from "../../lib/editDiff";
 import RemoteImg from "../common/RemoteImg";
 import EmojiImportDialog from "./EmojiImportDialog";
 import panel from "../common/Panel.module.css";
@@ -240,7 +241,14 @@ export default function EmojisPanel() {
     setBusyId(em.id);
     setError("");
     try {
-      await api.admin.updateEmoji(em.id, { tags: parseTags(editTags), license: editLicense.trim() });
+      // 編集を始めた時点（一覧を読み込んだ時点）の値から変えた項目だけを差分で送る
+      await api.admin.updateEmoji(
+        em.id,
+        diffEdits(
+          { tags: em.tags, license: em.license ?? "" },
+          { tags: parseTags(editTags), license: editLicense.trim() },
+        ),
+      );
       setEditId(null);
       load();
     } catch (err) {

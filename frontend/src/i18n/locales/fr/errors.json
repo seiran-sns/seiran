@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "La demande d’autorisation est introuvable ou a expiré. Recommencez depuis l’application.",
   "OAUTH_CLIENT_UNAVAILABLE": "Impossible de charger les informations de l’application. Réessayez plus tard.",
   "OAUTH_INVALID_SCOPE": "Les autorisations demandées par l’application sont invalides",
-  "OAUTH_SESSION_NOT_FOUND": "Autorisation introuvable"
+  "OAUTH_SESSION_NOT_FOUND": "Autorisation introuvable",
+  "EDIT_CONFLICT": "Ces paramètres semblent avoir été modifiés depuis un autre écran. Veuillez recharger la page"
 }

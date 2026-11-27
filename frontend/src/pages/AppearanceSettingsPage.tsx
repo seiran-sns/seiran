@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import AppShell from "../components/layout/AppShell";
@@ -64,6 +64,8 @@ export default function AppearanceSettingsPage() {
       ? (user?.language_preference as DisplayLanguage)
       : "auto",
   );
+  /** サーバーに保存されている表示言語（`null` は自動）。選び直しはここからの差分で送る。 */
+  const savedLanguage = useRef<string | null>(user?.language_preference ?? null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
@@ -107,7 +109,11 @@ export default function AppearanceSettingsPage() {
     setError("");
     setSaved(false);
     try {
-      await api.account.updateLanguage(option === "auto" ? null : option);
+      const language = option === "auto" ? null : option;
+      // 別の画面で変えられていたら保存せずエラーを出す（選んだ値は画面に残す）
+      await api.account.updateLanguage({ from: savedLanguage.current, to: language });
+      savedLanguage.current = language;
+      updateUser({ language_preference: language });
       if (option === "auto") {
         localStorage.removeItem("i18nextLng");
         await i18n.changeLanguage(detectAutoLanguage());
@@ -128,7 +134,6 @@ export default function AppearanceSettingsPage() {
         <h3 className={styles.sectionTitle}>
           {t("account:appearanceSettings.languageTitle")}
         </h3>
-        {error && <p className={styles.error}>{error}</p>}
         <select
           className={styles.select}
           value={selected}
@@ -143,6 +148,8 @@ export default function AppearanceSettingsPage() {
             ),
           )}
         </select>
+        {/* 選んだ時点で保存するので、失敗（別の画面との衝突等）は選んだ欄のすぐ下に出す */}
+        {error && <p className={styles.error}>{error}</p>}
         {saved && (
           <p className={styles.success}>
             {t("account:appearanceSettings.saved")}

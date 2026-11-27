@@ -571,6 +571,10 @@ export interface UserProfile {
   birthday?: string;
   /** `true`ならFediverseへ`vcard:bday`として公開する。本人が閲覧している場合のみ含まれる。 */
   birthday_public?: boolean;
+  /** アイコン・背景画像のメディア ID（未設定は空文字列）。本人が閲覧している場合のみ含まれる
+   * （編集フォームが差分の編集前の値として送る）。 */
+  avatar_media_id?: string;
+  banner_media_id?: string;
   /** プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカルユーザーのみ
    * （`public_lists`と同様、リモートは将来課題）。 */
   also_known_as: AlsoKnownAsItem[];

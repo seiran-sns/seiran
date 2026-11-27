@@ -25,12 +25,15 @@ export const scheduledPosts = {
       await request<RawScheduledPost>("POST", "/scheduled-posts", { ...body, scheduled_at: scheduledAt }),
     );
   },
-  /** 内容と予約日時を書き換えて投稿待ちに戻す（投稿できなかった予約の再予約を兼ねる）。 */
-  async update(id: string, scheduledAt: string, body: CreateNoteBody) {
+  /** 内容と予約日時を書き換えて投稿待ちに戻す（投稿できなかった予約の再予約を兼ねる）。
+   * `base` は編集画面を開いた時点の予約で、サーバーはそこからの差分を今の予約に当てる
+   * （本文・CW は別の画面での編集と行単位でマージ、重なれば `EDIT_CONFLICT`）。 */
+  async update(id: string, scheduledAt: string, body: CreateNoteBody, base: ScheduledPost) {
     return normalizeScheduledPost(
       await request<RawScheduledPost>("PUT", `/scheduled-posts/${encodeURIComponent(id)}`, {
         ...body,
         scheduled_at: scheduledAt,
+        base: { scheduled_at: base.scheduledAt, request: base.request },
       }),
     );
   },
@@ -38,9 +41,13 @@ export const scheduledPosts = {
     return request<void>("DELETE", `/scheduled-posts/${encodeURIComponent(id)}`);
   },
   /** 予約を（渡した内容で）今すぐ投稿する。 */
-  async publish(id: string, body: CreateNoteBody) {
+  /** 予約を今すぐ投稿する。`base`（編集画面を開いた時点の予約）からの差分を今の予約に当てる。 */
+  async publish(id: string, body: CreateNoteBody, base: ScheduledPost) {
     return normalizeNote(
-      await request<RawNote>("POST", `/scheduled-posts/${encodeURIComponent(id)}/publish`, body),
+      await request<RawNote>("POST", `/scheduled-posts/${encodeURIComponent(id)}/publish`, {
+        ...body,
+        base: base.request,
+      }),
     );
   },
 };

@@ -6,8 +6,9 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::edit_diff::Edit;
 use seiran_common::generate_snowflake_id;
-use seiran_common::repository::EmojiRow;
+use seiran_common::repository::{EmojiEdit, EmojiRow};
 
 use crate::error::ApiError;
 use crate::AppState;
@@ -61,10 +62,11 @@ pub struct CreateEmojiRequest {
 
 #[derive(Deserialize)]
 pub struct UpdateEmojiRequest {
-    /// いずれも省略時は現在値を保持する。
-    pub category: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub license: Option<String>,
+    /// いずれも省略時は現在値を保持する。差分 `{"from": 編集前, "to": 編集後}` か編集後の
+    /// 値だけ（上書き）（`seiran_common::edit_diff`）。
+    pub category: Option<Edit<String>>,
+    pub tags: Option<Edit<Vec<String>>>,
+    pub license: Option<Edit<String>>,
 }
 
 /// shortcode を検証する。`custom_emojis.shortcode` は `VARCHAR(100)` のため、文字種チェックに
@@ -193,15 +195,21 @@ pub async fn update_emoji(
     Path(id): Path<i64>,
     Json(req): Json<UpdateEmojiRequest>,
 ) -> Result<Json<EmojiResponse>, ApiError> {
-    if let Some(ref c) = req.category {
-        validate_category(c)?;
+    if let Some(c) = &req.category {
+        validate_category(c.target())?;
     }
     let tags = match req.tags {
-        Some(ref t) => Some(normalize_tags(t)?),
+        Some(edit) => {
+            let normalized = normalize_tags(edit.target())?;
+            Some(edit.map_target(|_| normalized))
+        }
         None => None,
     };
     let license = match req.license {
-        Some(ref l) => Some(normalize_license(l)?),
+        Some(edit) => {
+            let normalized = normalize_license(edit.target())?;
+            Some(edit.map_target(|_| normalized))
+        }
         None => None,
     };
 
@@ -209,12 +217,14 @@ pub async fn update_emoji(
         .emojis
         .update(
             id,
-            req.category.as_deref(),
-            tags.as_deref(),
-            license.as_deref(),
+            EmojiEdit {
+                category: req.category,
+                tags,
+                license,
+            },
         )
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))??;
 
     row.map(|r| Json(r.into()))
         .ok_or(ApiError::NotFound("EMOJI_NOT_FOUND"))

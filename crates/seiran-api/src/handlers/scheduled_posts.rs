@@ -25,6 +25,7 @@ use axum::{
 use chrono::{DateTime, Duration, Utc};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::edit_diff::{merge_object, Edit, EditConflict};
 use seiran_common::generate_snowflake_id;
 use seiran_common::repository::scheduled_post::{self as repo, ScheduledPostCounts};
 
@@ -122,10 +123,7 @@ async fn prepare_request(
     mut req: CreateNoteRequest,
     scheduled_at: DateTime<Utc>,
 ) -> Result<serde_json::Value, ApiError> {
-    req.normalize_misskey_quote();
-    req.visibility = req
-        .visibility
-        .map(|v| crate::handlers::notes::delivery::normalize_misskey_visibility(&v).to_owned());
+    normalize(&mut req);
     crate::handlers::notes::creation::validate_scheduled_request(
         state,
         actor_id,
@@ -134,6 +132,135 @@ async fn prepare_request(
     )
     .await?;
     serde_json::to_value(&req).map_err(internal)
+}
+
+/// 保存する形への正規化（検証はしない）。差分を突き合わせるときも同じ形にそろえる。
+fn normalize(req: &mut CreateNoteRequest) {
+    req.normalize_misskey_quote();
+    req.visibility = req
+        .visibility
+        .take()
+        .map(|v| crate::handlers::notes::delivery::normalize_misskey_visibility(&v).to_owned());
+}
+
+/// 予約の編集画面を開いた時点の予約（`ScheduledPostResponse` の `scheduledAt`・`request`）。
+/// 保存はここからの差分として、別の画面での編集と合わせる（`seiran_common::edit_diff`）。
+#[derive(Deserialize)]
+pub struct ScheduleBase {
+    pub scheduled_at: DateTime<Utc>,
+    pub request: CreateNoteRequest,
+}
+
+/// 本文と CW は行単位の 3-way マージ、それ以外の項目は値として当てる。
+const TEXT_KEYS: &[&str] = &["text", "content_warning"];
+
+fn request_object(
+    mut req: CreateNoteRequest,
+) -> Result<serde_json::Map<String, serde_json::Value>, ApiError> {
+    normalize(&mut req);
+    match serde_json::to_value(req).map_err(internal)? {
+        serde_json::Value::Object(map) => Ok(map),
+        _ => Err(internal("予約投稿のリクエストがオブジェクトでない")),
+    }
+}
+
+/// 編集の差分を今の予約に当てた結果。
+struct MergedEdit {
+    request: CreateNoteRequest,
+    scheduled_at: DateTime<Utc>,
+    /// 別の画面での編集も取り込んだ（編集後の内容そのままではない）。
+    combined: bool,
+}
+
+/// 編集画面を開いた時点 `base` からの編集（`edited`・`scheduled_at`）を、今の予約 `current` に
+/// 当てる。
+fn merge_onto(
+    current: &ScheduledPostRow,
+    base: &serde_json::Map<String, serde_json::Value>,
+    base_scheduled_at: DateTime<Utc>,
+    edited: &serde_json::Map<String, serde_json::Value>,
+    scheduled_at: DateTime<Utc>,
+) -> Result<MergedEdit, ApiError> {
+    let current_request = request_object(request_of(current)?)?;
+    let request = merge_object(base, edited, &current_request, TEXT_KEYS)?;
+    let merged_at = Edit::Change {
+        from: base_scheduled_at,
+        to: scheduled_at,
+    }
+    .apply_value(&current.scheduled_at)?;
+    let combined = request != *edited || merged_at != scheduled_at;
+    Ok(MergedEdit {
+        request: serde_json::from_value(serde_json::Value::Object(request))
+            .map_err(|_| EditConflict)?,
+        scheduled_at: merged_at,
+        combined,
+    })
+}
+
+/// 編集後の内容のままなら通る検証に、別の画面の編集と合わせたせいで落ちたら（本文の上限超過
+/// 等）、どちらかを直さないと保存できないので衝突として知らせる。
+fn conflict_if_combined(merged: &MergedEdit, e: ApiError) -> ApiError {
+    match e {
+        ApiError::BadRequest(_) if merged.combined => EditConflict.into(),
+        e => e,
+    }
+}
+
+/// 読み直してから書くまでに別の画面が保存したときに、読み直して当て直す回数。
+const MERGE_ATTEMPTS: usize = 3;
+
+/// 予約の編集画面からの保存。開いた時点 `base` からの差分を今の予約に当てて、内容と予約日時を
+/// 書き換えて投稿待ちに戻す。別の画面での編集と重なったら何も変えず `EDIT_CONFLICT`。
+///
+/// 検証（返信先の確認等）にはリモートへの問い合わせを含むので、行をロックしたまま待たずに、
+/// 読んだ時点の `revision` のままなら書く1文の `UPDATE` で保存し、その間に書き換えられて
+/// いたら読み直して当て直す。
+pub async fn update_from_base(
+    state: &AppState,
+    user: &AuthedUser,
+    id: i64,
+    req: CreateNoteRequest,
+    scheduled_at: DateTime<Utc>,
+    base: ScheduleBase,
+) -> Result<ScheduledPostRow, ApiError> {
+    user.require_not_did_moved_out()?;
+    let base_request = request_object(base.request)?;
+    let edited = request_object(req)?;
+    for _ in 0..MERGE_ATTEMPTS {
+        let current = find(state, user, id).await?;
+        let merged = merge_onto(
+            &current,
+            &base_request,
+            base.scheduled_at,
+            &edited,
+            scheduled_at,
+        )?;
+        validate_scheduled_at(merged.scheduled_at, Some(current.scheduled_at))
+            .map_err(|e| conflict_if_combined(&merged, e))?;
+        let request = prepare_request(
+            state,
+            user.actor_id,
+            merged.request.clone(),
+            merged.scheduled_at,
+        )
+        .await
+        .map_err(|e| conflict_if_combined(&merged, e))?;
+        if let Some(row) = repo::update_if_revision(
+            &state.db,
+            id,
+            user.actor_id,
+            &request,
+            merged.scheduled_at,
+            current.revision,
+        )
+        .await
+        .map_err(internal)?
+        {
+            notify_changed(state, user.actor_id);
+            return Ok(row);
+        }
+    }
+    Err(EditConflict.into())
 }
 
 /// 予約を作る。
@@ -223,12 +350,29 @@ pub async fn publish_now(
     user: &AuthedUser,
     id: i64,
     req: Option<CreateNoteRequest>,
+    base: Option<CreateNoteRequest>,
 ) -> Result<NoteResponse, ApiError> {
     user.require_not_did_moved_out()?;
     let row = find(state, user, id).await?;
-    let mut req = match req {
-        Some(req) => req,
-        None => request_of(&row)?,
+    // 編集画面を開いた時点 `base` があれば、そこからの差分を今の予約に当てて投稿する（別の画面
+    // での編集を落とさない）。読んでから投稿するまでに書き換えられたら投稿しない（下の
+    // SCHEDULED_POST_CHANGED）
+    let mut merged = None;
+    let mut req = match (req, base) {
+        (Some(req), Some(base)) => {
+            let edit = merge_onto(
+                &row,
+                &request_object(base)?,
+                row.scheduled_at,
+                &request_object(req)?,
+                row.scheduled_at,
+            )?;
+            let req = edit.request.clone();
+            merged = Some(edit);
+            req
+        }
+        (Some(req), None) => req,
+        (None, _) => request_of(&row)?,
     };
     req.normalize_misskey_quote();
     let author = state
@@ -249,7 +393,10 @@ pub async fn publish_now(
         ApiError::Conflict("SCHEDULED_POST_ALREADY_HANDLED") => {
             ApiError::Conflict("SCHEDULED_POST_CHANGED")
         }
-        e => e,
+        e => match &merged {
+            Some(merged) => conflict_if_combined(merged, e),
+            None => e,
+        },
     })?;
     notify_changed(state, user.actor_id);
     Ok(note)
@@ -498,6 +645,19 @@ async fn to_response(
 #[derive(Deserialize)]
 pub struct ScheduleRequest {
     pub scheduled_at: DateTime<Utc>,
+    /// 予約の編集画面を開いた時点の予約。あれば差分として保存する（`update_from_base`）。
+    /// 無ければ上書き（差分を送らない版の画面）。
+    #[serde(default)]
+    pub base: Option<ScheduleBase>,
+    #[serde(flatten)]
+    pub request: CreateNoteRequest,
+}
+
+#[derive(Deserialize)]
+pub struct PublishRequest {
+    /// 予約の編集画面を開いた時点の内容。あれば差分として今の予約に当ててから投稿する。
+    #[serde(default)]
+    pub base: Option<CreateNoteRequest>,
     #[serde(flatten)]
     pub request: CreateNoteRequest,
 }
@@ -550,7 +710,12 @@ pub async fn update_handler(
     Json(body): Json<ScheduleRequest>,
 ) -> Result<Json<ScheduledPostResponse>, ApiError> {
     let id = parse_id(&id)?;
-    let row = update(&state, &user, id, Some(body.request), body.scheduled_at).await?;
+    let row = match body.base {
+        Some(base) => {
+            update_from_base(&state, &user, id, body.request, body.scheduled_at, base).await?
+        }
+        None => update(&state, &user, id, Some(body.request), body.scheduled_at).await?,
+    };
     Ok(Json(to_response(&state, user.actor_id, row).await?))
 }
 
@@ -575,10 +740,12 @@ pub async fn publish_handler(
     user: AuthedUser,
     State(state): State<AppState>,
     Path(id): Path<String>,
-    Json(req): Json<CreateNoteRequest>,
+    Json(body): Json<PublishRequest>,
 ) -> Result<Json<NoteResponse>, ApiError> {
     let id = parse_id(&id)?;
-    Ok(Json(publish_now(&state, &user, id, Some(req)).await?))
+    Ok(Json(
+        publish_now(&state, &user, id, Some(body.request), body.base).await?,
+    ))
 }
 
 #[cfg(test)]

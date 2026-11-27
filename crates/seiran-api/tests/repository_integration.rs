@@ -812,3 +812,219 @@ async fn deleted_post_media_is_kept_for_grace_period_then_orphaned() {
         "削除済みポストの添付は猶予期間を過ぎれば孤児になる"
     );
 }
+
+/// 設定の保存は開いた時点からの差分をロック中の現在値に当てる（`seiran_common::edit_diff`）。
+/// 別の画面が同じ項目を別の値にしていたら何も変えずに衝突、同じ値にしていたら通る。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn list_update_applies_edit_or_conflicts() {
+    use seiran_common::edit_diff::{Edit, EditConflict};
+    use seiran_common::repository::ListEdit;
+
+    let pool = test_db_pool().await;
+    let lists = PgListRepository::new(pool.clone());
+    let owner = create_fixture_local_actor(&pool, "edowner").await;
+    let list_id = seiran_common::generate_snowflake_id(chrono::Utc::now());
+    lists
+        .create(list_id, owner, "a", false, chrono::Utc::now())
+        .await
+        .unwrap();
+    let change = |from: &str, to: &str| Edit::Change {
+        from: from.to_string(),
+        to: to.to_string(),
+    };
+
+    // 画面A: a → b（誰も変えていないので通る）
+    let updated = lists
+        .update(
+            list_id,
+            owner,
+            ListEdit {
+                name: Some(change("a", "b")),
+                is_public: None,
+            },
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    assert_eq!(updated.name, "b");
+
+    // 画面B: 開いた時点の a → c は、現在値 b と食い違うので衝突し、公開設定も変えない
+    let conflict = lists
+        .update(
+            list_id,
+            owner,
+            ListEdit {
+                name: Some(change("a", "c")),
+                is_public: Some(Edit::Change {
+                    from: false,
+                    to: true,
+                }),
+            },
+        )
+        .await
+        .unwrap();
+    assert!(matches!(conflict, Err(EditConflict)));
+    let row = lists.find_by_id(list_id).await.unwrap().unwrap();
+    assert_eq!((row.name.as_str(), row.is_public), ("b", false));
+
+    // 画面C: a → b（別の画面と同じ値）は通る
+    assert!(lists
+        .update(
+            list_id,
+            owner,
+            ListEdit {
+                name: Some(change("a", "b")),
+                is_public: None,
+            },
+        )
+        .await
+        .unwrap()
+        .is_ok());
+}
+
+/// サイト設定の差分は全項目を1トランザクションで当て、1つでも衝突したら何も保存しない。
+/// テキストは別の画面の変更と行単位でマージされる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn site_settings_update_with_merges_text_and_is_all_or_nothing() {
+    use seiran_common::edit_diff::{Edit, EditConflict};
+    use seiran_common::repository::{PgSiteSettingsRepository, SiteSettingsRepository};
+
+    let pool = test_db_pool().await;
+    let settings = PgSiteSettingsRepository::new(pool.clone());
+    let suffix = unique_suffix();
+    let text_key = format!("edit_test_text_{suffix}");
+    let value_key = format!("edit_test_value_{suffix}");
+    settings.set(&text_key, "one\ntwo\nthree\n").await.unwrap();
+    settings.set(&value_key, "2").await.unwrap();
+
+    // 別の画面が1行目を変えた後で、開いた時点の内容から3行目を変えて保存する
+    settings.set(&text_key, "ONE\ntwo\nthree\n").await.unwrap();
+    let (tk, vk) = (text_key.clone(), value_key.clone());
+    let saved = settings
+        .update_with(Box::new(move |current| {
+            let text = Edit::Change {
+                from: "one\ntwo\nthree\n".to_string(),
+                to: "one\ntwo\nTHREE\n".to_string(),
+            }
+            .apply_text(&current[&tk])?;
+            let value = Edit::Change {
+                from: "2".to_string(),
+                to: "1".to_string(),
+            }
+            .apply_value(&current[&vk])?;
+            Ok(vec![(tk, text), (vk, value)])
+        }))
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(saved[&text_key], "ONE\ntwo\nTHREE\n");
+    assert_eq!(saved[&value_key], "1");
+
+    // 値 2 → 3 は現在値 1 と食い違うので衝突し、同時に送ったテキストも保存されない
+    let (tk, vk) = (text_key.clone(), value_key.clone());
+    let conflict = settings
+        .update_with(Box::new(move |current| {
+            let text = Edit::Set("changed".to_string()).apply_text(&current[&tk])?;
+            let value = Edit::Change {
+                from: "2".to_string(),
+                to: "3".to_string(),
+            }
+            .apply_value(&current[&vk])?;
+            Ok(vec![(tk, text), (vk, value)])
+        }))
+        .await
+        .unwrap();
+    assert!(matches!(conflict, Err(EditConflict)));
+    assert_eq!(
+        settings.get(&text_key).await.unwrap().as_deref(),
+        Some("ONE\ntwo\nTHREE\n")
+    );
+
+    sqlx::query("DELETE FROM site_settings WHERE key = ANY($1)")
+        .bind(vec![text_key, value_key])
+        .execute(&pool)
+        .await
+        .unwrap();
+}
+
+/// ユーザー操作メニューからのロール変更は、メニューを開いた時点のロールからの差分で当てる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn change_actor_role_conflicts_when_changed_elsewhere() {
+    use seiran_common::edit_diff::Edit;
+    use seiran_common::repository::moderation::{change_actor_role, ChangeRoleOutcome};
+
+    let pool = test_db_pool().await;
+    let actor = create_fixture_local_actor(&pool, "edrole").await;
+    let changeable = ["quarantine", "silence", "user"];
+    let change = |from: &str, to: &str| Edit::Change {
+        from: from.to_string(),
+        to: to.to_string(),
+    };
+    assert_eq!(
+        change_actor_role(&pool, actor, &change("user", "silence"), &changeable, 0)
+            .await
+            .unwrap(),
+        ChangeRoleOutcome::Changed
+    );
+    // 別の画面が silence にした後、user を見ていた画面から quarantine にしようとした
+    assert_eq!(
+        change_actor_role(&pool, actor, &change("user", "quarantine"), &changeable, 0)
+            .await
+            .unwrap(),
+        ChangeRoleOutcome::EditConflict
+    );
+}
+
+/// 予約の編集は、読んだ時点の revision のままのときだけ書く。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn scheduled_post_update_if_revision_rejects_stale_revision() {
+    use seiran_common::repository::scheduled_post as repo;
+
+    let pool = test_db_pool().await;
+    let actor = create_fixture_local_actor(&pool, "edsched").await;
+    let at = chrono::Utc::now() + chrono::Duration::hours(1);
+    let row = repo::insert_if_under_limit(
+        &pool,
+        seiran_common::generate_snowflake_id(chrono::Utc::now()),
+        actor,
+        &serde_json::json!({"text": "a"}),
+        at,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let updated = repo::update_if_revision(
+        &pool,
+        row.id,
+        actor,
+        &serde_json::json!({"text": "b"}),
+        at,
+        row.revision,
+    )
+    .await
+    .unwrap()
+    .expect("読んだ時点の revision なら書ける");
+    assert!(repo::update_if_revision(
+        &pool,
+        row.id,
+        actor,
+        &serde_json::json!({"text": "c"}),
+        at,
+        row.revision,
+    )
+    .await
+    .unwrap()
+    .is_none());
+    let current = repo::find_for_actor(&pool, row.id, actor)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.request["text"], "b");
+    assert_eq!(current.revision, updated.revision);
+}

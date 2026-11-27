@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, ActorSuggestion, getErrorMessage, ListDetail, ListSummary } from "../api/client";
+import { diffEdits } from "../lib/editDiff";
 
 /**
  * ListsSettingsPage が必要とするデータ取得・ミューテーション（リスト一覧取得、作成/改名/削除、
@@ -123,10 +124,19 @@ export function useListsSettings() {
     setSaving(true);
     setError("");
     try {
-      await api.lists.update(selectedId, name, editIsPublic);
+      // 開いた（最後に保存した）時点の値から変えた項目だけを差分で送る
+      await api.lists.update(
+        selectedId,
+        diffEdits(
+          { name: detail?.name ?? name, is_public: detail?.is_public ?? editIsPublic },
+          { name, is_public: editIsPublic },
+        ),
+      );
       await reloadLists();
       const d = await api.lists.get(selectedId);
       setDetail(d);
+      setEditName(d.name);
+      setEditIsPublic(d.is_public);
     } catch (err) {
       setError(getErrorMessage(err));
     } finally {

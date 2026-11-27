@@ -6,6 +6,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::edit_diff::Edit;
 use seiran_common::repository::AdminUserRow;
 
 use crate::error::ApiError;
@@ -66,7 +67,9 @@ pub struct ListUsersQuery {
 
 #[derive(Deserialize)]
 pub struct ChangeRoleRequest {
-    pub role: String,
+    /// 差分 `{"from": 選ぶ前, "to": 選んだロール}` なら、別の画面で別のロールにされていたとき
+    /// `EDIT_CONFLICT`（`seiran_common::edit_diff`）。
+    pub role: Edit<String>,
 }
 
 // ─── ハンドラ ─────────────────────────────────────────────────────────────
@@ -120,7 +123,7 @@ pub async fn change_user_role(
     Json(req): Json<ChangeRoleRequest>,
 ) -> Result<StatusCode, ApiError> {
     if !matches!(
-        req.role.as_str(),
+        req.role.target().as_str(),
         "quarantine" | "silence" | "user" | "moderator" | "emoji-editor" | "admin"
     ) {
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
@@ -128,9 +131,9 @@ pub async fn change_user_role(
 
     state
         .users
-        .update_role(id, req.role.as_str())
+        .update_role(id, &req.role)
         .await
-        .map_err(|e| ApiError::Internal(e.to_string()))?;
+        .map_err(|e| ApiError::Internal(e.to_string()))??;
 
     Ok(StatusCode::NO_CONTENT)
 }

@@ -1,4 +1,5 @@
 import { mailLanguage, request, uploadFormData } from "./core";
+import type { Edit } from "../lib/editDiff";
 import type { AdminReport, AdminUser, AuthIpBlock, DeniedHostsResponse, CustomEmoji, EmojiImportStatus, FediverseRelay, RemoteEmoji, ReportComment, SiteSettings, StorageProvider, SuspendedActor } from "./types";
 
 export const admin = {
@@ -74,7 +75,8 @@ export const admin = {
       `/admin/users/${encodeURIComponent(id)}/unsuspend`,
     );
   },
-  changeUserRole(id: string, role: string) {
+  /** `role` は選ぶ前のロールからの差分（別の画面で変えられていたら `EDIT_CONFLICT`）。 */
+  changeUserRole(id: string, role: Edit<string>) {
     return request<void>(
       "POST",
       `/admin/users/${encodeURIComponent(id)}/role`,
@@ -109,7 +111,8 @@ export const admin = {
       `/admin/actors/${encodeURIComponent(id)}/moderation`,
     );
   },
-  changeActorRole(id: string, role: string) {
+  /** `role` はメニューを開いた時点のロールからの差分（別の画面で変えられていたら `EDIT_CONFLICT`）。 */
+  changeActorRole(id: string, role: Edit<string>) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/role`, { role });
   },
   unsuspendActor(id: string) {
@@ -119,57 +122,17 @@ export const admin = {
   getSiteSettings() {
     return request<SiteSettings>("GET", "/admin/site-settings");
   },
+  /**
+   * 変えた項目だけを差分（`Edit`）で送る。書き込み専用の項目（`smtp_password`・
+   * `turnstile_secret_key`・`cloudflare_api_token`）は画面が現在値を知らないので値だけ送る
+   * （上書き）。どれか1つでも別の画面の変更と重なったら何も保存されず `EDIT_CONFLICT`。
+   */
   updateSiteSettings(
-    patch: Partial<{
-      smtp_host: string;
-      smtp_port: string;
-      smtp_username: string;
-      smtp_password: string;
-      smtp_from: string;
-      require_email_verification: string;
-      site_name: string;
-      site_color: string;
-      site_icon_url: string;
-      site_icon_sha256: string;
-      site_icon_media_file_id: string;
-      media_proxy_url: string;
-      site_description: string;
-      terms_of_service_text: string;
-      login_bg_url: string;
-      login_bg_type: string;
-      login_bg_media_file_id: string;
-      auth_bruteforce_window_minutes: string;
-      auth_bruteforce_max_variants: string;
-      auth_ip_block_window_minutes: string;
-      auth_ip_block_threshold: string;
-      auth_ip_block_duration_hours: string;
-      turnstile_site_key: string;
-      turnstile_secret_key: string;
-      cloudflare_api_token: string;
-      cloudflare_zone_id: string;
-      password_reset_max_active: string;
-      account_creation_ip_window_minutes: string;
-      account_creation_ip_max: string;
-      max_user_accounts: string;
-      registration_closed: string;
-      post_rate_limit_window_minutes: string;
-      post_rate_limit_max_user: string;
-      post_rate_limit_max_moderator: string;
-      follow_rate_limit_window_hours: string;
-      follow_rate_limit_max_user: string;
-      follow_rate_limit_max_moderator: string;
-      follow_rate_limit_max_quarantine: string;
-      list_max_count_user: string;
-      list_max_count_moderator: string;
-      scheduled_post_max_user: string;
-      scheduled_post_max_moderator: string;
-      list_member_max_user: string;
-      list_member_max_moderator: string;
-      search_rate_limit_window_minutes: string;
-      search_rate_limit_max_user: string;
-      search_rate_limit_max_moderator: string;
-      oembed_allowed_domains: string;
-    }>,
+    patch: { [K in Exclude<keyof SiteSettings, `${string}_set`>]?: Edit<string> } & {
+      smtp_password?: string;
+      turnstile_secret_key?: string;
+      cloudflare_api_token?: string;
+    },
   ) {
     return request<SiteSettings>("PATCH", "/admin/site-settings", patch);
   },
@@ -193,7 +156,8 @@ export const admin = {
   getDeniedHosts() {
     return request<DeniedHostsResponse>("GET", "/admin/denied-hosts");
   },
-  updateDeniedHosts(text: string) {
+  /** textarea の内容の差分。ホストの集合として、足した・除いた分だけが今の一覧に当てられる。 */
+  updateDeniedHosts(text: Edit<string>) {
     return request<DeniedHostsResponse>("PUT", "/admin/denied-hosts", { text });
   },
   listAuthIpBlocks() {
@@ -221,7 +185,21 @@ export const admin = {
   }) {
     return request<StorageProvider>("POST", "/admin/storage-providers", body);
   },
-  updateStorageProvider(id: number, patch: Record<string, unknown>) {
+  /** 変えた項目だけを差分で送る。`secret_key`（書き込み専用）と `is_active`（切り替え）は値だけ。 */
+  updateStorageProvider(
+    id: number,
+    patch: {
+      name?: Edit<string>;
+      endpoint?: Edit<string>;
+      bucket?: Edit<string>;
+      region?: Edit<string>;
+      access_key?: Edit<string>;
+      secret_key?: string;
+      public_url?: Edit<string>;
+      capacity_mb?: Edit<number | null>;
+      is_active?: boolean;
+    },
+  ) {
     return request<StorageProvider>(
       "PATCH",
       `/admin/storage-providers/${id}`,
@@ -246,7 +224,7 @@ export const admin = {
   },
   updateEmoji(
     id: string,
-    body: { category?: string; tags?: string[]; license?: string },
+    body: { category?: Edit<string>; tags?: Edit<string[]>; license?: Edit<string> },
   ) {
     return request<CustomEmoji>(
       "PATCH",

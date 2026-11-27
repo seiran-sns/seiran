@@ -1,9 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../api/client";
 import type { ActivitySubscriptionAllowance, BlueskyPrivacy } from "../api/types";
 import AppShell from "../components/layout/AppShell";
 import SwitchField from "../components/common/SwitchField";
+import { isEditConflict } from "../lib/editDiff";
 import styles from "./PrivacySettings.module.css";
 
 /** 設定画面「プライバシー」。Bsky Discoverフィード等のアルゴリズムレコメンドからの
@@ -27,12 +28,16 @@ export default function PrivacySettingsPage() {
     allow_activity_subscriptions: "followers",
   });
   const [blueskySaving, setBlueskySaving] = useState(false);
+  /** サーバーに保存されている「投稿の通知」の範囲。ラジオボタンの選び直しはここからの差分で送る。 */
+  const savedActivitySubscriptions = useRef<ActivitySubscriptionAllowance>("followers");
   /** 最後に保存できた項目（その項目の欄にだけ「保存しました」を出す）。 */
   const [blueskySaved, setBlueskySaved] = useState<keyof BlueskyPrivacy | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [lockSaving, setLockSaving] = useState(false);
   const [error, setError] = useState("");
+  /** 「投稿の通知」（選んだ時点で保存するラジオボタン）の保存の失敗。選択肢のすぐ下に出す。 */
+  const [activityError, setActivityError] = useState("");
   const [saved, setSaved] = useState(false);
   const [lockSaved, setLockSaved] = useState(false);
 
@@ -48,6 +53,7 @@ export default function PrivacySettingsPage() {
           setHideFromAlgorithmicRecommendations(contentVisibility.hide_from_algorithmic_recommendations);
           setIsLocked(lock.is_locked);
           setBlueskyPrivacy(bluesky);
+          savedActivitySubscriptions.current = bluesky.allow_activity_subscriptions;
         }
       })
       .catch((err) => {
@@ -83,13 +89,27 @@ export default function PrivacySettingsPage() {
     setBlueskyPrivacy({ ...previous, ...update });
     setBlueskySaving(true);
     setError("");
+    setActivityError("");
     setBlueskySaved(null);
     try {
-      setBlueskyPrivacy(await api.account.updateBlueskyPrivacy(update));
+      const { allow_activity_subscriptions: allow, hide_from_unauthenticated } = update;
+      const saved = await api.account.updateBlueskyPrivacy({
+        hide_from_unauthenticated,
+        // 別の画面で変えられていたら保存せずエラーを出す
+        allow_activity_subscriptions:
+          allow === undefined ? undefined : { from: savedActivitySubscriptions.current, to: allow },
+      });
+      savedActivitySubscriptions.current = saved.allow_activity_subscriptions;
+      setBlueskyPrivacy(saved);
       setBlueskySaved(Object.keys(update)[0] as keyof BlueskyPrivacy);
     } catch (err) {
-      setBlueskyPrivacy(previous);
-      setError(getErrorMessage(err));
+      // 別の画面との衝突なら、選んだ値は画面に残してエラーだけ出す
+      if (!isEditConflict(err)) setBlueskyPrivacy(previous);
+      if (update.allow_activity_subscriptions !== undefined) {
+        setActivityError(getErrorMessage(err));
+      } else {
+        setError(getErrorMessage(err));
+      }
     } finally {
       setBlueskySaving(false);
     }
@@ -168,6 +188,7 @@ export default function PrivacySettingsPage() {
             </label>
           ))}
         </div>
+        {activityError && <p className={styles.error}>{activityError}</p>}
         <p className={styles.note}>{t("account:privacySettings.blueskyClientsOnlyNote")}</p>
         {blueskySaved === "allow_activity_subscriptions" && (
           <p className={styles.success}>{t("account:privacySettings.saved")}</p>

@@ -7,6 +7,7 @@ use axum::{
 };
 use serde::Deserialize;
 
+use seiran_common::edit_diff::Edit;
 use seiran_common::repository::AppTokenRow;
 
 use seiran_common::generate_snowflake_id;
@@ -20,8 +21,10 @@ use crate::{error::ApiError, middleware::extract_auth, AppState};
 
 #[derive(Deserialize)]
 pub struct UpdateLanguageRequest {
-    /// `None` は「自動」（ブラウザ設定に従う）。
-    pub language: Option<String>,
+    /// `None` は「自動」（ブラウザ設定に従う）。差分 `{"from": 選ぶ前, "to": 選んだ値}` なら、
+    /// 別の画面で別の値にされていたとき `EDIT_CONFLICT`（`seiran_common::edit_diff`）。
+    #[serde(default)]
+    pub language: Edit<Option<String>>,
 }
 
 /// `POST /api/account/language`（#55 表示設定）
@@ -39,7 +42,7 @@ pub async fn update_language(
     )
     .await?;
 
-    if let Some(lang) = &req.language {
+    if let Some(lang) = req.language.target() {
         if !is_supported_display_language(lang) {
             return Err(ApiError::BadRequest("UNSUPPORTED_LANGUAGE".to_owned()));
         }
@@ -47,9 +50,9 @@ pub async fn update_language(
 
     state
         .users
-        .update_language_preference(auth_user.user_id, req.language.as_deref())
+        .update_language_preference(auth_user.user_id, &req.language)
         .await
-        .map_err(|e| ApiError::Internal(format!("[update-language] users UPDATE 失敗: {}", e)))?;
+        .map_err(|e| ApiError::Internal(format!("[update-language] users UPDATE 失敗: {}", e)))??;
 
     Ok(Json(()))
 }
@@ -259,8 +262,11 @@ pub struct BlueskyPrivacyResponse {
 /// 指定した項目だけを変える。
 #[derive(Deserialize)]
 pub struct UpdateBlueskyPrivacyRequest {
+    /// スイッチの即時保存。押した時点の表示と逆の値にするだけで衝突しようがないので上書き。
     pub hide_from_unauthenticated: Option<bool>,
-    pub allow_activity_subscriptions: Option<String>,
+    /// ラジオボタンの即時保存。差分 `{"from": 選ぶ前, "to": 選んだ値}` なら、別の画面で別の値に
+    /// されていたとき `EDIT_CONFLICT`（`seiran_common::edit_diff`）。
+    pub allow_activity_subscriptions: Option<Edit<String>>,
 }
 
 async fn bluesky_privacy(
@@ -303,8 +309,8 @@ pub async fn update_bluesky_privacy(
     Json(req): Json<UpdateBlueskyPrivacyRequest>,
 ) -> Result<Json<BlueskyPrivacyResponse>, ApiError> {
     use seiran_common::atp::self_settings::ALLOW_SUBSCRIPTIONS_VALUES;
-    if let Some(allow) = req.allow_activity_subscriptions.as_deref() {
-        if !ALLOW_SUBSCRIPTIONS_VALUES.contains(&allow) {
+    if let Some(allow) = &req.allow_activity_subscriptions {
+        if !ALLOW_SUBSCRIPTIONS_VALUES.contains(&allow.target().as_str()) {
             return Err(ApiError::BadRequest(format!(
                 "allow_activity_subscriptions は {} のいずれかです",
                 ALLOW_SUBSCRIPTIONS_VALUES.join("/")
@@ -322,15 +328,15 @@ pub async fn update_bluesky_privacy(
             .map_err(db_err)?;
         crate::handlers::notes::recommit_bsky_profile(&state, user.actor_id).await;
     }
-    if let Some(allow) = req.allow_activity_subscriptions.as_deref() {
+    if let Some(allow) = &req.allow_activity_subscriptions {
         state
             .actors
             .update_allow_activity_subscriptions(user.actor_id, allow)
             .await
-            .map_err(db_err)?;
+            .map_err(db_err)??;
         if let Err(e) = state
             .atp_service
-            .commit_notification_declaration(user.actor_id, allow, chrono::Utc::now())
+            .commit_notification_declaration(user.actor_id, allow.target(), chrono::Utc::now())
             .await
         {
             tracing::error!(

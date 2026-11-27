@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage } from "../../api/client";
 import type { SiteSettings } from "../../api/types";
+import { diffEdits } from "../../lib/editDiff";
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 import sheet from "./RoleRateLimitPanel.module.css";
@@ -69,12 +70,20 @@ export default function RoleRateLimitPanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [saved, setSaved] = useState(false);
-  const [values, setValues] = useState<Partial<Record<RateLimitKey, string>>>({});
+  const [values, setValues] = useState<Record<RateLimitKey, string>>({} as Record<RateLimitKey, string>);
+  /** 開いた（最後に保存した）時点のサーバーの値。保存はここからの差分で送る。 */
+  const baseline = useRef<Record<RateLimitKey, string>>({} as Record<RateLimitKey, string>);
+
+  function applySettings(s: SiteSettings) {
+    const loaded = Object.fromEntries(ALL_KEYS.map((k) => [k, s[k]])) as Record<RateLimitKey, string>;
+    baseline.current = loaded;
+    setValues(loaded);
+  }
 
   useEffect(() => {
     api.admin
       .getSiteSettings()
-      .then((s) => setValues(Object.fromEntries(ALL_KEYS.map((k) => [k, s[k]]))))
+      .then(applySettings)
       .catch((e) => setError(getErrorMessage(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -90,7 +99,8 @@ export default function RoleRateLimitPanel() {
     setError("");
     setSaved(false);
     try {
-      await api.admin.updateSiteSettings(values);
+      // 変えた項目だけを差分で送り、別の画面の変更も取り込んだ保存後の値を表示し直す
+      applySettings(await api.admin.updateSiteSettings(diffEdits(baseline.current, values)));
       setSaved(true);
     } catch (e) {
       setError(getErrorMessage(e));

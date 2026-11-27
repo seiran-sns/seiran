@@ -5,6 +5,7 @@ import { ActorSuggestion, AlsoKnownAsItem, api, DriveFile, getErrorMessage, Prof
 import AppShell from "../components/layout/AppShell";
 import { useAuth } from "../contexts/AuthContext";
 import { calcLimit } from "../lib/format";
+import { diffEdits } from "../lib/editDiff";
 import panel from "../components/common/Panel.module.css";
 import styles from "./ProfileEdit.module.css";
 import DisplayName from "../components/common/DisplayName";
@@ -17,6 +18,21 @@ const DISPLAY_NAME_MAX_GRAPHEMES = 64;
 const DISPLAY_NAME_MAX_BYTES = 640;
 const BIO_MAX_GRAPHEMES = 256;
 const BIO_MAX_BYTES = 2_560;
+
+/** 保存で送る項目（差分の基準と画面の値を同じ形で持つ）。 */
+interface ProfileForm {
+  display_name: string;
+  bio: string;
+  avatar_media_id: string | null;
+  banner_media_id: string | null;
+  profile_fields: ProfileField[];
+  birthday: string | null;
+  birthday_public: boolean;
+}
+
+function filledProfileFields(fields: ProfileField[]): ProfileField[] {
+  return fields.filter((f) => f.name.trim() && f.value.trim());
+}
 
 function emptyProfileFields(): ProfileField[] {
   return Array.from({ length: PROFILE_FIELD_SLOTS }, () => ({ name: "", value: "" }));
@@ -53,6 +69,8 @@ export default function ProfileEditPage() {
   const [currentBannerUrl, setCurrentBannerUrl] = useState<string | null>(null);
   const [uploadingBanner, setUploadingBanner] = useState(false);
   const bannerFileRef = useRef<HTMLInputElement>(null);
+  /** 開いた時点のサーバーの値。保存はここからの差分で送る（別の画面の変更を上書きしない）。 */
+  const baseline = useRef<ProfileForm | null>(null);
 
   useEffect(() => {
     if (!user) return;
@@ -68,8 +86,18 @@ export default function ProfileEditPage() {
         setCurrentAvatarUrl(p.avatar_url ?? null);
         setCurrentBannerUrl(p.banner_url ?? null);
         const slots = emptyProfileFields();
-        p.profile_fields.slice(0, PROFILE_FIELD_SLOTS).forEach((f, i) => { slots[i] = f; });
+        const loadedFields = p.profile_fields.slice(0, PROFILE_FIELD_SLOTS);
+        loadedFields.forEach((f, i) => { slots[i] = f; });
         setProfileFields(slots);
+        baseline.current = {
+          display_name: p.display_name ?? "",
+          bio: p.bio ?? "",
+          avatar_media_id: p.avatar_media_id || null,
+          banner_media_id: p.banner_media_id || null,
+          profile_fields: filledProfileFields(loadedFields),
+          birthday: p.birthday ?? null,
+          birthday_public: p.birthday_public ?? false,
+        };
         setAkaItems(p.also_known_as);
       })
       .catch((e) => !cancelled && setError(getErrorMessage(e)))
@@ -179,15 +207,19 @@ export default function ProfileEditPage() {
     setError("");
     setSaved(false);
     try {
-      await api.users.updateProfile({
+      const base = baseline.current;
+      if (!base) return;
+      const current: ProfileForm = {
         display_name: displayName,
         bio,
-        ...(avatar ? { avatar_media_id: avatar.id } : {}),
-        ...(banner ? { banner_media_id: banner.id } : {}),
-        profile_fields: profileFields.filter((f) => f.name.trim() && f.value.trim()),
+        avatar_media_id: avatar ? avatar.id : base.avatar_media_id,
+        banner_media_id: banner ? banner.id : base.banner_media_id,
+        profile_fields: filledProfileFields(profileFields),
         birthday: birthday || null,
         birthday_public: birthdayPublic,
-      });
+      };
+      // 開いた時点から変えた項目だけを差分で送る
+      await api.users.updateProfile(diffEdits(base, current));
       setSaved(true);
       setTimeout(() => navigate(`/@${user?.username ?? ""}`), 500);
     } catch (err) {

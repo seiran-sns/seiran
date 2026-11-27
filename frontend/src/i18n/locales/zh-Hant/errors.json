@@ -127,5 +127,6 @@
   "OAUTH_REQUEST_NOT_FOUND": "找不到授權請求或已過期。請從應用程式重新開始。",
   "OAUTH_CLIENT_UNAVAILABLE": "無法取得應用程式資訊。請稍後再試。",
   "OAUTH_INVALID_SCOPE": "應用程式請求的權限無效",
-  "OAUTH_SESSION_NOT_FOUND": "找不到該授權"
+  "OAUTH_SESSION_NOT_FOUND": "找不到該授權",
+  "EDIT_CONFLICT": "這些設定似乎已在其他畫面中被變更。請重新載入頁面"
 }

@@ -768,15 +768,21 @@ export default function PostComposer({
       );
       let note: Note | null = null;
       if (scheduleEnabled) {
-        const at = new Date(scheduleAt).toISOString();
+        // 予約日時を変えていなければ開いた時点の値をそのまま送る（入力欄は分単位なので、
+        // 変えていないのに変えた扱いになって別の画面の変更と衝突しないように）
+        const at =
+          editingScheduled &&
+          scheduleAt === toDatetimeLocal(new Date(editingScheduled.scheduledAt))
+            ? editingScheduled.scheduledAt
+            : new Date(scheduleAt).toISOString();
         const saved = editingScheduled
-          ? await api.scheduledPosts.update(editingScheduled.id, at, body)
+          ? await api.scheduledPosts.update(editingScheduled.id, at, body, editingScheduled)
           : await api.scheduledPosts.create(at, body);
         refreshScheduledPostCounts();
         showSuccess(t("home:postComposer.schedule.saved"));
         onScheduled?.(saved);
       } else if (editingScheduled) {
-        note = await api.scheduledPosts.publish(editingScheduled.id, body);
+        note = await api.scheduledPosts.publish(editingScheduled.id, body, editingScheduled);
         refreshScheduledPostCounts();
       } else {
         note = await api.notes.create(

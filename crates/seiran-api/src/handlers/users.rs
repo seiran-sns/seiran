@@ -9,6 +9,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use seiran_common::ap::fetch_ap_collection_uris;
 use seiran_common::atp::fetch_bsky_profile;
+use seiran_common::edit_diff::{Edit, EditConflict};
 use seiran_common::repository::{extract_shortcode_candidates, Actor, ActorProfileRow};
 use seiran_common::ApDeliveryKind;
 
@@ -316,7 +317,7 @@ pub async fn user_followers(
 
 /// プロフィールのキーバリュー項目（#62、Mastodon 等の「プロフィールのメタデータ欄」に相当）。
 /// `actors.profile_fields`（JSONB配列）にそのままシリアライズされる。
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProfileField {
     pub name: String,
     pub value: String,
@@ -412,6 +413,12 @@ pub struct ProfileResponse {
     /// （編集フォームの現在値用、他人には無関係な内部設定のため省略）。
     #[serde(skip_serializing_if = "Option::is_none")]
     pub birthday_public: Option<bool>,
+    /// アイコン・背景画像のメディア ID（文字列）。本人が閲覧している場合のみ返す（編集フォームが
+    /// 変更の差分の編集前の値として送る、`seiran_common::edit_diff`）。
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub avatar_media_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub banner_media_id: Option<String>,
     /// プロフィールの「別のアカウント」（alsoKnownAs、seiran独自拡張）。現状ローカル
     /// ユーザーのみ対応（`public_lists`と同様、リモートは将来課題）。
     pub also_known_as: Vec<crate::handlers::also_known_as::AlsoKnownAsItem>,
@@ -561,6 +568,8 @@ async fn fetch_bsky_profile_from_appview(
         follower_count: 0,
         birthday: None,
         birthday_public: None,
+        avatar_media_id: None,
+        banner_media_id: None,
         also_known_as: vec![],
         link_resolutions: std::collections::HashMap::new(),
     })
@@ -1290,7 +1299,10 @@ async fn build_profile_response_inner(
         .unwrap_or((0, 0));
     let instance = resolve_profile_instance_info(state, &actor.actor_type, &actor.domain).await;
     let also_known_as = load_also_known_as(state, &actor).await;
-    let (birthday, birthday_public) = visible_birthday(&actor, my_actor_id == Some(actor_id));
+    let is_self = my_actor_id == Some(actor_id);
+    let (birthday, birthday_public) = visible_birthday(&actor, is_self);
+    let (avatar_media_id, banner_media_id) =
+        own_profile_media_ids(state, my_user_id, is_self).await;
     let did_status = local_did_status(state, &actor).await;
 
     Ok(Json(ProfileResponse {
@@ -1326,9 +1338,37 @@ async fn build_profile_response_inner(
         follower_count,
         birthday,
         birthday_public,
+        avatar_media_id,
+        banner_media_id,
         also_known_as,
         link_resolutions,
     }))
+}
+
+/// 本人のプロフィールなら、アイコン・背景画像のメディア ID（`ProfileResponse` 参照）。
+async fn own_profile_media_ids(
+    state: &AppState,
+    my_user_id: Option<i64>,
+    is_self: bool,
+) -> (Option<String>, Option<String>) {
+    let Some(user_id) = my_user_id.filter(|_| is_self) else {
+        return (None, None);
+    };
+    match state.actors.find_profile_by_user_id(user_id).await {
+        Ok(Some(row)) => (
+            Some(
+                row.avatar_media_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+            ),
+            Some(
+                row.banner_media_id
+                    .map(|id| id.to_string())
+                    .unwrap_or_default(),
+            ),
+        ),
+        _ => (None, None),
+    }
 }
 async fn fetch_remote_profile(
     username: &str,
@@ -1452,6 +1492,8 @@ async fn fetch_remote_profile(
         follower_count: 0,
         birthday: None,
         birthday_public: None,
+        avatar_media_id: None,
+        banner_media_id: None,
         also_known_as: vec![],
         link_resolutions: std::collections::HashMap::new(),
     })
@@ -1471,28 +1513,30 @@ async fn lookup_by_uri(uri: &str, my_user_id: Option<i64>, state: &AppState) -> 
 
 #[derive(Deserialize)]
 pub struct UpdateProfileRequest {
-    pub display_name: Option<String>,
-    /// 自己紹介。未指定なら現在値を保持、空文字なら空に更新。
-    pub bio: Option<String>,
-    /// `None` = フィールド未指定（現在値を保持）
-    /// `Some(None)` = null を明示（解除）
-    /// `Some(Some(id))` = メディア ID を設定（文字列で受け取り精度損失を防ぐ）
+    /// 各項目は差分 `{"from": 編集前, "to": 編集後}` か編集後の値だけ（上書き）
+    /// （`seiran_common::edit_diff`）。省略した項目は現在値を保持する。`null`（未設定）は
+    /// 表示名・自己紹介では空文字列と同じに扱う。
     #[serde(default)]
-    pub avatar_media_id: Option<Option<String>>,
+    pub display_name: Option<Edit<String>>,
+    /// 自己紹介。差分なら別の画面の変更と行単位で 3-way マージする。
     #[serde(default)]
-    pub banner_media_id: Option<Option<String>>,
-    /// プロフィールのキーバリュー項目（#62）。`None` = 現在値を保持、`Some(vec)` = 全置換
-    /// （空・空白のみの行は保存時に除外する）。
+    pub bio: Option<Edit<String>>,
+    /// `{"from": 編集前の ID, "to": null}` で解除、`to` に ID（文字列で受け取り精度損失を
+    /// 防ぐ）で設定。上書きの形での `null` は省略と同じ（現在値を保持）。
     #[serde(default)]
-    pub profile_fields: Option<Vec<ProfileField>>,
-    /// 生年月日（`YYYY-MM-DD`、Misskey互換の`birthday`）。`None` = 現在値を保持、
-    /// `Some(None)` = 削除、`Some(Some(date))` = 設定。
+    pub avatar_media_id: Option<Edit<Option<String>>>,
     #[serde(default)]
-    pub birthday: Option<Option<String>>,
+    pub banner_media_id: Option<Edit<Option<String>>>,
+    /// プロフィールのキーバリュー項目（#62）。全置換（空・空白のみの行は保存時に除外する）。
+    #[serde(default)]
+    pub profile_fields: Option<Edit<Vec<ProfileField>>>,
+    /// 生年月日（`YYYY-MM-DD`、Misskey互換の`birthday`）。`to` が `null` なら削除。
+    #[serde(default)]
+    pub birthday: Option<Edit<Option<String>>>,
     /// `true`ならFediverseへ`vcard:bday`として公開する（デフォルト`false`、Misskey本家には
-    /// 無いseiran独自拡張）。`None` = 現在値を保持。
+    /// 無いseiran独自拡張）。
     #[serde(default)]
-    pub birthday_public: Option<bool>,
+    pub birthday_public: Option<Edit<bool>>,
 }
 
 #[derive(Serialize)]
@@ -1606,132 +1650,42 @@ pub async fn update_profile(
         Err(e) => return e.into_response(),
     };
 
-    if let Err(e) = validate_profile_text_lengths(req.display_name.as_deref(), req.bio.as_deref()) {
+    if let Err(e) = validate_profile_text_lengths(
+        req.display_name.as_ref().map(|e| e.target().as_str()),
+        req.bio.as_ref().map(|e| e.target().as_str()),
+    ) {
         return e.into_response();
     }
-
-    // 現在のプロフィールを取得
-    let current: ActorProfileRow = match state
-        .actors
-        .find_profile_by_user_id(auth_user.user_id)
-        .await
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
-        Err(e) => {
-            tracing::error!("[update_profile] SELECT 失敗: {}", e);
-            return ApiError::Internal(e.to_string()).into_response();
-        }
+    let edits = match parse_profile_edits(req) {
+        Ok(edits) => edits,
+        Err(resp) => return *resp,
     };
-
-    // リクエストで指定されたフィールドのみ上書き
-    let display_name_changed = req.display_name.is_some();
-    let new_display_name: Option<String> = if req.display_name.is_some() {
-        req.display_name
-    } else {
-        current.display_name
-    };
-    let new_bio: Option<String> = if req.bio.is_some() {
-        req.bio
-    } else {
-        current.bio
-    };
-    let new_avatar_media_id: Option<i64> = match req.avatar_media_id {
-        None => current.avatar_media_id,
-        Some(None) => None,
-        Some(Some(s)) => match s.parse::<i64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                return ApiError::BadRequest("avatar_media_id が不正な値です".to_string())
-                    .into_response()
-            }
-        },
-    };
-    let new_banner_media_id: Option<i64> = match req.banner_media_id {
-        None => current.banner_media_id,
-        Some(None) => None,
-        Some(Some(s)) => match s.parse::<i64>() {
-            Ok(id) => Some(id),
-            Err(_) => {
-                return ApiError::BadRequest("banner_media_id が不正な値です".to_string())
-                    .into_response()
-            }
-        },
-    };
-    let new_profile_fields: serde_json::Value = match req.profile_fields {
-        Some(fields) => match validate_profile_fields(fields) {
-            Ok(v) => v,
-            Err(resp) => return *resp,
-        },
-        None => current.profile_fields,
-    };
-    let new_birth_date: Option<chrono::NaiveDate> = match req.birthday {
-        None => current.birth_date,
-        Some(None) => None,
-        Some(Some(s)) => match chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d") {
-            Ok(d) => Some(d),
-            Err(_) => {
-                return ApiError::BadRequest(
-                    "birthday はYYYY-MM-DD形式で指定してください".to_string(),
-                )
-                .into_response()
-            }
-        },
-    };
-    let new_birth_date_public = req.birthday_public.unwrap_or(current.birth_date_public);
 
     // 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。display_name が
-    // 変わらない更新（bio のみ編集等）では再計算せず既存値を保持する。
-    let empty_emoji_map = || serde_json::Value::Object(serde_json::Map::new());
-    let new_emoji_map: serde_json::Value = if display_name_changed {
-        let candidates = new_display_name
-            .as_deref()
-            .map(extract_shortcode_candidates)
-            .unwrap_or_default();
-        if candidates.is_empty() {
-            empty_emoji_map()
-        } else {
-            match state.emojis.find_urls_by_shortcodes(&candidates).await {
-                Ok(pairs) => serde_json::Value::Object(
-                    pairs
-                        .into_iter()
-                        .map(|(code, url)| (format!(":{}:", code), serde_json::Value::String(url)))
-                        .collect(),
-                ),
-                Err(e) => {
-                    tracing::error!(
-                        "[update_profile] 表示名の絵文字ショートコード解決失敗: {}",
-                        e
-                    );
-                    current.emoji_map.clone().unwrap_or_else(empty_emoji_map)
-                }
-            }
-        }
-    } else {
-        current.emoji_map.clone().unwrap_or_else(empty_emoji_map)
+    // 変わらない更新（bio のみ編集等）では再計算せず既存値を保持する。表示名の差分は当たれば
+    // 必ず編集後の値になるので、ロックの前に編集後の値から解決しておく。
+    let new_emoji_map: Option<serde_json::Value> = match &edits.display_name {
+        Some(edit) => Some(resolve_display_name_emoji_map(&state, edit.target()).await),
+        None => None,
     };
 
-    // UPDATE
-    if let Err(e) = state
+    let updated = match state
         .actors
-        .update_profile(
+        .update_profile_with(
             auth_user.user_id,
-            &seiran_common::repository::LocalProfileUpdate {
-                display_name: new_display_name.as_deref(),
-                bio: new_bio.as_deref(),
-                avatar_media_id: new_avatar_media_id,
-                banner_media_id: new_banner_media_id,
-                profile_fields: &new_profile_fields,
-                emoji_map: &new_emoji_map,
-                birth_date: new_birth_date,
-                birth_date_public: new_birth_date_public,
-            },
+            Box::new(move |current| edits.apply(current, new_emoji_map)),
         )
         .await
     {
-        tracing::error!("[update_profile] UPDATE 失敗: {}", e);
-        return ApiError::Internal(e.to_string()).into_response();
-    }
+        Ok(Ok(Some(updated))) => updated,
+        Ok(Ok(None)) => return ApiError::NotFound("ACTOR_NOT_FOUND").into_response(),
+        Ok(Err(conflict)) => return ApiError::from(conflict).into_response(),
+        Err(e) => {
+            tracing::error!("[update_profile] UPDATE 失敗: {}", e);
+            return ApiError::Internal(e.to_string()).into_response();
+        }
+    };
+    let current = &updated;
 
     // ATP repo へプロフィールを再コミットして bsky 側にも avatar/bio/プロフィールの
     // キーバリュー項目（#62、bio 末尾へのリスト追記）を反映する。UPDATE 済みの最新値を
@@ -1774,16 +1728,147 @@ pub async fn update_profile(
         .await;
 
     Json(UpdateProfileResponse {
-        username: current.username,
-        display_name: new_display_name,
-        bio: new_bio,
-        avatar_media_id: new_avatar_media_id,
-        banner_media_id: new_banner_media_id,
-        profile_fields: profile_fields_from_json(&new_profile_fields),
-        birthday: new_birth_date,
-        birthday_public: new_birth_date_public,
+        username: updated.username,
+        display_name: updated.display_name,
+        bio: updated.bio,
+        avatar_media_id: updated.avatar_media_id,
+        banner_media_id: updated.banner_media_id,
+        profile_fields: profile_fields_from_json(&updated.profile_fields),
+        birthday: updated.birth_date,
+        birthday_public: updated.birth_date_public,
     })
     .into_response()
+}
+
+/// 検証・正規化済みのプロフィール編集。`None` の項目は変えない。
+struct ProfileEdits {
+    display_name: Option<Edit<String>>,
+    bio: Option<Edit<String>>,
+    avatar_media_id: Option<Edit<Option<i64>>>,
+    banner_media_id: Option<Edit<Option<i64>>>,
+    profile_fields: Option<Edit<Vec<ProfileField>>>,
+    birth_date: Option<Edit<Option<chrono::NaiveDate>>>,
+    birth_date_public: Option<Edit<bool>>,
+}
+
+impl ProfileEdits {
+    /// ロック中の現在値に差分を当てる。`emoji_map` は表示名を変えるときの解決済みマップ。
+    fn apply(
+        self,
+        mut row: ActorProfileRow,
+        emoji_map: Option<serde_json::Value>,
+    ) -> Result<ActorProfileRow, EditConflict> {
+        fn value<T: PartialEq + Clone>(
+            edit: Option<Edit<T>>,
+            current: T,
+        ) -> Result<T, EditConflict> {
+            match edit {
+                Some(edit) => edit.apply_value(&current),
+                None => Ok(current),
+            }
+        }
+        if let Some(edit) = self.display_name {
+            let current = row.display_name.take().unwrap_or_default();
+            row.display_name = Some(edit.apply_value(&current)?);
+        }
+        if let Some(edit) = self.bio {
+            let current = row.bio.take().unwrap_or_default();
+            let merged = edit.apply_text(&current)?;
+            // 編集後の値は上限内と確かめてあるので、超えるのは別の画面の変更と合わせたときだけ。
+            // どちらかを削らないと保存できないので衝突として知らせる
+            if exceeds_profile_text_limit(&merged, MAX_BIO_GRAPHEMES, MAX_BIO_BYTES) {
+                return Err(EditConflict);
+            }
+            row.bio = Some(merged);
+        }
+        row.avatar_media_id = value(self.avatar_media_id, row.avatar_media_id)?;
+        row.banner_media_id = value(self.banner_media_id, row.banner_media_id)?;
+        if let Some(edit) = self.profile_fields {
+            let fields = edit.apply_value(&profile_fields_from_json(&row.profile_fields))?;
+            row.profile_fields = serde_json::to_value(fields).unwrap_or_default();
+        }
+        row.birth_date = value(self.birth_date, row.birth_date)?;
+        row.birth_date_public = value(self.birth_date_public, row.birth_date_public)?;
+        if let Some(map) = emoji_map {
+            row.emoji_map = Some(map);
+        }
+        Ok(row)
+    }
+}
+
+/// リクエストの各項目を検証し、保存する形（メディア ID・日付・整形済みの項目）に直す。
+fn parse_profile_edits(req: UpdateProfileRequest) -> Result<ProfileEdits, Box<Response>> {
+    fn bad(message: &str) -> Box<Response> {
+        Box::new(ApiError::BadRequest(message.to_string()).into_response())
+    }
+    fn media_id(
+        edit: Option<Edit<Option<String>>>,
+        message: &str,
+    ) -> Result<Option<Edit<Option<i64>>>, Box<Response>> {
+        let parse = |v: Option<String>| v.map(|s| s.parse::<i64>()).transpose();
+        match edit {
+            // 上書きの形での null は「指定なし」（従来どおり現在値を保持）
+            None | Some(Edit::Set(None)) => Ok(None),
+            Some(Edit::Set(to)) => Ok(Some(Edit::Set(parse(to).map_err(|_| bad(message))?))),
+            Some(Edit::Change { from, to }) => Ok(Some(Edit::Change {
+                from: parse(from).map_err(|_| bad(message))?,
+                to: parse(to).map_err(|_| bad(message))?,
+            })),
+        }
+    }
+    let parse_date = |v: Option<String>| {
+        v.map(|s| chrono::NaiveDate::parse_from_str(&s, "%Y-%m-%d"))
+            .transpose()
+            .map_err(|_| bad("birthday はYYYY-MM-DD形式で指定してください"))
+    };
+    let birth_date = match req.birthday {
+        None | Some(Edit::Set(None)) => None,
+        Some(Edit::Set(to)) => Some(Edit::Set(parse_date(to)?)),
+        Some(Edit::Change { from, to }) => Some(Edit::Change {
+            from: parse_date(from)?,
+            to: parse_date(to)?,
+        }),
+    };
+    let profile_fields = match req.profile_fields {
+        Some(edit) => {
+            let cleaned =
+                profile_fields_from_json(&validate_profile_fields(edit.target().clone())?);
+            Some(edit.map_target(|_| cleaned))
+        }
+        None => None,
+    };
+    Ok(ProfileEdits {
+        display_name: req.display_name,
+        bio: req.bio,
+        avatar_media_id: media_id(req.avatar_media_id, "avatar_media_id が不正な値です")?,
+        banner_media_id: media_id(req.banner_media_id, "banner_media_id が不正な値です")?,
+        profile_fields,
+        birth_date,
+        birth_date_public: req.birthday_public,
+    })
+}
+
+/// 表示名中のカスタム絵文字（`:shortcode:`）→画像URLマップ（#186）。解決に失敗したら空。
+async fn resolve_display_name_emoji_map(state: &AppState, display_name: &str) -> serde_json::Value {
+    let candidates = extract_shortcode_candidates(display_name);
+    if candidates.is_empty() {
+        return serde_json::Value::Object(serde_json::Map::new());
+    }
+    match state.emojis.find_urls_by_shortcodes(&candidates).await {
+        Ok(pairs) => serde_json::Value::Object(
+            pairs
+                .into_iter()
+                .map(|(code, url)| (format!(":{}:", code), serde_json::Value::String(url)))
+                .collect(),
+        ),
+        Err(e) => {
+            tracing::error!(
+                "[update_profile] 表示名の絵文字ショートコード解決失敗: {}",
+                e
+            );
+            serde_json::Value::Object(serde_json::Map::new())
+        }
+    }
 }
 
 // ─── リモートFediアクターのフォロー中/フォロワー全件取得（#68） ───────────────────

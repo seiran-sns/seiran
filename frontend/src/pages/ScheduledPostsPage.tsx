@@ -53,7 +53,8 @@ export default function ScheduledPostsPage() {
     setBusy(true);
     try {
       if (confirm.kind === "publish") {
-        await api.scheduledPosts.publish(confirm.post.id, confirm.post.request);
+        // 一覧を読んだ後に別の画面で編集されていれば、その内容で投稿する
+        await api.scheduledPosts.publish(confirm.post.id, confirm.post.request, confirm.post);
         showSuccess(t("features:scheduledPosts.published"));
       } else {
         await api.scheduledPosts.delete(confirm.post.id);

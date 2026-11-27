@@ -1,3 +1,4 @@
+use crate::edit_diff::{Edit, EditConflict};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use sqlx::PgPool;
@@ -156,7 +157,13 @@ pub trait UserRepository: Send + Sync {
     ) -> Result<crate::repository::actor::SuspendOutcome, sqlx::Error>;
 
     /// ロール（`quarantine` / `silence` / `user` / `emoji-editor` / `moderator` / `admin`）を更新する。
-    async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error>;
+    /// ロールの差分を当てる（`crate::edit_diff`）。現在値が編集前・編集後のどちらでもなければ
+    /// 変えずに `Err(EditConflict)`（ユーザーが無いときも同じ）。
+    async fn update_role(
+        &self,
+        user_id: i64,
+        role: &Edit<String>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error>;
 
     /// 表示言語設定（`ja` / `en`）を取得する。`None` は「自動」（ブラウザ設定に従う）。
     async fn find_language_preference_by_user_id(
@@ -164,12 +171,13 @@ pub trait UserRepository: Send + Sync {
         user_id: i64,
     ) -> Result<Option<String>, sqlx::Error>;
 
-    /// 表示言語設定を更新する。`None` を渡すと「自動」に戻す。
+    /// 表示言語設定の差分を当てる（`None` は「自動」、`crate::edit_diff`）。現在値が
+    /// 編集前・編集後のどちらでもなければ変えずに `Err(EditConflict)`。
     async fn update_language_preference(
         &self,
         user_id: i64,
-        language: Option<&str>,
-    ) -> Result<(), sqlx::Error>;
+        language: &Edit<Option<String>>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error>;
 
     /// 「今後は表示しない」にしたガイドのキー一覧（`guides::HIDEABLE_GUIDES` のうち）。
     async fn find_hidden_guides(&self, user_id: i64) -> Result<Vec<String>, sqlx::Error>;
@@ -416,13 +424,29 @@ impl UserRepository for PgUserRepository {
         .map(suspend_outcome)
     }
 
-    async fn update_role(&self, user_id: i64, role: &str) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users SET role = $1::user_role WHERE id = $2")
-            .bind(role)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+    async fn update_role(
+        &self,
+        user_id: i64,
+        role: &Edit<String>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error> {
+        if role.is_unchanged() {
+            return Ok(Ok(()));
+        }
+        let result = sqlx::query(
+            "UPDATE users SET role = $2::user_role WHERE id = $1
+               AND (NOT $3 OR role::text = $4 OR role::text = $2)",
+        )
+        .bind(user_id)
+        .bind(role.target())
+        .bind(role.expected().is_some())
+        .bind(role.expected())
+        .execute(&self.pool)
+        .await?;
+        Ok(if result.rows_affected() > 0 {
+            Ok(())
+        } else {
+            Err(EditConflict)
+        })
     }
 
     async fn find_language_preference_by_user_id(
@@ -440,14 +464,28 @@ impl UserRepository for PgUserRepository {
     async fn update_language_preference(
         &self,
         user_id: i64,
-        language: Option<&str>,
-    ) -> Result<(), sqlx::Error> {
-        sqlx::query("UPDATE users SET language_preference = $1, updated_at = NOW() WHERE id = $2")
-            .bind(language)
-            .bind(user_id)
-            .execute(&self.pool)
-            .await
-            .map(|_| ())
+        language: &Edit<Option<String>>,
+    ) -> Result<Result<(), EditConflict>, sqlx::Error> {
+        if language.is_unchanged() {
+            return Ok(Ok(()));
+        }
+        let result = sqlx::query(
+            "UPDATE users SET language_preference = $2, updated_at = NOW() WHERE id = $1
+               AND (NOT $3
+                    OR language_preference IS NOT DISTINCT FROM $4
+                    OR language_preference IS NOT DISTINCT FROM $2)",
+        )
+        .bind(user_id)
+        .bind(language.target())
+        .bind(language.expected().is_some())
+        .bind(language.expected().cloned().flatten())
+        .execute(&self.pool)
+        .await?;
+        Ok(if result.rows_affected() > 0 {
+            Ok(())
+        } else {
+            Err(EditConflict)
+        })
     }
 
     async fn find_hidden_guides(&self, user_id: i64) -> Result<Vec<String>, sqlx::Error> {

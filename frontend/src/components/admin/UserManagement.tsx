@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { api, AdminUser, getErrorMessage } from "../../api/client";
 import { useCursorPagination } from "../../hooks/useCursorPagination";
@@ -6,6 +6,7 @@ import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel
 import panel from "../common/Panel.module.css";
 import styles from "../../pages/Admin.module.css";
 import { isPrivilegedRole } from "../../lib/roles";
+import { isEditConflict } from "../../lib/editDiff";
 import ConfirmModal from "../common/ConfirmModal";
 import DisplayName from "../common/DisplayName";
 
@@ -19,6 +20,12 @@ export default function UserManagement() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  /** 別の画面との衝突で保存できなかったユーザーの、サーバーに保存されているロール。画面には
+   * 選んだロールを残すので、選び直しの差分の基準はこちらを使う（一覧を取り直したら消す）。 */
+  const savedRoles = useRef(new Map<string, string>());
+  /** ロールの保存の失敗（ユーザーID → 文言）。選んだ時点で保存するので、その行のセレクトの
+   * すぐ下に出す。 */
+  const [roleErrors, setRoleErrors] = useState<Record<string, string>>({});
 
   const fetchPage = useCallback(
     (afterId: string) =>
@@ -56,6 +63,8 @@ export default function UserManagement() {
       .listUsers({ q: query || undefined, limit: PAGE_SIZE })
       .then((rows) => {
         if (cancelled) return;
+        savedRoles.current.clear();
+        setRoleErrors({});
         setUsers(rows);
         setHasMore(rows.length >= PAGE_SIZE);
       })
@@ -102,16 +111,29 @@ export default function UserManagement() {
   async function changeRole(u: AdminUser, role: string) {
     if (role === u.role) return;
     setBusyId(u.id);
-    setError("");
+    setRoleErrors((prev) => {
+      const next = { ...prev };
+      delete next[u.id];
+      return next;
+    });
+    const from = savedRoles.current.get(u.id) ?? u.role;
     try {
-      await api.admin.changeUserRole(u.id, role);
+      await api.admin.changeUserRole(u.id, { from, to: role });
+      savedRoles.current.delete(u.id);
       setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, role } : x)));
     } catch (e) {
-      setError(getErrorMessage(e));
+      if (isEditConflict(e)) {
+        // 別の画面でロールが変えられていた: 選んだロールは画面に残してエラーだけ出す
+        savedRoles.current.set(u.id, from);
+        setUsers((prev) => prev.map((x) => (x.id === u.id ? { ...x, role } : x)));
+      }
+      const message = getErrorMessage(e);
+      setRoleErrors((prev) => ({ ...prev, [u.id]: message }));
     } finally {
       setBusyId(null);
     }
   }
+
 
   async function disableTotp(u: AdminUser) {
     if (!window.confirm(t("admin:userManagement.disableTotpConfirm", { username: u.username ?? u.email }))) return;
@@ -175,20 +197,23 @@ export default function UserManagement() {
               {u.suspended_at && (
                 <span className={`${styles.badge} ${styles.badgeSuspended}`}>{t("admin:userManagement.suspendedBadge")}</span>
               )}
-              <select
-                className={styles.select}
-                value={u.role}
-                disabled={busyId === u.id}
-                onChange={(e) => {
-                  if (e.target.value !== u.role) setPending({ kind: "role", user: u, role: e.target.value });
-                }}
-              >
-                {ROLES.map((r) => (
-                  <option key={r} value={r}>
-                    {r}
-                  </option>
-                ))}
-              </select>
+              <div className={styles.roleCell}>
+                <select
+                  className={styles.select}
+                  value={u.role}
+                  disabled={busyId === u.id}
+                  onChange={(e) => {
+                    if (e.target.value !== u.role) setPending({ kind: "role", user: u, role: e.target.value });
+                  }}
+                >
+                  {ROLES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+                {roleErrors[u.id] && <p className={styles.roleError}>{roleErrors[u.id]}</p>}
+              </div>
               {/* admin・moderator は凍結できない（凍結済みなら解除だけはできる）。 */}
               {(u.suspended_at || !isPrivilegedRole(u.role)) && (
                 <button
