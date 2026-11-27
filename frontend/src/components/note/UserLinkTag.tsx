@@ -39,16 +39,16 @@ export default function UserLinkTag({ target, to, className, title, children }: 
 
   return (
     <span
-      className={hoverStyles.wrap}
+      className={`${hoverStyles.wrap} ${hoverStyles.host}`}
       onMouseEnter={hover.handleMouseEnter}
-      onMouseLeave={hover.handleMouseLeave}
     >
-      {hover.isHovered && (
+      {hover.activated && (
         <UserHoverPopover
           followStatus={hover.followStatus}
           loadingStatus={hover.loadingStatus}
           followActionPending={hover.followActionPending}
           onToggle={hover.handleToggleFollow}
+          style={hover.popoverStyle}
         />
       )}
       <Link

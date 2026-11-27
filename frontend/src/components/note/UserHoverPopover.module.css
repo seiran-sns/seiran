@@ -20,18 +20,29 @@
   border: 1px solid var(--border);
   border-radius: 8px;
   box-shadow: 0 4px 14px rgba(0, 0, 0, 0.15);
-  animation: fadeIn 0.15s ease-out;
+  /* 表示・非表示はホバー領域（.host）の:hoverだけで決める（JSの開閉ステートを
+     持たない理由はuseFollowHoverSwitchのactivatedのコメント参照）。離れてから
+     400ms待ってフェードアウトを始め、ユーザー名からスイッチへの隙間を渡る間や
+     少し行き過ぎたときも消えないようにする。フェードし終わるまでvisibilityは
+     visibleのままなので、その間にポップアップへ戻れば、ポップアップは.hostの
+     子孫であるため.hostの:hoverが再び成り立ち表示が続く。 */
+  visibility: hidden;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity 0.15s ease-out 400ms,
+    transform 0.15s ease-out 400ms,
+    visibility 0s linear 550ms;
 }
 
-@keyframes fadeIn {
-  from {
-    opacity: 0;
-    transform: translateY(4px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+.host:hover > .popover {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+  transition:
+    opacity 0.15s ease-out,
+    transform 0.15s ease-out,
+    visibility 0s;
 }
 
 .popover::after {

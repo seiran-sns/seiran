@@ -35,6 +35,7 @@ import ReactionChips from "./ReactionChips";
 import UserContextMenu from "./UserContextMenu";
 import UserLinkTag from "./UserLinkTag";
 import UserHoverPopover from "./UserHoverPopover";
+import hoverPopoverStyles from "./UserHoverPopover.module.css";
 import { UserRelationshipTarget } from "../../hooks/useUserRelationshipMenu";
 import { useComposer } from "../../contexts/ComposerContext";
 import blueskyLogo from "../../assets/bluesky-logo.svg";
@@ -292,11 +293,11 @@ function PostContent({
   // ストアに未登録（undefined）なら「まだ取得していない」ことを意味する。
   const {
     followStatus,
-    isHovered,
+    activated: followSwitchActivated,
+    popoverStyle: followSwitchStyle,
     loadingStatus,
     followActionPending,
     handleMouseEnter,
-    handleMouseLeave,
     handleToggleFollow,
   } = useFollowHoverSwitch(authorTarget, isAuthorSelf);
 
@@ -413,16 +414,16 @@ function PostContent({
     <>
       <div className={styles.header}>
         <div
-          className={styles.userContainer}
+          className={`${styles.userContainer} ${hoverPopoverStyles.host}`}
           onMouseEnter={handleMouseEnter}
-          onMouseLeave={handleMouseLeave}
         >
-          {isHovered && !isAuthorSelf && (
+          {followSwitchActivated && !isAuthorSelf && (
             <UserHoverPopover
               followStatus={followStatus}
               loadingStatus={loadingStatus}
               followActionPending={followActionPending}
               onToggle={handleToggleFollow}
+              style={followSwitchStyle}
             />
           )}
 
