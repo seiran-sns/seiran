@@ -15,6 +15,24 @@
   z-index: 101;
   width: 320px;
   max-width: 80vw;
+  /* 表示・非表示は:hoverだけで決める（JSの開閉ステートを持たない理由は
+     NoteHoverPreview.tsxのactivatedのコメント参照）。離れたときはvisibilityの
+     切り替えを120ms遅らせ、通知アイテムとポップアップの間の隙間をカーソルが
+     渡る間も消えないようにする。visibilityのトランジション中は値がvisibleの
+     ままなので、その間にポップアップへ乗ればポップアップはwrapの子孫であるため
+     wrapの:hoverが再び成り立ち、表示が続く。 */
+  visibility: hidden;
+  transition: visibility 0s linear 120ms;
+}
+
+.wrap:hover > .popup {
+  visibility: visible;
+  transition-delay: 0s;
+}
+
+.wrap.suppressed > .popup {
+  visibility: hidden;
+  transition: none;
 }
 
 /* 真下ではなく子要素の左側に出す（通知アイテム用）。マウスが下方向へ動いても
