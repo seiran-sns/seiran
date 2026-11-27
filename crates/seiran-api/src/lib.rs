@@ -973,6 +973,7 @@ pub fn spawn_startup_tasks(state: &AppState) {
         backfill_identity_events(&state).await;
         backfill_unset_avatar_profiles(&state).await;
         backfill_chat_declarations(&state).await;
+        backfill_self_setting_declarations(&state).await;
         backfill_seiran_actor_declarations(&state).await;
         // DID 確定時の記録が途中で止まった分を補う。
         seiran_common::follow_exec::record_missing_local_follows(
@@ -1670,6 +1671,41 @@ async fn backfill_chat_declarations(state: &AppState) {
                 e
             ),
         }
+    }
+}
+
+/// 投稿の通知を許可する範囲（`app.bsky.notification.declaration`）とおすすめからの除外
+/// （`app.bsky.actor.contentVisibilityDeclaration`）のレコードを、まだ持たないローカルユーザーへ
+/// actors の値からコミットする（actors とリポジトリを一致させる。`docs/protocols.md` 3節）。
+async fn backfill_self_setting_declarations(state: &AppState) {
+    let actor_ids =
+        match seiran_common::repository::maintenance::local_actors_missing_self_setting_declarations(
+            &state.db,
+        )
+        .await
+        {
+            Ok(ids) => ids,
+            Err(e) => {
+                tracing::error!("[startup] プライバシー設定の宣言 対象取得失敗: {}", e);
+                return;
+            }
+        };
+    let total = actor_ids.len();
+    for actor_id in actor_ids {
+        if let Err(e) = state
+            .atp_service
+            .ensure_self_setting_declarations(actor_id, chrono::Utc::now())
+            .await
+        {
+            tracing::error!(
+                "[startup] プライバシー設定の宣言コミット失敗 actor_id={}: {}",
+                actor_id,
+                e
+            );
+        }
+    }
+    if total > 0 {
+        tracing::info!("[startup] プライバシー設定の宣言コミット: {} 人", total);
     }
 }
 

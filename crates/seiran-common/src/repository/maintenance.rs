@@ -131,6 +131,32 @@ pub async fn local_actors_without_self_record(
     .await
 }
 
+/// 通知の宣言・表示の宣言の self レコードのどちらかが無いローカルアクター。
+pub async fn local_actors_missing_self_setting_declarations(
+    pool: &PgPool,
+) -> Result<Vec<i64>, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT a.id
+         FROM actors a
+         WHERE a.actor_type = 'local' AND a.at_did IS NOT NULL
+           AND (
+             NOT EXISTS (
+               SELECT 1 FROM atp_records r
+               WHERE r.actor_id = a.id AND r.rkey = 'self'
+                 AND r.collection = 'app.bsky.notification.declaration'
+             )
+             OR NOT EXISTS (
+               SELECT 1 FROM atp_records r
+               WHERE r.actor_id = a.id AND r.rkey = 'self'
+                 AND r.collection = 'app.bsky.actor.contentVisibilityDeclaration'
+             )
+           )
+         ORDER BY a.id",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 /// 孤立メディアファイル。
 #[derive(Debug, sqlx::FromRow)]
 pub struct OrphanedMediaFile {

@@ -17,6 +17,18 @@ pub(crate) fn service_did(state: &AppState) -> String {
     format!("did:web:{}", state.local_domain)
 }
 
+/// XRPC 標準形式（`{"error", "message"}`、400）のエラー応答。クライアントは `error` の
+/// 値で原因を見分ける（例: bsky.app は `getRecord` の `RecordNotFound` を「未設定」として
+/// 既定値で扱い、それ以外は読み込み失敗と表示する）。
+pub(crate) fn xrpc_error(error: &str, message: String) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    (
+        axum::http::StatusCode::BAD_REQUEST,
+        axum::Json(serde_json::json!({ "error": error, "message": message })),
+    )
+        .into_response()
+}
+
 /// `Authorization: Bearer <token>` からトークン部分だけを取り出す。
 pub(crate) fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
     headers

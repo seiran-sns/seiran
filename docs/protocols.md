@@ -265,6 +265,7 @@ Clearsky 等は firehose の代わりに PDS へ直接 `listRecords` を叩く�
 - `sync.listBlobs` — その DID がアップロードした `media_files` の CID。CID は保持せず `sha256` から再構築する（`cid_from_sha256_hex`）。
 
 ### postgate・getTrends のスタブ応答
+- `repo.getRecord` でレコードが無いときは、公式 PDS と同じ 400 `{"error": "RecordNotFound", "message": "Could not locate record: at://…"}` を返す。bsky.app は `RecordNotFound` だけを「未設定」とみなして既定値で扱い（例: `app.bsky.notification.declaration` が無ければ `followers`）、それ以外の応答は読み込み失敗と表示する。
 - `repo.getRecord?collection=app.bsky.feed.postgate`（`get_record_postgate`）— 実レコードが無ければ合成レコードを返す。仕様上は「不在＝制限なし」だが、404 だと bsky.app が引用不可として扱うことがあるため。CID は実際に DAG-CBOR エンコードして計算する。ローカルユーザーは常に `embeddingRules: []`（postgate 作成機能が無い）。リモート Bsky の投稿は `posts.bsky_quote_disabled` から合成し、未取得なら「制限なし」。実レコードがあればそちらを優先する。
 - `app.bsky.unspecced.getTrends` — 常に `{"trends": []}`。無いと `atproto-proxy` ヘッダー無しの呼び出しが 404 になる。
 
@@ -480,6 +481,7 @@ bsky.app のプライバシー設定画面のスイッチは、PDS へ self レ�
 | アルゴリズムのおすすめから除外するよう求める | `app.bsky.actor.contentVisibilityDeclaration` の `hideFromAlgorithmicRecommendations` | `hide_from_algorithmic_recommendations` |
 
 - **ATP → actors**: `createRecord`/`putRecord`/`deleteRecord`/`applyWrites` でこれらの self レコードが変わったら、`seiran_common::atp::self_settings::sync_from_repo` がリポジトリにある今の3レコードを読み直して3列をまとめて更新する（書かれた値ではなく読み直すので、削除・DID 転入・既存データの移行も同じ関数で済む）。DID 転入では取り込んだプロフィールを当てはめる時点で同じ関数を呼ぶ。反映しないと、次に seiran 側からコミットし直したときに外部で変えた設定が巻き戻る。
+- **完全同期**: actors に値がある以上、リポジトリにも同じ内容のレコードを置く（レコードが無いと bsky.app 等は既定値を推測するしかなく、リポジトリの書き出し・Relay への配信からも設定が読めない）。`AtpCommitService::ensure_self_setting_declarations` が、通知の宣言・表示の宣言のうち無いものを actors の値からコミットする。呼ぶのは DID 確定時（`publish_initial_atp_records`）・起動時（`backfill_self_setting_declarations`、どちらかを持たないローカルアクター全員）・外部クライアントがこれらを削除したあと（actors は既定値に戻り、その値で置き直す）。プロフィールは登録時から常にある。
 - **actors → ATP**: `commit_profile` は `hide_from_unauthenticated` が真なら `labels`（`com.atproto.label.defs#selfLabels`、`!no-unauthenticated` だけ）を付ける。プロフィールレコードのそれ以外の self-label は持たない。
 - **既存データ**: 列の追加前に書かれたレコードは、マイグレーションが積んだ `atp_self_settings_backfill` を起動時の `backfill_atp_self_settings` が読んで反映する（CBOR は SQL で読めない）。反映前に seiran でプロフィールを編集するとラベルが外れるので、起動時タスクの最初に行う。
 - **設定画面**: 「プライバシー」（`/settings/privacy`）で切り替える。`GET`/`POST /api/account/bluesky-privacy`（`POST` は指定した項目だけを更新）が列を書き換え、ログアウト時の非表示はプロフィールを再コミット（`recommit_bsky_profile`）、投稿の通知は `commit_notification_declaration` で `app.bsky.notification.declaration/self` をコミットする。

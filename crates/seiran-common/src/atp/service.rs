@@ -1577,6 +1577,46 @@ impl AtpCommitService {
         .await
     }
 
+    /// 通知の宣言（`app.bsky.notification.declaration/self`）と表示の宣言
+    /// （`app.bsky.actor.contentVisibilityDeclaration/self`）のうち、リポジトリに無いものを
+    /// `actors` の値からコミットする。actors に値がある以上、リポジトリにも同じ内容の
+    /// レコードがあるようにする（レコードが無いと bsky.app 等は既定値を推測して表示するしかなく、
+    /// リポジトリの書き出し・Relay への配信からも設定が読めない）。既にあるレコードは触らない。
+    pub async fn ensure_self_setting_declarations(
+        &self,
+        actor_id: i64,
+        now: DateTime<Utc>,
+    ) -> Result<(), AtpCommitError> {
+        use crate::atp::self_settings::{
+            CONTENT_VISIBILITY_COLLECTION, NOTIFICATION_DECLARATION_COLLECTION,
+        };
+        use crate::repository::atp::record_cid;
+        let actors = PgActorRepository::new(self.pool.clone());
+        if record_cid(
+            &self.pool,
+            actor_id,
+            NOTIFICATION_DECLARATION_COLLECTION,
+            "self",
+        )
+        .await?
+        .is_none()
+        {
+            let allow = actors.find_allow_activity_subscriptions(actor_id).await?;
+            self.commit_notification_declaration(actor_id, &allow, now)
+                .await?;
+        }
+        if record_cid(&self.pool, actor_id, CONTENT_VISIBILITY_COLLECTION, "self")
+            .await?
+            .is_none()
+        {
+            let hide = actors
+                .find_hide_from_algorithmic_recommendations(actor_id)
+                .await?;
+            self.commit_content_visibility(actor_id, hide, now).await?;
+        }
+        Ok(())
+    }
+
     /// rkey `self` の単一レコードを、`atp_records` の有無で create/update を決めてコミットする。
     async fn commit_self_record(
         &self,
