@@ -4,7 +4,8 @@ import { ApiError } from "../api/core";
  * 設定画面・管理画面の保存で送る、1項目の差分。画面を開いた（最後に保存した）時点の値 `from`
  * と、保存したい値 `to`。サーバーはロック中の現在値にこれを当て、別の画面の変更と重なれば
  * 保存せず `EDIT_CONFLICT` を返す（`crates/seiran-common/src/edit_diff.rs`）。値の項目は
- * 「現在値が `from` か `to` なら `to`」、テキストの項目は `from` を共通祖先にした 3-way マージ。
+ * 「現在値が `from` か `to` なら `to`」、テキストの項目は `from` を共通祖先にした 3-way マージ、
+ * タグ等の集合は足した・除いた要素だけを当てる。
  */
 export interface Edit<T> {
   from: T;

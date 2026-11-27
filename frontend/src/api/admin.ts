@@ -111,7 +111,8 @@ export const admin = {
       `/admin/actors/${encodeURIComponent(id)}/moderation`,
     );
   },
-  changeActorRole(id: string, role: string) {
+  /** `role` はメニューを開いた時点のロールからの差分（別の画面で変えられていたら `EDIT_CONFLICT`）。 */
+  changeActorRole(id: string, role: Edit<string>) {
     return request<void>("POST", `/admin/actors/${encodeURIComponent(id)}/role`, { role });
   },
   unsuspendActor(id: string) {
@@ -155,7 +156,7 @@ export const admin = {
   getDeniedHosts() {
     return request<DeniedHostsResponse>("GET", "/admin/denied-hosts");
   },
-  /** textarea の内容の差分。別の画面の変更と行単位で 3-way マージされる。 */
+  /** textarea の内容の差分。ホストの集合として、足した・除いた分だけが今の一覧に当てられる。 */
   updateDeniedHosts(text: Edit<string>) {
     return request<DeniedHostsResponse>("PUT", "/admin/denied-hosts", { text });
   },

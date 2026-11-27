@@ -191,7 +191,9 @@ pub async fn moderation_state(
 
 #[derive(Debug, Deserialize)]
 pub struct ChangeActorRoleRequest {
-    pub role: String,
+    /// 差分 `{"from": 選ぶ前, "to": 選んだロール}` なら、別の画面で別のロールにされていたとき
+    /// `EDIT_CONFLICT`（`seiran_common::edit_diff`）。
+    pub role: seiran_common::edit_diff::Edit<String>,
 }
 
 /// POST /api/admin/actors/:id/role
@@ -204,11 +206,12 @@ pub async fn change_actor_role(
     Path(id): Path<i64>,
     Json(req): Json<ChangeActorRoleRequest>,
 ) -> Result<StatusCode, ApiError> {
-    if !ALL_ROLES.contains(&req.role.as_str()) {
+    let role = req.role.target().as_str();
+    if !ALL_ROLES.contains(&role) {
         return Err(ApiError::BadRequest("INVALID_ROLE".to_owned()));
     }
     let changeable = changeable_roles(&state, me.user_id).await?;
-    if !changeable.contains(&req.role.as_str()) {
+    if !changeable.contains(&role) {
         return Err(ApiError::Forbidden("ROLE_NOT_ASSIGNABLE"));
     }
     use seiran_common::repository::moderation::{self, ChangeRoleOutcome};
@@ -218,6 +221,7 @@ pub async fn change_actor_role(
     {
         ChangeRoleOutcome::Changed => Ok(StatusCode::NO_CONTENT),
         ChangeRoleOutcome::Forbidden => Err(ApiError::Forbidden("ROLE_NOT_CHANGEABLE")),
+        ChangeRoleOutcome::EditConflict => Err(seiran_common::edit_diff::EditConflict.into()),
         ChangeRoleOutcome::NotLocal => Err(ApiError::NotFound("LOCAL_USER_NOT_FOUND")),
     }
 }

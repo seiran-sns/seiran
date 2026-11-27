@@ -1773,7 +1773,13 @@ impl ProfileEdits {
         }
         if let Some(edit) = self.bio {
             let current = row.bio.take().unwrap_or_default();
-            row.bio = Some(edit.apply_text(&current)?);
+            let merged = edit.apply_text(&current)?;
+            // 編集後の値は上限内と確かめてあるので、超えるのは別の画面の変更と合わせたときだけ。
+            // どちらかを削らないと保存できないので衝突として知らせる
+            if exceeds_profile_text_limit(&merged, MAX_BIO_GRAPHEMES, MAX_BIO_BYTES) {
+                return Err(EditConflict);
+            }
+            row.bio = Some(merged);
         }
         row.avatar_media_id = value(self.avatar_media_id, row.avatar_media_id)?;
         row.banner_media_id = value(self.banner_media_id, row.banner_media_id)?;

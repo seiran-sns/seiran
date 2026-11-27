@@ -949,3 +949,82 @@ async fn site_settings_update_with_merges_text_and_is_all_or_nothing() {
         .await
         .unwrap();
 }
+
+/// ユーザー操作メニューからのロール変更は、メニューを開いた時点のロールからの差分で当てる。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn change_actor_role_conflicts_when_changed_elsewhere() {
+    use seiran_common::edit_diff::Edit;
+    use seiran_common::repository::moderation::{change_actor_role, ChangeRoleOutcome};
+
+    let pool = test_db_pool().await;
+    let actor = create_fixture_local_actor(&pool, "edrole").await;
+    let changeable = ["quarantine", "silence", "user"];
+    let change = |from: &str, to: &str| Edit::Change {
+        from: from.to_string(),
+        to: to.to_string(),
+    };
+    assert_eq!(
+        change_actor_role(&pool, actor, &change("user", "silence"), &changeable, 0)
+            .await
+            .unwrap(),
+        ChangeRoleOutcome::Changed
+    );
+    // 別の画面が silence にした後、user を見ていた画面から quarantine にしようとした
+    assert_eq!(
+        change_actor_role(&pool, actor, &change("user", "quarantine"), &changeable, 0)
+            .await
+            .unwrap(),
+        ChangeRoleOutcome::EditConflict
+    );
+}
+
+/// 予約の編集は、読んだ時点の revision のままのときだけ書く。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn scheduled_post_update_if_revision_rejects_stale_revision() {
+    use seiran_common::repository::scheduled_post as repo;
+
+    let pool = test_db_pool().await;
+    let actor = create_fixture_local_actor(&pool, "edsched").await;
+    let at = chrono::Utc::now() + chrono::Duration::hours(1);
+    let row = repo::insert_if_under_limit(
+        &pool,
+        seiran_common::generate_snowflake_id(chrono::Utc::now()),
+        actor,
+        &serde_json::json!({"text": "a"}),
+        at,
+        None,
+    )
+    .await
+    .unwrap()
+    .unwrap();
+    let updated = repo::update_if_revision(
+        &pool,
+        row.id,
+        actor,
+        &serde_json::json!({"text": "b"}),
+        at,
+        row.revision,
+    )
+    .await
+    .unwrap()
+    .expect("読んだ時点の revision なら書ける");
+    assert!(repo::update_if_revision(
+        &pool,
+        row.id,
+        actor,
+        &serde_json::json!({"text": "c"}),
+        at,
+        row.revision,
+    )
+    .await
+    .unwrap()
+    .is_none());
+    let current = repo::find_for_actor(&pool, row.id, actor)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(current.request["text"], "b");
+    assert_eq!(current.revision, updated.revision);
+}

@@ -222,7 +222,12 @@ export function useUserRelationshipMenu(
         await api.admin.unsuspendActor(target.actorId);
         setModeration({ ...moderation, suspended: false });
       } else {
-        await api.admin.changeActorRole(target.actorId, moderationDialog.role);
+        // メニューを開いた時点のロールからの差分。別の画面で変えられていたら保存せずエラーを
+        // 出す（ダイアログは閉じず、選んだロールを残す）
+        await api.admin.changeActorRole(target.actorId, {
+          from: moderation.role ?? "",
+          to: moderationDialog.role,
+        });
         setModeration({ ...moderation, role: moderationDialog.role });
       }
       setModerationDialog(null);

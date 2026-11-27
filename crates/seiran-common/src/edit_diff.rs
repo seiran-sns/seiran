@@ -9,6 +9,9 @@
 //!   別の画面が別の値にしたということなので衝突。`from` と `to` が同じなら現在値のまま。
 //! - テキスト: `from` を共通祖先にした行単位の 3-way マージ。別の画面の変更と重ならなければ
 //!   両方を取り込み、重なれば衝突。
+//! - 集合（タグ・拒否サーバー等、順序と重複に意味の無い一覧）: `from` から `to` で足した要素を
+//!   足し、除いた要素を除く。別の画面の変更とは衝突しようがない。
+//! - オブジェクト（予約投稿の内容）: キーごとに値かテキストとして当てる。
 //!
 //! 衝突した保存は全体を取りやめ、`EDIT_CONFLICT`（409）を返す。画面は入力を残したまま
 //! 「他の画面から変更されているようです」と知らせ、読み込み直してもらう。
@@ -122,6 +125,82 @@ impl Edit<Option<String>> {
     }
 }
 
+impl<T: PartialEq + Clone> Edit<Vec<T>> {
+    /// 集合の差分を当てる。`from` から `to` で除いた要素を現在値から除き、足した要素を
+    /// （まだ無ければ）末尾に足す。衝突しない。
+    pub fn apply_set(self, current: &[T]) -> Vec<T> {
+        match self {
+            Edit::Change { from, to } => {
+                let mut merged: Vec<T> = current
+                    .iter()
+                    .filter(|v| to.contains(v) || !from.contains(v))
+                    .cloned()
+                    .collect();
+                for v in to {
+                    if !from.contains(&v) && !merged.contains(&v) {
+                        merged.push(v);
+                    }
+                }
+                merged
+            }
+            Edit::Set(to) => to,
+        }
+    }
+}
+
+/// JSON オブジェクトの差分をキーごとに当てる。`text_keys` のキーは文字列（`null` は空文字列と
+/// 同じ）として 3-way マージし、それ以外は値として当てる。無いキーは `null` と同じに扱う。
+pub fn merge_object(
+    base: &serde_json::Map<String, serde_json::Value>,
+    edited: &serde_json::Map<String, serde_json::Value>,
+    current: &serde_json::Map<String, serde_json::Value>,
+    text_keys: &[&str],
+) -> Result<serde_json::Map<String, serde_json::Value>, EditConflict> {
+    use serde_json::Value;
+    let null = Value::Null;
+    let mut keys: Vec<&String> = base
+        .keys()
+        .chain(edited.keys())
+        .chain(current.keys())
+        .collect();
+    keys.sort();
+    keys.dedup();
+    let mut merged = serde_json::Map::new();
+    for key in keys {
+        let (b, e, c) = (
+            base.get(key).unwrap_or(&null),
+            edited.get(key).unwrap_or(&null),
+            current.get(key).unwrap_or(&null),
+        );
+        let value = if b == e {
+            c.clone()
+        } else if c == b || c == e {
+            e.clone()
+        } else if text_keys.contains(&key.as_str()) {
+            let text = |v: &Value| match v {
+                Value::String(s) => Some(s.clone()),
+                Value::Null => Some(String::new()),
+                _ => None,
+            };
+            let (Some(b), Some(e), Some(c)) = (text(b), text(e), text(c)) else {
+                return Err(EditConflict);
+            };
+            let m = merge_text(&b, &c, &e)?;
+            if m.is_empty() {
+                Value::Null
+            } else {
+                Value::String(m)
+            }
+        } else {
+            return Err(EditConflict);
+        };
+        if !value.is_null() || current.contains_key(key) || edited.contains_key(key) {
+            merged.insert(key.clone(), value);
+        }
+    }
+    Ok(merged)
+}
+
 /// 行単位の 3-way マージ。
 pub fn merge_text(base: &str, current: &str, edited: &str) -> Result<String, EditConflict> {
     if current == base || current == edited {
@@ -203,6 +282,32 @@ mod tests {
         assert_eq!(
             change(Some("hi".to_string()), Some(String::new())).apply_optional_text(Some("hi")),
             Ok(None)
+        );
+    }
+
+    #[test]
+    fn set_merges_additions_and_removals_without_conflict() {
+        let edit = change(vec!["a", "b", "c"], vec!["a", "c", "d"]);
+        // 別の画面が e を足し a を除いていても、両方の変更が残る
+        assert_eq!(edit.apply_set(&["b", "c", "e"]), vec!["c", "e", "d"]);
+    }
+
+    #[test]
+    fn object_merges_per_key() {
+        let obj = |v: serde_json::Value| v.as_object().unwrap().clone();
+        let base =
+            obj(serde_json::json!({"text": "a\nx\nb\n", "visibility": "public", "cw": null}));
+        let edited =
+            obj(serde_json::json!({"text": "a\nx\nB\n", "visibility": "public", "cw": null}));
+        let current =
+            obj(serde_json::json!({"text": "A\nx\nb\n", "visibility": "home", "cw": null}));
+        let merged = merge_object(&base, &edited, &current, &["text"]).unwrap();
+        assert_eq!(merged["text"], "A\nx\nB\n");
+        assert_eq!(merged["visibility"], "home");
+        let edited = obj(serde_json::json!({"text": "a\nx\nb\n", "visibility": "followers"}));
+        assert_eq!(
+            merge_object(&base, &edited, &current, &["text"]),
+            Err(EditConflict)
         );
     }
 

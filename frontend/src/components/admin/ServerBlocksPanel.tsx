@@ -7,14 +7,14 @@ import styles from "../../pages/Admin.module.css";
 /**
  * 管理画面「サーバーブロック」タブ。拒否サーバーを1行1ドメインの textarea で読み書きする
  * （サブドメインも対象。扱いはバックエンドの`seiran_common::denied_host`）。保存は開いた時点
- * からの差分で送り、別の画面での変更と行単位でマージされる。保存後はバックエンドが正規化した
- * 一覧で textarea を置き換える。
+ * からの差分で送り、足した・除いたホストだけが別の画面での変更に当てられる。保存後はバックエンドが
+ * 正規化した一覧で textarea を置き換える。
  */
 export default function ServerBlocksPanel() {
   const { t } = useTranslation();
   const [text, setText] = useState("");
-  /** 開いた（最後に保存した）時点の一覧。保存はここからの差分で送り、サーバーが別の画面の
-   * 変更と 3-way マージする。 */
+  /** 開いた（最後に保存した）時点の一覧。保存はここからの差分で送り、サーバーが足した・除いた
+   * ホストだけを今の一覧に当てる。 */
   const baseline = useRef("");
 
   function applyHosts(hosts: string[]) {

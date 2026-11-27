@@ -128,7 +128,8 @@ pub struct EmojiRow {
 }
 
 /// 管理画面での絵文字の編集。`None` の項目は変えない。`category`・`license` の未設定
-/// （NULL）は空文字列と同じに扱う。`license` は複数行のテキストとして 3-way マージする。
+/// （NULL）は空文字列と同じに扱う。`tags` は集合として、`license` は複数行のテキストとして
+/// 3-way マージする。
 pub struct EmojiEdit {
     pub category: Option<Edit<String>>,
     pub tags: Option<Edit<Vec<String>>>,
@@ -260,9 +261,10 @@ impl EmojiRepository for PgEmojiRepository {
         let applied = (|| {
             Ok::<_, EditConflict>((
                 optional(edit.category, category)?,
+                // タグは集合として足した分・除いた分だけを当てる（衝突しない）
                 match edit.tags {
                     None => tags,
-                    Some(e) => e.apply_value(&tags)?,
+                    Some(e) => e.apply_set(&tags),
                 },
                 // ライセンスは条文を貼る複数行のテキストなので 3-way マージ
                 match edit.license {

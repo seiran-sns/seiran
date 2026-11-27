@@ -133,6 +133,33 @@ pub async fn update(
     .await
 }
 
+/// 読んだ時点（`revision`）から誰も書き換えていなければ、内容と予約日時を書き換えて投稿待ちに
+/// 戻す（予約の編集を、別の画面の編集と合わせてから保存する）。書き換えられていたか無ければ
+/// `None`。
+pub async fn update_if_revision(
+    pool: &PgPool,
+    id: i64,
+    actor_id: i64,
+    request: &serde_json::Value,
+    scheduled_at: DateTime<Utc>,
+    revision: i32,
+) -> Result<Option<ScheduledPostRow>, sqlx::Error> {
+    sqlx::query_as(sqlx::AssertSqlSafe(format!(
+        "UPDATE scheduled_posts
+         SET request = $3, scheduled_at = $4, revision = revision + 1,
+             failure_code = NULL, failed_at = NULL, updated_at = NOW()
+         WHERE id = $1 AND actor_id = $2 AND revision = $5
+         RETURNING {COLUMNS}"
+    )))
+    .bind(id)
+    .bind(actor_id)
+    .bind(request)
+    .bind(scheduled_at)
+    .bind(revision)
+    .fetch_optional(pool)
+    .await
+}
+
 /// 本人の予約を消す。消したら真。
 pub async fn delete(pool: &PgPool, id: i64, actor_id: i64) -> Result<bool, sqlx::Error> {
     let result = sqlx::query("DELETE FROM scheduled_posts WHERE id = $1 AND actor_id = $2")
