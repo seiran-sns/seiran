@@ -83,6 +83,11 @@ pub const ACTOR_REFERENCES: &[ActorReference] = &[
     plain("atp_refresh_tokens", "actor_id"),
     plain("atp_repo_events", "actor_id"),
     ActorReference {
+        table: "atp_self_settings_backfill",
+        column: "actor_id",
+        unique: &[key(&[])],
+    },
+    ActorReference {
         table: "blocks",
         column: "blocked_actor_id",
         unique: &[key(&["blocker_actor_id"])],
