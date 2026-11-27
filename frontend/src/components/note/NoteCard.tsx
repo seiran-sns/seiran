@@ -294,6 +294,7 @@ function PostContent({
   const {
     followStatus,
     activated: followSwitchActivated,
+    popoverStyle: followSwitchStyle,
     loadingStatus,
     followActionPending,
     handleMouseEnter,
@@ -422,6 +423,7 @@ function PostContent({
               loadingStatus={loadingStatus}
               followActionPending={followActionPending}
               onToggle={handleToggleFollow}
+              style={followSwitchStyle}
             />
           )}
 

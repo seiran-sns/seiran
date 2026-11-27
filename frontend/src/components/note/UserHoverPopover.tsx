@@ -1,3 +1,4 @@
+import type { CSSProperties } from "react";
 import { useTranslation } from "react-i18next";
 import { FollowStatus } from "../../stores/userRelationshipStore";
 import styles from "./UserHoverPopover.module.css";
@@ -7,6 +8,8 @@ interface UserHoverPopoverProps {
   loadingStatus: boolean;
   followActionPending: boolean;
   onToggle: (e: React.MouseEvent) => void;
+  /** 配置（`useFollowHoverSwitch`の`popoverStyle`）。 */
+  style?: CSSProperties;
 }
 
 function getFollowLabel(
@@ -27,12 +30,13 @@ export default function UserHoverPopover({
   loadingStatus,
   followActionPending,
   onToggle,
+  style,
 }: UserHoverPopoverProps) {
   const { t } = useTranslation();
   const label = loadingStatus ? t("common:loading") : getFollowLabel(followStatus, t);
 
   return (
-    <div className={styles.popover} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.popover} style={style} onClick={(e) => e.stopPropagation()}>
       <span className={`${styles.label} ${styles[`status_${followStatus ?? "not_following"}`]}`}>
         {label}
       </span>

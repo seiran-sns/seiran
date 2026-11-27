@@ -48,6 +48,7 @@ export default function UserLinkTag({ target, to, className, title, children }: 
           loadingStatus={hover.loadingStatus}
           followActionPending={hover.followActionPending}
           onToggle={hover.handleToggleFollow}
+          style={hover.popoverStyle}
         />
       )}
       <Link

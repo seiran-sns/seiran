@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type CSSProperties } from "react";
 import { api, getErrorMessage } from "../api/client";
 import { followTargetOf } from "../api/follows";
 import { useToast } from "../contexts/ToastContext";
@@ -33,10 +33,20 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
   // 決める（UserHoverPopover.module.cssの`.host:hover > .popover`）。enter/leaveの対で
   // 開閉ステートを持つと、leaveを取りこぼしたときに閉じる契機が来ず残り続けるため。
   const [activated, setActivated] = useState(false);
+  const [popoverStyle, setPopoverStyle] = useState<CSSProperties | undefined>(undefined);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
 
-  function handleMouseEnter() {
+  function handleMouseEnter(e: React.MouseEvent<HTMLElement>) {
+    // ホバー領域の真上へ画面基準（position: fixed）で置く。通知アイテムの名前は
+    // 省略記号を出すためoverflow: hiddenの1行（NotificationsPanelの.singleLine）の中に
+    // あり、その外へはみ出す絶対配置だと切り取られて見えなくなる。
+    const rect = e.currentTarget.getBoundingClientRect();
+    setPopoverStyle({
+      position: "fixed",
+      left: rect.left,
+      bottom: document.documentElement.clientHeight - rect.top + 4,
+    });
     setActivated(true);
     if (!isSelf && followStatus === null && !loadingStatus) {
       setLoadingStatus(true);
@@ -81,6 +91,7 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
   return {
     followStatus,
     activated,
+    popoverStyle,
     loadingStatus,
     followActionPending,
     handleMouseEnter,

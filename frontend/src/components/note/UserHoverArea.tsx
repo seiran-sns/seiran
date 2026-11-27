@@ -42,6 +42,7 @@ export default function UserHoverArea({ target, isSelf, children }: UserHoverAre
           loadingStatus={hover.loadingStatus}
           followActionPending={hover.followActionPending}
           onToggle={hover.handleToggleFollow}
+          style={hover.popoverStyle}
         />
       )}
       {children}
