@@ -18,12 +18,13 @@ interface UserHoverAreaProps {
  *
  * 通知アイテムが`NoteHoverPreview`（投稿概要ポップアップ）でも包まれている場合、
  * このホバー領域と外側のホバー領域が同時に発火すること自体は無害（両者は独立した
- * ポップアップとして共存できる）。逆に`onMouseEnter`/`onMouseLeave`で
- * `stopPropagation()`を呼ぶと、Reactの合成イベント実装（内部的に`mouseover`/
- * `mouseout`ネイティブイベントの伝播を経由してenter/leaveを計算する）が祖先要素への
- * 合成イベントのディスパッチ自体を打ち切ってしまい、外側の`NoteHoverPreview`の
- * `onMouseLeave`が呼ばれずポップアップが開いたまま残る不具合を引き起こす。
+ * ポップアップとして共存できる）。逆に`onMouseEnter`で`stopPropagation()`を呼ぶと、
+ * Reactの合成イベント実装（内部的に`mouseover`/`mouseout`ネイティブイベントの伝播を
+ * 経由してenter/leaveを計算する）が祖先要素への合成イベントのディスパッチ自体を
+ * 打ち切ってしまい、外側の`NoteHoverPreview`の取得・配置計算が走らない。
  * そのため`stopPropagation`は呼ばない。
+ *
+ * 表示・非表示はCSSの`:hover`で決める（`UserHoverPopover.module.css`の`.host`）。
  */
 export default function UserHoverArea({ target, isSelf, children }: UserHoverAreaProps) {
   const hover = useFollowHoverSwitch(target, isSelf);
@@ -32,11 +33,10 @@ export default function UserHoverArea({ target, isSelf, children }: UserHoverAre
 
   return (
     <span
-      className={styles.wrap}
+      className={`${styles.wrap} ${styles.host}`}
       onMouseEnter={hover.handleMouseEnter}
-      onMouseLeave={hover.handleMouseLeave}
     >
-      {hover.isHovered && (
+      {hover.activated && (
         <UserHoverPopover
           followStatus={hover.followStatus}
           loadingStatus={hover.loadingStatus}

@@ -29,12 +29,15 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
   const targetKey = profileQuery(target.username, target.domain);
   const followStatus = useFollowStatus(targetKey) ?? null;
 
-  const [isHovered, setIsHovered] = useState(false);
+  // 一度でもマウスが乗ったらポップアップをDOMに置く。表示・非表示はCSSの`:hover`が
+  // 決める（UserHoverPopover.module.cssの`.host:hover > .popover`）。enter/leaveの対で
+  // 開閉ステートを持つと、leaveを取りこぼしたときに閉じる契機が来ず残り続けるため。
+  const [activated, setActivated] = useState(false);
   const [loadingStatus, setLoadingStatus] = useState(false);
   const [followActionPending, setFollowActionPending] = useState(false);
 
   function handleMouseEnter() {
-    setIsHovered(true);
+    setActivated(true);
     if (!isSelf && followStatus === null && !loadingStatus) {
       setLoadingStatus(true);
       api.users
@@ -51,10 +54,6 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
         .catch(() => setFollowStatusStore(targetKey, "not_following"))
         .finally(() => setLoadingStatus(false));
     }
-  }
-
-  function handleMouseLeave() {
-    setIsHovered(false);
   }
 
   async function handleToggleFollow(e: React.MouseEvent) {
@@ -81,11 +80,10 @@ export function useFollowHoverSwitch(target: FollowHoverTarget, isSelf: boolean)
 
   return {
     followStatus,
-    isHovered,
+    activated,
     loadingStatus,
     followActionPending,
     handleMouseEnter,
-    handleMouseLeave,
     handleToggleFollow,
   };
 }
