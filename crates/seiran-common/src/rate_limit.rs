@@ -68,13 +68,34 @@ pub enum CheckFollowRateLimitError {
     Db(sqlx::Error),
 }
 
+/// フォロー上限をどの用途で消費するか。
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowLimitUse {
+    /// 利用者が画面から1件ずつ行うフォロー。上限いっぱいまで使える。
+    Interactive,
+    /// フォローインポート。上限の1割（切り捨て）を残したところで止まる。上限を超える件数の
+    /// インポート中も、手動のフォローが常に上限に当たって弾かれる状態にしないため。
+    Import,
+}
+
+impl FollowLimitUse {
+    fn effective_max(self, max: i64) -> i64 {
+        match self {
+            Self::Interactive => max,
+            Self::Import => max - max / 10,
+        }
+    }
+}
+
 /// 24時間あたり新規フォロー数を制限する（既定: user/emoji-editor/silence 100人、moderator 300人、
 /// quarantine 10人）。quarantine は働きかけ先を広げにくくするため user より厳しい独自の上限を持つ。
 /// フォロー成立状態（accepted/pending問わず）を`follows`テーブルの行数でカウントする。
+/// `usage` が [`FollowLimitUse::Import`] なら上限の1割を残した値で判定する。
 pub async fn check_follow_rate_limit(
     pool: &PgPool,
     site_settings: &dyn SiteSettingsRepository,
     actor_id: i64,
+    usage: FollowLimitUse,
 ) -> Result<(), CheckFollowRateLimitError> {
     let role = actor_role(pool, actor_id).await;
     let max = if role == "quarantine" {
@@ -106,10 +127,25 @@ pub async fn check_follow_rate_limit(
     .fetch_one(pool)
     .await
     .map_err(CheckFollowRateLimitError::Db)?;
-    if count >= max {
+    if count >= usage.effective_max(max) {
         return Err(CheckFollowRateLimitError::Exceeded {
             retry_after_secs: (window_hours * 3600) as u64,
         });
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::FollowLimitUse;
+
+    #[test]
+    fn import_leaves_a_tenth_of_the_limit() {
+        assert_eq!(FollowLimitUse::Import.effective_max(100), 90);
+        assert_eq!(FollowLimitUse::Import.effective_max(300), 270);
+        assert_eq!(FollowLimitUse::Import.effective_max(10), 9);
+        // 10未満では1割が0人になるため、インポートも上限いっぱいまで進む。
+        assert_eq!(FollowLimitUse::Import.effective_max(5), 5);
+        assert_eq!(FollowLimitUse::Interactive.effective_max(100), 100);
+    }
 }

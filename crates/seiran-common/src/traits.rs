@@ -346,8 +346,8 @@ pub enum Job {
     /// フォローインポート（設定画面からの一括フォロー、隠し仕様でMisskeyエクスポート
     /// CSVの1列目のみを識別子として読む）の自己再enqueue型ジョブ。`follow_import_items`
     /// に `pending` が残っていれば1件処理し、成功・失敗を問わず自分自身を再度積む。
-    /// レート制限（`check_follow_rate_limit`）に引っかかった場合は該当itemを`pending`の
-    /// まま5分後の`enqueue_retry`で自分自身を再投入する（WorkerEngineの指数バックオフ・
+    /// レート制限（`check_follow_rate_limit`、上限の1割を残した値で判定）に引っかかった
+    /// 場合は該当itemを`pending`のまま5分後の`enqueue_retry`で自分自身を再投入する（WorkerEngineの指数バックオフ・
     /// attemptカウンタは消費しない）。対象が尽きるか`follow_import_requests.status`が
     /// `running`でなくなったら（完了/キャンセル）再enqueueせず終了する。
     FollowImportProcess { request_id: i64 },
