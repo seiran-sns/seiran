@@ -382,6 +382,46 @@ test.describe("ロール別レート制限", () => {
     }
   });
 
+  test("ユーザーの検索もポストの検索と同じ回数の枠を使う（続きの読み込みとメンション補完は数えない）", async ({
+    request,
+  }) => {
+    const admin = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
+    await patchSiteSettings(request, admin, { search_rate_limit_max_user: "3" });
+    try {
+      const user = await registerUserViaApi(request, "e2eusersearchlimit");
+      const headers = { Authorization: `Bearer ${user.token}` };
+
+      const custom = await request.get("/api/users/search?q=hello", { headers });
+      expect(custom.ok(), await custom.text()).toBeTruthy();
+      const misskey = await request.post("/api/users/search", { headers, data: { query: "hello" } });
+      expect(misskey.ok(), await misskey.text()).toBeTruthy();
+      // Mastodon 互換の v2/search はアカウントと投稿を一度に探しても1回と数える。
+      const mastodon = await request.get("/api/v2/search?q=hello", { headers });
+      expect(mastodon.ok(), await mastodon.text()).toBeTruthy();
+
+      const notes = await request.get("/api/notes/search?q=hello", { headers });
+      expect(notes.status()).toBe(429);
+      expect((await notes.json()).code).toBe("SEARCH_RATE_LIMITED");
+      const users = await request.get("/api/users/search?q=hello", { headers });
+      expect(users.status()).toBe(429);
+
+      // 続きの読み込みとメンションの補完は数えないので、上限に達していても使える。
+      const more = await request.get("/api/users/search?q=hello&offset=30", { headers });
+      expect(more.ok(), await more.text()).toBeTruthy();
+      const accounts = await request.get("/api/v1/accounts/search?q=hello", { headers });
+      expect(accounts.ok(), await accounts.text()).toBeTruthy();
+      const byName = await request.post("/api/users/search-by-username-and-host", {
+        headers,
+        data: { username: "hel" },
+      });
+      expect(byName.ok(), await byName.text()).toBeTruthy();
+    } finally {
+      await patchSiteSettings(request, admin, {
+        search_rate_limit_max_user: DEFAULT_SETTINGS.search_rate_limit_max_user,
+      });
+    }
+  });
+
   test("adminロールはロール別レート制限の対象外", async ({ request }) => {
     const admin = await loginViaApi(request, ADMIN_USERNAME, ADMIN_PASSWORD);
     await patchSiteSettings(request, admin, { post_rate_limit_max_user: "1" });

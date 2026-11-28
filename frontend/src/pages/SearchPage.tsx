@@ -51,6 +51,12 @@ interface PostRequest {
   conditions: SearchConditions;
 }
 
+/** ユーザーの検索1回分（「検索」を押した時点の検索語）。`seq` は同じ内容でも押すたびに増やす。 */
+interface UserRequest {
+  seq: number;
+  q: string;
+}
+
 /** 検索語と条件を比べるための文字列。 */
 function requestKey(q: string, c: SearchConditions): string {
   return JSON.stringify([q, c.since ?? "", c.until ?? "", c.user?.handle ?? "", c.server ?? "", c.tag ?? ""]);
@@ -148,16 +154,21 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlKey, conditionUser]);
 
-  // ポストの検索を走らせる要求。「検索」を押したとき、またはほかの経路で URL の検索語・条件が
-  // 変わったとき（右ペインの検索窓・共有されたリンク・再読み込み）だけ作る。タブの切り替えでは
-  // 作らない（切り替えるたびに検索すると回数を使う）。
+  // 検索を走らせる要求はタブごとに持ち、表示中のタブの分だけを作る。作るのは「検索」を押した
+  // とき、またはほかの経路で URL の検索語・条件が変わったとき（右ペインの検索窓・共有された
+  // リンク・再読み込み）だけ。タブの切り替えでは作らない（ポストの検索には回数制限があり、
+  // 片方のタブで確定した検索語をもう片方へ持ち込むと、押していない検索が走って見える）。
   const [postRequest, setPostRequest] = useState<PostRequest | null>(null);
+  const [userRequest, setUserRequest] = useState<UserRequest | null>(null);
   const handledUrlKey = useRef<string | null>(null);
   useEffect(() => {
     if (userPending || handledUrlKey.current === urlKey) return;
     handledUrlKey.current = urlKey;
     if (tab === "posts" && (q || hasConditions(conditions))) {
       setPostRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q, conditions }));
+    }
+    if (tab === "users" && q) {
+      setUserRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q }));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [urlKey, userPending]);
@@ -187,14 +198,24 @@ export default function SearchPage() {
     if (tab === "posts" && (nextQ || hasConditions(committed))) {
       setPostRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q: nextQ, conditions: committed }));
     }
+    if (tab === "users") {
+      setUserRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q: nextQ }));
+    }
     writeUrl(nextQ, tab, committed);
   }
 
-  // 下書き（検索語・条件）が、表示中のポストの結果と違うか（「検索」で反映されることを示す）。
-  const draftKey = requestKey(input.trim(), draft);
-  const postsDirty = postRequest
-    ? draftKey !== requestKey(postRequest.q, postRequest.conditions)
-    : Boolean(input.trim()) || hasConditions(draft);
+  // 入力中の検索語・条件が、表示中のタブの結果を出したときと違うか。違えば「検索」ボタンに
+  // 投稿欄の投稿ボタンと同じ縁を付け、押せば反映されることを示す。ユーザーの検索に条件は効かない
+  // ので、ユーザーのタブでは検索語だけを比べる。
+  const draftQ = input.trim();
+  const dirty =
+    tab === "posts"
+      ? postRequest
+        ? requestKey(draftQ, draft) !== requestKey(postRequest.q, postRequest.conditions)
+        : Boolean(draftQ) || hasConditions(draft)
+      : userRequest
+        ? draftQ !== userRequest.q
+        : Boolean(draftQ);
 
   const center = (
     <>
@@ -206,7 +227,11 @@ export default function SearchPage() {
           onChange={(e) => setInput(e.target.value)}
           placeholder={t("search:searchPage.placeholder")}
         />
-        <button type="submit" className={rp.searchBtn}>{t("common:search")}</button>
+        <button
+          type="submit"
+          className={dirty ? `${rp.searchBtn} ${pageStyles.searchBtnDirty}` : rp.searchBtn}
+          data-dirty={dirty || undefined}
+        >{t("common:search")}</button>
       </form>
 
       <Tabs
@@ -215,14 +240,15 @@ export default function SearchPage() {
         onChange={(i) => writeUrl(q, i === 1 ? "users" : "posts", conditions, userHandle)}
       />
 
-      {/* ポストの結果はタブを切り替えても残す（戻るたびに検索し直すと回数を使う）。 */}
+      {/* 結果はタブごとに持ち、切り替えても残す（戻るたびに検索し直すと回数を使う）。 */}
       <div hidden={tab !== "posts"}>
         <SearchConditionsField value={draft} onChange={setDraft} />
-        {postsDirty && <p className={pageStyles.hint}>{t("search:searchPage.pressSearchHint")}</p>}
         {userResolveFailed && <p className={panel.message}>{t("search:searchPage.conditions.userNotFound")}</p>}
         <PostResults request={postRequest} />
       </div>
-      {tab === "users" && <UserResults q={q} />}
+      <div hidden={tab !== "users"}>
+        <UserResults request={userRequest} />
+      </div>
     </>
   );
 
@@ -318,8 +344,10 @@ function PostResults({ request }: { request: PostRequest | null }) {
   );
 }
 
-/** 「ユーザー」タブの結果（表示名・ハンドル・自己紹介の一致）。 */
-function UserResults({ q }: { q: string }) {
+/** 「ユーザー」タブの結果（表示名・ハンドル・自己紹介の一致）。`request` が変わったとき
+ * （「検索」を押したとき等）だけ検索する。 */
+function UserResults({ request }: { request: UserRequest | null }) {
+  const q = request?.q ?? "";
   const { t } = useTranslation();
   const [users, setUsers] = useState<ActorSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
@@ -351,7 +379,8 @@ function UserResults({ q }: { q: string }) {
     return () => {
       cancelled = true;
     };
-  }, [q]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request?.seq]);
 
   async function loadMore() {
     if (loadingMore) return;

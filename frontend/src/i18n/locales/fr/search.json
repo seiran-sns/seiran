@@ -42,8 +42,7 @@
     "users": {
       "noResults": "Aucun utilisateur trouvé.",
       "prompt": "Trouvez des utilisateurs par nom, identifiant ou bio."
-    },
-    "pressSearchHint": "Appuyez sur Rechercher pour chercher des publications avec ces réglages (le nombre de recherches est limité)."
+    }
   },
   "searchPanel": {
     "placeholder": "Rechercher des mots-clés"

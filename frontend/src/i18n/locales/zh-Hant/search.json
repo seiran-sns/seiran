@@ -42,8 +42,7 @@
     "users": {
       "noResults": "找不到符合的使用者。",
       "prompt": "可依名稱、ID 或簡介尋找使用者。"
-    },
-    "pressSearchHint": "按「搜尋」即可依此內容搜尋貼文（搜尋次數有上限）。"
+    }
   },
   "searchPanel": {
     "placeholder": "搜尋關鍵字"

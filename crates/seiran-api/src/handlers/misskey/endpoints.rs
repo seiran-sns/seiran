@@ -426,13 +426,19 @@ async fn build_users_in_order(
 }
 
 /// POST /api/users/search — 表示名・ハンドルでユーザーを探す。検索は Mastodon 互換の
-/// `accounts/search` と同じ `actor_search::search_user_ids`。
+/// `accounts/search` と同じ `actor_search::search_user_ids`。検索画面からの検索なので、
+/// ポストの検索（`notes/search`）と同じくログイン必須で、同じ回数制限の枠で数える（続きの
+/// 読み込みは数えない）。メンションの補完（`search-by-username-and-host`）は数えない。
 pub async fn users_search(
-    MaybeAuthedUser(me): MaybeAuthedUser,
+    user: AuthedUser,
     State(state): State<AppState>,
     Json(body): Json<UsersSearchBody>,
 ) -> Result<Json<UsersListResponse>, ApiError> {
-    let viewer = me.map(|u| u.actor_id);
+    if body.query.trim().is_empty() {
+        return Ok(Json(UsersListResponse::Detailed(Vec::new())));
+    }
+    crate::rate_limit::check_search_rate_limit(&state, user.actor_id, body.offset == 0).await?;
+    let viewer = Some(user.actor_id);
     let search = UserSearch {
         query: &body.query,
         origin: body.origin.into(),

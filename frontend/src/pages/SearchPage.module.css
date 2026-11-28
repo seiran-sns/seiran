@@ -1,7 +1,5 @@
-/* 条件欄の下に出す「「検索」を押すとこの内容で検索します」の案内。 */
-.hint {
-  margin: 0;
-  padding: 0 16px 8px;
-  color: var(--text-faint);
-  font-size: 12px;
+/* 入力中の検索語・条件が表示中の結果と違うときの「検索」ボタンの縁（投稿欄の投稿ボタンの
+ * 送信先マーカーと同じ見た目）。押せば反映されることを示す。 */
+.searchBtnDirty {
+  box-shadow: 0 0 0 5px var(--danger);
 }

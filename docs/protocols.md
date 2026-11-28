@@ -708,7 +708,7 @@ DID 解決は常に公開 AppView（`public.api.bsky.app` の `getProfile`/`reso
 
 ## 6.1 投稿検索とBluesky AppView
 
-投稿の検索はログイン必須（`GET /api/notes/search`・Misskey 互換 `POST /api/notes/search` は未ログインなら 401、Mastodon 互換 `/api/v2/search` は `statuses` だけを空にする）。全文検索はクエリによって重く、AppView の結果の保存も伴うので、回数制限（`check_search_rate_limit`、ユーザー単位）の掛からない未ログインには開かない。共通関数（`search_post_ids_by_cursor` 等）は閲覧者を必須の引数に取る。
+投稿の検索はログイン必須（`GET /api/notes/search`・Misskey 互換 `POST /api/notes/search` は未ログインなら 401、Mastodon 互換 `/api/v2/search` は `statuses` だけを空にする）。全文検索はクエリによって重く、AppView の結果の保存も伴うので、回数制限（`check_search_rate_limit`、ユーザー単位）の掛からない未ログインには開かない。ユーザーの検索も、検索画面に当たるもの（`GET /api/users/search`・Misskey 互換 `POST /api/users/search`・Mastodon 互換 `/api/v2/search` の `accounts`）は同じくログイン必須で、同じ回数制限の枠で数える（最初のページだけ。`v2/search` はアカウントと投稿を一度に探しても1回）。メンションの補完に使われるもの（`GET /api/actors/suggest`・`users/search-by-username-and-host`・`/api/v1/accounts/search`）は入力のたびに呼ばれるので数えない。共通関数（`search_post_ids_by_cursor` 等）は閲覧者を必須の引数に取る。
 
 `GET /api/notes/search` は、初回検索でローカルDBと AppView の `app.bsky.feed.searchPosts` から `limit` 件ずつ取り、AppView の結果は author を `actors`、投稿を `posts` へ upsert してから、ローカル結果と ID 降順でマージ・重複排除して `limit` 件返す。AppView 障害時はローカル結果だけにする。
 
@@ -754,7 +754,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **`stats`**: `notesCount`/`usersCount`（と同値の `original*`）はローカルの実数（削除済み投稿・退会済みユーザー・リモートを除く）。`instances`・`driveUsage*` は0固定。
 
-**ユーザー検索（`users/search`・`users/search-by-username-and-host`）**: `users/search` は Mastodon 互換の `accounts/search`・`v2/search` と同じ共通関数 `actor_search::search_user_ids` を通し、差は応答の整形だけ（`detail: false` なら `UserLite`）。照合は表示名・各ハンドル表記・自己紹介の部分一致で、ユーザー名が語で始まる人、表示名かハンドルに一致した人、自己紹介だけに一致した人の順に、それぞれユーザー名順に並べる（`offset` で続き、`origin` は `local`/`remote`/`combined`）。語が `user@host`・`@user`・Bsky ハンドル・ローカルのユーザー名として既知のアクターに引き当たれば最初のページの先頭に置き、以降のページには出さない。部分一致は2文字以上のときだけ行う（1文字はほぼ全アクターに一致して並べ替えに秒単位かかる。入力のたびに検索するクライアントが最初の1文字で投げてくる）。ブロック・ミュートの相手、凍結・退会済みは出さない。未ログインではローカルのうちログアウト中の閲覧者に見せてよいアクターだけを出す。`search-by-username-and-host`（メンションの補完）はユーザー名の前方一致と `host`（省略で全サーバー、自ドメインか `.` でローカル、それ以外はサーバー名の前方一致）で絞り、フォロー中の相手を先に並べる（Misskey と同じ）。
+**ユーザー検索（`users/search`・`users/search-by-username-and-host`）**: `users/search` は Mastodon 互換の `accounts/search`・`v2/search` と同じ共通関数 `actor_search::search_user_ids` を通し、差は応答の整形だけ（`detail: false` なら `UserLite`）。照合は表示名・各ハンドル表記・自己紹介の部分一致で、ユーザー名が語で始まる人、表示名かハンドルに一致した人、自己紹介だけに一致した人の順に、それぞれユーザー名順に並べる（`offset` で続き、`origin` は `local`/`remote`/`combined`）。語が `user@host`・`@user`・Bsky ハンドル・ローカルのユーザー名として既知のアクターに引き当たれば最初のページの先頭に置き、以降のページには出さない。部分一致は2文字以上のときだけ行う（1文字はほぼ全アクターに一致して並べ替えに秒単位かかる。入力のたびに検索するクライアントが最初の1文字で投げてくる）。ブロック・ミュートの相手、凍結・退会済みは出さない。`users/search` はログイン必須で、検索回数制限（初回のみ）を数える（6.1節）。`search-by-username-and-host`（メンションの補完）はユーザー名の前方一致と `host`（省略で全サーバー、自ドメインか `.` でローカル、それ以外はサーバー名の前方一致）で絞り、フォロー中の相手を先に並べる（Misskey と同じ）。
 
 **未実装機能のスタブ**: `announcements`、`users/featured-notes`・`clips`・`pages`・`flashs`・`gallery/posts` は `empty_list_stub`（常に `[]`）。エンドポイントが無いと Aria が該当タブをエラー表示にするため。実装するときは個別ハンドラに差し替える。
 
@@ -822,7 +822,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 **その他のエンドポイント**:
 - インスタンス: `GET /api/v1/instance`・`/api/v2/instance`（`version` は `4.5.0 (compatible; seiran x.y.z)`、`api_versions.mastodon` は7。クライアントはこれで引用 UI 等の機能有無を決める）、`custom_emojis`、`preferences`。
 - タイムライン: `timelines/home`・`public`（`local=true` でローカル、それ以外はグローバル）・`tag/:hashtag`・`list/:id`、`tags/:name`、`lists`・`lists/:id`。
-- 閲覧: `statuses/:id`・`context`（祖先は返信先を最大40件たどる。子孫は `thread_descendants` のうち返信でつながるものを古い順）・`reblogged_by`・`favourited_by`、`accounts/:id`・`statuses`（`pinned`・`exclude_replies`・`exclude_reblogs`・`only_media`）・`followers`・`following`・`relationships`・`lookup`（未知の `acct` は `resolve_open_target` で取り込む）・`search`、`GET /api/v2/search`（URL は `resolve=true` のとき「開く」と同じ解決。投稿検索の回数制限はカスタム API と共通。`offset` によるページングは未対応で、`max_id` 無しの `offset` には空を返す）。
+- 閲覧: `statuses/:id`・`context`（祖先は返信先を最大40件たどる。子孫は `thread_descendants` のうち返信でつながるものを古い順）・`reblogged_by`・`favourited_by`、`accounts/:id`・`statuses`（`pinned`・`exclude_replies`・`exclude_reblogs`・`only_media`）・`followers`・`following`・`relationships`・`lookup`（未知の `acct` は `resolve_open_target` で取り込む）・`search`、`GET /api/v2/search`（URL は `resolve=true` のとき「開く」と同じ解決。アカウント・投稿の検索はログイン時だけで、未ログインは空を返す。回数制限はカスタム API と共通で、1回の呼び出しを1回と数える。`offset` によるページングは未対応で、`max_id` 無しの `offset` には空を返す）。
 - 操作: `accounts/:id/follow`・`unfollow`（既にフォロー済みでも関係を返す）、`statuses/:id/favourite`・`unfavourite`・`reblog`・`unreblog`、`POST /api/v1/media`・`/api/v2/media`（`create_drive_file` に委譲。同期処理なので常に 200）、`GET`/`PUT /api/v1/media/:id`（更新内容は保存しない）。
 - 通知: `GET /api/v1/notifications`。`follow`→`follow`、`followRequest`→`follow_request`、`mention`/`reply`→`mention`、`repost`→`reblog`（`status` はリポストされた自分の投稿）、`quote`→`quote`、`❤️` リアクション→`favourite`、他のリアクション→`emoji_reaction`（Fedibird の形の `emoji_reaction` に加え、Pleroma の形の `emoji`・`emoji_url` も付ける。`types[]`・`exclude_types[]` の `pleroma:emoji_reaction` も同じ通知に当てる）。引っ越し関連等は出さない。既読化しない。
 - ブロック・ミュート: `accounts/:id/block`・`unblock`・`mute`・`unmute` はカスタム API と共通の `blocks::block_actor`/`unblock_actor`・`mutes::mute_actor`/`unmute_actor`（対象文字列の解決と処理本体を分けたもの）を呼んで関係を返す。ミュートの `notifications`・`duration` は無視する（常に通知も含めて無期限）。`GET /api/v1/blocks`・`mutes` はページングせず全件。

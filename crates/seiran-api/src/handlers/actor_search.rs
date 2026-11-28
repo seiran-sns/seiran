@@ -96,11 +96,17 @@ pub struct UserSearchQuery {
 /// `GET /api/users/search?q=...&limit=...&offset=...` — 検索画面の「ユーザー」タブ。
 /// 検索は Misskey 互換の `users/search`・Mastodon 互換の `accounts/search` と同じ
 /// `search_user_ids`（同じパスの `POST` が Misskey 互換）。応答は `api.actors.search` と同じ形。
+/// 回数制限はポストの検索と同じ枠で数える（続きの読み込みは数えない）。
 pub async fn search_users(
     user: AuthedUser,
     Query(q): Query<UserSearchQuery>,
     State(state): State<AppState>,
 ) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    if q.q.trim().is_empty() {
+        return Ok(Json(Vec::new()));
+    }
+    let offset = q.offset.unwrap_or(0);
+    crate::rate_limit::check_search_rate_limit(&state, user.actor_id, offset == 0).await?;
     let search = UserSearch {
         query: &q.q,
         origin: ActorOrigin::Any,
@@ -108,7 +114,7 @@ pub async fn search_users(
         following_only: false,
         resolve: true,
         limit: q.limit.unwrap_or(30).clamp(1, 100),
-        offset: q.offset.unwrap_or(0),
+        offset,
     };
     let ids = search_user_ids(&state, &search).await?;
     let rows = actor_search::find_rows_by_ids(&state.db, &ids)
