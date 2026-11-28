@@ -111,6 +111,8 @@ pub(super) async fn broadcast_created_note(inbox: &InboxContext, ctx: CreatedNot
             )
             .await
             .unwrap_or(false),
+            author_actor_id: ctx.actor_id,
+            is_repost: false,
         };
         inbox.stream_hub.publish_channel_note(scope, note_json);
     }

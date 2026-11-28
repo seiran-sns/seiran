@@ -1219,6 +1219,8 @@ async fn publish_bsky_post_to_timelines(
             seiran_common::repository::denied_host::actor_is_kept_off_public_feeds(pool, actor_id)
                 .await
                 .unwrap_or(false),
+        author_actor_id: actor_id,
+        is_repost: false,
     };
     stream_hub.publish_channel_note(scope, note_json);
 }

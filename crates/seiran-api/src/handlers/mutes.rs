@@ -60,6 +60,7 @@ pub(crate) async fn mute_actor(
         .insert(actor_id, target_actor_id)
         .await
         .map_err(|e| ApiError::Internal(format!("[mute] mutes INSERT 失敗: {}", e)))?;
+    state.stream_hub.publish_relations_changed(vec![actor_id]);
     tracing::info!("[mute] {} → {} ミュート完了", actor_id, target_actor_id);
     Ok(())
 }
@@ -135,6 +136,7 @@ pub(crate) async fn unmute_actor(
         .delete_by_actors(actor_id, target_actor_id)
         .await
         .map_err(|e| ApiError::Internal(format!("[unmute] mutes DELETE 失敗: {}", e)))?;
+    state.stream_hub.publish_relations_changed(vec![actor_id]);
     tracing::info!(
         "[unmute] {} → {} ミュート解除完了",
         actor_id,
