@@ -230,6 +230,49 @@ async fn suspended_actor_is_hidden_from_every_viewer() {
     assert!(!is_hidden(&mut tx, VIEWER, OTHER).await);
 }
 
+async fn is_profile_hidden(tx: &mut sqlx::PgConnection, viewer_id: i64, other_id: i64) -> bool {
+    sqlx::query_scalar::<_, bool>("SELECT actor_profile_is_hidden_for_viewer($1, $2)")
+        .bind(viewer_id)
+        .bind(other_id)
+        .fetch_one(tx)
+        .await
+        .expect("actor_profile_is_hidden_for_viewer 呼び出し失敗")
+}
+
+/// プロフィールはミュートでは隠さず、ブロック（方向不問）と凍結では隠す。
+#[tokio::test]
+#[ignore = "実DBが必要"]
+async fn profile_ignores_mute_but_honors_block_and_suspension() {
+    let pool = test_db_pool().await;
+    setup_fixtures(&pool).await;
+    let mut tx = pool.begin().await.unwrap();
+
+    sqlx::query("INSERT INTO mutes (muter_actor_id, muted_actor_id) VALUES ($1, $2)")
+        .bind(VIEWER)
+        .bind(AUTHOR)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(is_hidden(&mut tx, VIEWER, AUTHOR).await);
+    assert!(!is_profile_hidden(&mut tx, VIEWER, AUTHOR).await);
+
+    sqlx::query("INSERT INTO blocks (blocker_actor_id, blocked_actor_id) VALUES ($1, $2)")
+        .bind(AUTHOR)
+        .bind(VIEWER)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(is_profile_hidden(&mut tx, VIEWER, AUTHOR).await);
+    assert!(is_profile_hidden(&mut tx, AUTHOR, VIEWER).await);
+
+    sqlx::query("UPDATE actors SET suspended_at = NOW() WHERE id = $1")
+        .bind(OTHER)
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    assert!(is_profile_hidden(&mut tx, VIEWER, OTHER).await);
+}
+
 // 参照埋め込み（引用・リポスト・返信先）用の一括取得の固定用。他テストのフォロー関係と
 // 干渉しないよう、専用のアクター・投稿を使う（fixture行自体は他と同様に残す）。
 const DM_AUTHOR: i64 = 900_000_004;

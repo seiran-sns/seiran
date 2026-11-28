@@ -476,7 +476,7 @@ impl ReactionRepository for PgReactionRepository {
                AND p.deleted_at IS NULL
                AND r.id < COALESCE($2::bigint, 9223372036854775807)
                AND r.id > COALESCE($3::bigint, 0)
-               AND ($4::bigint IS NULL OR $4 = $1 OR NOT actor_is_hidden_for_viewer($4, $1))
+               AND ($4::bigint IS NULL OR $4 = $1 OR NOT actor_profile_is_hidden_for_viewer($4, $1))
                AND post_is_visible_to($4, p.actor_id, p.visibility::text, p.id, $5)
              ORDER BY r.id DESC
              LIMIT $6",

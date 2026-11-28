@@ -116,7 +116,7 @@ impl PinnedPostsRepository for PgPinnedPostsRepository {
              JOIN posts p ON p.id = pp.post_id
              ", crate::timeline_post_joins!(), "
              WHERE pp.actor_id = $1 AND p.deleted_at IS NULL
-               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, p.actor_id))
+               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_profile_is_hidden_for_viewer($2, p.actor_id))
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, false)
              ORDER BY pp.pinned_at DESC"),
         )

@@ -865,8 +865,8 @@ async fn load_viewer_relationship(
     };
 
     // ブロック・ミュート状態。タイムライン取得（timeline_by_actor/list_timeline_by_actor）は
-    // actor_is_hidden_for_viewer によって既に相互非表示が効くため、ここでは表示用の
-    // フラグ取得のみ行う（recent_posts/pinned_posts のショートサーキットは不要）。
+    // actor_profile_is_hidden_for_viewer によって既にブロックの相互非表示が効く（ミュートは
+    // プロフィールでは隠さない）ため、ここでは表示用のフラグ取得のみ行う。
     let (is_blocking, is_blocked_by) = match my_actor_id {
         Some(mid) => state
             .blocks
