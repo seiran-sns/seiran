@@ -3,7 +3,7 @@
     "placeholder": "Search",
     "noResults": "No matching posts found.",
     "prompt": "Enter keywords or add conditions to search.",
-    "loadMoreButton": "Load more",
+    "end": "That's everything.",
     "tabs": {
       "quickNotifications": "Quick notifications",
       "posts": "Posts",

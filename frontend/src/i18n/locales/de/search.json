@@ -3,7 +3,7 @@
     "placeholder": "Suchen",
     "noResults": "Keine passenden Beiträge gefunden.",
     "prompt": "Gib Suchbegriffe ein oder füge Bedingungen hinzu.",
-    "loadMoreButton": "Mehr laden",
+    "end": "Das ist alles.",
     "tabs": {
       "quickNotifications": "Schnelle Benachrichtigungen",
       "posts": "Beiträge",

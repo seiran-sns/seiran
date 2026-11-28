@@ -3,7 +3,7 @@
     "placeholder": "Buscar",
     "noResults": "No se encontraron publicaciones coincidentes.",
     "prompt": "Escribe palabras clave o añade condiciones para buscar.",
-    "loadMoreButton": "Cargar más",
+    "end": "Eso es todo.",
     "tabs": {
       "quickNotifications": "Notificaciones rápidas",
       "posts": "Publicaciones",

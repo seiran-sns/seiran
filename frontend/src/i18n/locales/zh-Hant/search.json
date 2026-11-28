@@ -3,7 +3,7 @@
     "placeholder": "搜尋",
     "noResults": "找不到符合的貼文。",
     "prompt": "輸入關鍵字或新增條件來搜尋。",
-    "loadMoreButton": "載入更多",
+    "end": "已顯示全部結果。",
     "tabs": {
       "quickNotifications": "快速通知",
       "posts": "貼文",

@@ -52,6 +52,7 @@ pub struct SearchQuery {
 #[derive(Serialize)]
 pub struct SearchResponse {
     pub notes: Vec<NoteResponse>,
+    /// 続きを取るときに渡すセッション ID。続きがもう無ければ `None`（`is_search_exhausted`）。
     pub session_id: Option<String>,
 }
 
@@ -202,16 +203,19 @@ pub async fn search_notes(
                 },
             );
             let new_local_until = extra_local.last().copied().or(local_until_id);
+            let local_exhausted = extra_local.len() < limit;
             buf.append(&mut extra_local);
             buf.append(&mut av_ids);
 
             // ソート・重複除去・ページング分割
             let buf = resolve_bridge_ids_for_search(&state.db, buf).await;
             let (ids, remaining) = merge_sort_dedup_and_split(buf, limit);
+            let ended = is_search_exhausted(&remaining, local_exhausted, &next_cursor);
             state
                 .search_store
                 .put_buffer(sid, remaining, new_local_until, next_cursor);
-            return fetch_and_respond(&state, ids, Some(sid.clone()), Some(viewer.0)).await;
+            let session_id = (!ended).then(|| sid.clone());
+            return fetch_and_respond(&state, ids, session_id, Some(viewer.0)).await;
         }
         // セッション消滅 → 新しい検索としてやり直す
     }
@@ -228,13 +232,17 @@ pub async fn search_notes(
         },
     );
     let local_until_id = local_ids.last().copied();
+    let local_exhausted = local_ids.len() < limit;
     let mut all_ids = local_ids;
     all_ids.append(&mut av_ids);
     let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
 
-    let new_session_id = uuid::Uuid::new_v4().to_string();
     let (return_ids, remaining) = merge_sort_dedup_and_split(all_ids, limit);
+    if is_search_exhausted(&remaining, local_exhausted, &appview_cursor) {
+        return fetch_and_respond(&state, return_ids, None, Some(viewer.0)).await;
+    }
 
+    let new_session_id = uuid::Uuid::new_v4().to_string();
     state.search_store.create(
         new_session_id.clone(),
         raw_query.clone(),
@@ -383,6 +391,18 @@ async fn resolve_bridge_ids_for_search(db: &sqlx::PgPool, ids: Vec<i64>) -> Vec<
             _ => Some(id),
         })
         .collect()
+}
+
+/// 続きがもう無いか（返し残しが無く、ローカル DB の取得がページに満たず、AppView の続きも
+/// 無い）。そのときは `session_id` を返さず、画面は「これですべて」を出して読み込みを止める。
+/// 返した件数では判定できない（取得時に可視性で絞るので、続きがあっても1ページに満たない
+/// ことがある）。
+fn is_search_exhausted(
+    remaining: &[i64],
+    local_exhausted: bool,
+    appview_cursor: &Option<String>,
+) -> bool {
+    remaining.is_empty() && local_exhausted && appview_cursor.is_none()
 }
 
 fn merge_sort_dedup_and_split(mut ids: Vec<i64>, limit: usize) -> (Vec<i64>, Vec<i64>) {
@@ -552,7 +572,18 @@ async fn fetch_and_respond(
 
 #[cfg(test)]
 mod tests {
-    use super::{merge_sort_dedup_and_split, normalize_hashtag, server_filter_from, ServerFilter};
+    use super::{
+        is_search_exhausted, merge_sort_dedup_and_split, normalize_hashtag, server_filter_from,
+        ServerFilter,
+    };
+
+    #[test]
+    fn search_is_exhausted_only_when_every_source_is_done() {
+        assert!(is_search_exhausted(&[], true, &None));
+        assert!(!is_search_exhausted(&[1], true, &None));
+        assert!(!is_search_exhausted(&[], false, &None));
+        assert!(!is_search_exhausted(&[], true, &Some("c".to_owned())));
+    }
 
     #[test]
     fn server_filter_accepts_local_aliases_fediverse_bluesky_and_hosts() {

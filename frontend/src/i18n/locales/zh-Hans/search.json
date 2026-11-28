@@ -3,7 +3,7 @@
     "placeholder": "搜索",
     "noResults": "没有找到匹配的帖子。",
     "prompt": "输入关键词或添加条件进行搜索。",
-    "loadMoreButton": "加载更多",
+    "end": "已显示全部结果。",
     "tabs": {
       "quickNotifications": "快速通知",
       "posts": "帖子",

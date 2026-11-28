@@ -3,7 +3,7 @@
     "placeholder": "Rechercher",
     "noResults": "Aucun message correspondant trouvé.",
     "prompt": "Saisissez des mots-clés ou ajoutez des conditions pour rechercher.",
-    "loadMoreButton": "Charger plus",
+    "end": "C'est tout.",
     "tabs": {
       "quickNotifications": "Notifications rapides",
       "posts": "Publications",

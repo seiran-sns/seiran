@@ -714,7 +714,7 @@ DID 解決は常に公開 AppView（`public.api.bsky.app` の `getProfile`/`reso
 
 Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by_cursor`（ブレンド・ブリッジポスト解決）と検索回数制限（`check_search_rate_limit`、初回のみ）を使い、`query`/`limit`/`sinceId`/`untilId` を受け付ける。`POST /api/notes/search-by-tag` は `tag`/`limit`/`sinceId`/`untilId` でハッシュタイムラインを返す（Aria 等）。
 
-`until_id` 指定時は対象の `created_at` を AppView の `until` に渡し、DBにも `p.id < until_id` を適用してブレンドする。`since_id` は Misskey 互換の逆方向ページングで、AppView を使わずDBの `p.id > since_id` だけを返す。既存フロントの過去掘りは `session_id` バッファも使える。
+`until_id` 指定時は対象の `created_at` を AppView の `until` に渡し、DBにも `p.id < until_id` を適用してブレンドする。`since_id` は Misskey 互換の逆方向ページングで、AppView を使わずDBの `p.id > since_id` だけを返す。既存フロントの過去掘りは `session_id` バッファも使える。続きがもう無い（返し残しが無く、ローカル DB の取得がページに満たず、AppView の続きも無い）ときは `session_id` を返さない。返した件数では終わりを判定できない（取得時に可視性で絞るので、続きがあっても1ページに満たないことがある）。
 
 ## 7. Misskey API 互換レイヤー
 

@@ -14,12 +14,12 @@ import SearchConditionsField, {
   SearchConditionUser,
 } from "../components/search/SearchConditionsField";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { useInfiniteScrollSentinel } from "../hooks/useInfiniteScrollSentinel";
 import { useIsMobileViewport } from "../hooks/useIsNarrowViewport";
 import { profilePath } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import rp from "../components/right/RightPanels.module.css";
 import listStyles from "../components/right/FollowListPanel.module.css";
-import styles from "./HomePage.module.css";
 import pageStyles from "./SearchPage.module.css";
 
 const PAGE_SIZE = 30;
@@ -270,15 +270,22 @@ export default function SearchPage() {
   return <AppShell center={center} right={isMobile ? undefined : right} />;
 }
 
-/** 「ポスト」タブの結果。`request` が変わったとき（「検索」を押したとき等）だけ検索する。 */
+/** 「ポスト」タブの結果。`request` が変わったとき（「検索」を押したとき等）だけ検索し、末尾まで
+ * スクロールすると続きを読み込む。続きが無くなったら（応答に `session_id` が無い）末尾に
+ * 「これですべてです」を出す。 */
 function PostResults({ request }: { request: PostRequest | null }) {
   const { t } = useTranslation();
   const [notes, setNotes] = useState<Note[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
   const [loading, setLoading] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
+  // 続きを読み込み終えるたびに進める。1ページ分がすべて見えない投稿で0件増えたときも
+  // 読み込み関数を作り直し、末尾がまだ画面内にあれば続けて読み込ませる。
+  const [loadedPages, setLoadedPages] = useState(0);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const seqRef = useRef(0);
   const apiConditions = useMemo(
     () => (request ? toApiConditions(request.conditions) : {}),
     [request]
@@ -286,6 +293,7 @@ function PostResults({ request }: { request: PostRequest | null }) {
 
   useEffect(() => {
     if (!request) return;
+    seqRef.current = request.seq;
     setSessionId(undefined);
     setError("");
     let cancelled = false;
@@ -306,20 +314,34 @@ function PostResults({ request }: { request: PostRequest | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.seq]);
 
-  async function loadMore() {
-    if (!request || loadingMore) return;
+  const loadMore = useCallback(async () => {
+    if (!request || !sessionId || loadingMoreRef.current) return;
+    const seq = request.seq;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const res = await api.notes.search({ q: request.q, limit: PAGE_SIZE, session_id: sessionId, ...apiConditions });
-      setNotes((prev) => [...prev, ...res.notes]);
+      if (seqRef.current !== seq) return;
+      setNotes((prev) => {
+        const seen = new Set(prev.map((n) => n.id));
+        return [...prev, ...res.notes.filter((n) => !seen.has(n.id))];
+      });
       setSessionId(res.session_id);
     } catch (e) {
+      if (seqRef.current !== seq) return;
       setError(getErrorMessage(e));
+      // 失敗したら自動では読み込み直さない（同じ失敗を繰り返さないよう、続きを打ち切る）。
+      setSessionId(undefined);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
+      setLoadedPages((n) => n + 1);
     }
-  }
+    // loadedPages は、0件増えたときも関数を作り直して末尾の監視をつけ直すために入れる。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [request, sessionId, apiConditions, loadedPages]);
 
+  const hasMore = Boolean(sessionId);
   return (
     <>
       {error && <p className={panel.message}>{error}</p>}
@@ -327,25 +349,19 @@ function PostResults({ request }: { request: PostRequest | null }) {
         notes={notes}
         loading={loading}
         emptyMessage={searched ? t("search:searchPage.noResults") : t("search:searchPage.prompt")}
+        onLoadMore={loadMore}
+        hasMore={hasMore}
+        loadingMore={loadingMore}
       />
-      {searched && !loading && notes.length > 0 && (
-        <div className={styles.feedTabs} style={{ position: "static" }}>
-          <button
-            className={styles.feedTab}
-            onClick={loadMore}
-            disabled={loadingMore}
-            style={{ cursor: loadingMore ? "default" : "pointer" }}
-          >
-            {loadingMore ? t("common:loading") : t("search:searchPage.loadMoreButton")}
-          </button>
-        </div>
+      {searched && !loading && !hasMore && !error && notes.length > 0 && (
+        <p className={panel.message}>{t("search:searchPage.end")}</p>
       )}
     </>
   );
 }
 
 /** 「ユーザー」タブの結果（表示名・ハンドル・自己紹介の一致）。`request` が変わったとき
- * （「検索」を押したとき等）だけ検索する。 */
+ * （「検索」を押したとき等）だけ検索し、末尾までスクロールすると続きを読み込む。 */
 function UserResults({ request }: { request: UserRequest | null }) {
   const q = request?.q ?? "";
   const { t } = useTranslation();
@@ -355,13 +371,16 @@ function UserResults({ request }: { request: UserRequest | null }) {
   const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
+  const loadingMoreRef = useRef(false);
+  const seqRef = useRef(0);
 
   useEffect(() => {
+    seqRef.current = request?.seq ?? 0;
     setError("");
+    setHasMore(false);
     if (!q) {
       setUsers([]);
       setSearched(false);
-      setHasMore(false);
       return;
     }
     let cancelled = false;
@@ -382,19 +401,26 @@ function UserResults({ request }: { request: UserRequest | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [request?.seq]);
 
-  async function loadMore() {
-    if (loadingMore) return;
+  const loadMore = useCallback(async () => {
+    if (!q || loadingMoreRef.current) return;
+    const seq = seqRef.current;
+    loadingMoreRef.current = true;
     setLoadingMore(true);
     try {
       const rows = await api.actors.searchUsers(q, { limit: PAGE_SIZE, offset: users.length });
+      if (seqRef.current !== seq) return;
       setUsers((prev) => [...prev, ...rows.filter((r) => !prev.some((p) => p.actor_id === r.actor_id))]);
       setHasMore(rows.length >= PAGE_SIZE);
     } catch (e) {
+      if (seqRef.current !== seq) return;
       setError(getErrorMessage(e));
+      setHasMore(false);
     } finally {
+      loadingMoreRef.current = false;
       setLoadingMore(false);
     }
-  }
+  }, [q, users.length]);
+  const sentinelRef = useInfiniteScrollSentinel<HTMLDivElement>(loadMore, hasMore);
 
   if (loading) return <p className={panel.message}>{t("common:loading")}</p>;
   return (
@@ -420,16 +446,12 @@ function UserResults({ request }: { request: UserRequest | null }) {
         </div>
       )}
       {hasMore && (
-        <div className={styles.feedTabs} style={{ position: "static" }}>
-          <button
-            className={styles.feedTab}
-            onClick={loadMore}
-            disabled={loadingMore}
-            style={{ cursor: loadingMore ? "default" : "pointer" }}
-          >
-            {loadingMore ? t("common:loading") : t("search:searchPage.loadMoreButton")}
-          </button>
+        <div ref={sentinelRef} className={listStyles.sentinel}>
+          {loadingMore ? t("common:loading") : ""}
         </div>
+      )}
+      {searched && !hasMore && !error && users.length > 0 && (
+        <p className={panel.message}>{t("search:searchPage.end")}</p>
       )}
     </>
   );

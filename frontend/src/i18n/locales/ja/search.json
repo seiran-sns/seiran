@@ -3,7 +3,7 @@
     "placeholder": "キーワードを検索",
     "noResults": "一致する投稿が見つかりませんでした。",
     "prompt": "キーワードを入力するか、条件を追加して検索してください。",
-    "loadMoreButton": "さらに読み込む",
+    "end": "これですべてです。",
     "tabs": {
       "quickNotifications": "クイック通知",
       "posts": "ポスト",

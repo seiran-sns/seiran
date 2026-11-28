@@ -3,7 +3,7 @@
     "placeholder": "검색",
     "noResults": "일치하는 게시물이 없습니다.",
     "prompt": "키워드를 입력하거나 조건을 추가해 검색하세요.",
-    "loadMoreButton": "더 로드하기",
+    "end": "이것이 전부입니다.",
     "tabs": {
       "quickNotifications": "빠른 알림",
       "posts": "게시물",
