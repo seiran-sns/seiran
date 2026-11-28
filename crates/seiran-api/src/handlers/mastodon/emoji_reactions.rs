@@ -66,6 +66,28 @@ pub struct FedibirdReactionEmoji {
     pub domain: Option<String>,
 }
 
+/// 通知の `emoji_reaction`（Fedibird の `REST::NotificationSerializer::EmojiReactionSerializer`）。
+/// 投稿の `emoji_reactions` と同じ形を `count`・`me` まで含めて返す。Feather 等は両者を同じ型で
+/// 読むので、`count` が無いと通知一覧全体のデコードに失敗する。通知1件はリアクション1件なので
+/// `count` は 1、`me` は Fedibird と同じく常に `false`（付けたのは通知の相手）。
+#[derive(Serialize, Clone, Debug, PartialEq, Eq)]
+pub struct FedibirdNotificationReaction {
+    #[serde(flatten)]
+    pub emoji: FedibirdReactionEmoji,
+    pub count: i64,
+    pub me: bool,
+}
+
+impl From<FedibirdReactionEmoji> for FedibirdNotificationReaction {
+    fn from(emoji: FedibirdReactionEmoji) -> Self {
+        Self {
+            emoji,
+            count: 1,
+            me: false,
+        }
+    }
+}
+
 /// ストリーミングの `emoji_reaction` イベントの本文（Fedibird の
 /// `PublishEmojiReactionWorker`）。その絵文字の件数を、届いた値に置き換えさせる。
 #[derive(Serialize, Clone, Debug, PartialEq, Eq)]

@@ -239,7 +239,7 @@ pub struct MastodonNotification {
     pub status: Option<MastodonStatus>,
     /// `emoji_reaction` のときの絵文字（Fedibird の形）。
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub emoji_reaction: Option<super::emoji_reactions::FedibirdReactionEmoji>,
+    pub emoji_reaction: Option<super::emoji_reactions::FedibirdNotificationReaction>,
     /// `emoji_reaction` のときのリアクション内容（Pleroma/Akkoma 互換クライアント向けの
     /// `pleroma:emoji_reaction` と同じ形。それを読むクライアントのために残す）。
     #[serde(skip_serializing_if = "Option::is_none")]
