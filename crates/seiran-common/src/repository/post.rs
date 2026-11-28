@@ -1173,7 +1173,7 @@ impl PostRepository for PgPostRepository {
              WHERE p.actor_id = $1 AND p.deleted_at IS NULL
                AND p.id < COALESCE($3::bigint, 9223372036854775807)
                AND p.id > COALESCE($4::bigint, 0)
-               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_is_hidden_for_viewer($2, $1))
+               AND ($2::bigint IS NULL OR p.actor_id = $2 OR NOT actor_profile_is_hidden_for_viewer($2, $1))
                AND post_is_visible_to($2, p.actor_id, p.visibility::text, p.id, $6)
                ",
             profile_feed_filter_sql!(),

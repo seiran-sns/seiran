@@ -242,6 +242,7 @@ AP 受信（本文・表示名・リアクション）で見つけたカスタ�
 
 - 退会時はこの3テーブルの当該アクターが関わる行（両方向）を物理削除する（「退会済みアクターは他者から存在しない」）。一覧クエリ（`list_blocked`/`list_muted`）にも `withdrawn_at IS NULL` を課す（物理削除より前に残った行へのフェイルセーフ）。
 - タイムライン・通知の相互非表示は `actor_is_hidden_for_viewer(viewer_id, other_id)`（ブロック・ミュート・退会済み・凍結を OR 判定）に集約する。ブロックはミュート相当の非表示も兼ねる（別途 `mutes` 行を作らない）。`viewer_id` が NULL（未ログイン）ではこの関数を通らない箇所があるので、`list_following`/`list_followers` 等は `withdrawn_at IS NULL` を独立の条件としても課す。
+- プロフィールのアクティビティ（`timeline_by_actor_filtered`・`reactions_by_actor_for_feed`）とピン留め（`list_timeline_by_actor`）は、`actor_is_hidden_for_viewer` からミュートを除いた `actor_profile_is_hidden_for_viewer(viewer_id, other_id)`（ブロック（方向不問）・退会済み・凍結）で判定する。ミュートは流れてくるもの（タイムライン・通知）だけを隠し、自分から開いたプロフィールでは隠さない。
 - `repost_mutes` は通常投稿を出したままリポストだけを隠す。リポストの判定は `p.repost_of_post_id IS NOT NULL OR p.repost_of_ap_uri IS NOT NULL`（未解決のリポストは `repost_of_post_id` が NULL なので）。`repost_is_muted_for_viewer(viewer_id, reposter_id)` はホーム/ローカル/ソーシャル/グローバルの4つのタイムラインだけに適用し、プロフィールや個別投稿・スレッドには適用しない。
 - 各リポジトリは、タイムラインの関係フラグ付与（`attach_relationship_flags`）用に「1閲覧者×複数ID」の一括判定（`find_statuses_among`/`list_muted_among`/`find_relationships_among`）を持つ。
 

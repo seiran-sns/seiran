@@ -968,7 +968,7 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 ## 10. ブロック・ミュート
 
 ### 定義
-- **ミュート**: 自分のタイムライン・通知から相手を隠すだけのローカル効果。相手に通知せず、配送もしない（`mutes` の INSERT/DELETE のみ）。
+- **ミュート**: 自分のタイムライン・通知から相手を隠すだけのローカル効果。相手に通知せず、配送もしない（`mutes` の INSERT/DELETE のみ）。相手のプロフィール（アクティビティ・ピン留め）では隠さない（プロフィールは閲覧者が自分から開くもので、流れてくるものを見ずに済ませるというミュートの目的に当たらないため）。
 - **ブロック**: Bsky 準拠（フォロー関係の強制解除＋相互完全非表示）。Fedi の「片方向拒否」と Misskey の「ミュート」を合わせた効果になる。相手の実体ごとに独立に送る:
   - `at_did` があれば `app.bsky.graph.block` をコミット（`commit_block`）
   - `ap_uri` があれば AP `Block` を配送
@@ -979,7 +979,7 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 ブロック関係があれば API で拒否する（`target_resolve::check_not_blocked`）: フォロー作成、リプライ作成（加えて返信先が閲覧者から見えるかを `find_by_id_for_viewer` で確認し、見えない `followers_only`/`direct` への返信を拒否）、リアクション、引用・リポスト、DM 送信。
 
 ### プロフィール表示の制限
-相手からブロックされている（`is_blocked_by`）と、`build_profile_response` は `bio` と `profile_fields` を空にする。投稿一覧は `actor_is_hidden_for_viewer` で元々空になる。
+相手からブロックされている（`is_blocked_by`）と、`build_profile_response` は `bio` と `profile_fields` を空にする。アクティビティ（投稿・リアクション）とピン留めは `actor_profile_is_hidden_for_viewer`（ブロック（方向不問）・凍結・退会。ミュートは含まない）で空になる。
 
 ### AP受信時のフォロー拒否
 `handle_follow` は、こちらが送信者をブロック中なら `Accept` を送らず無視する。
