@@ -3,6 +3,20 @@ import type { BskyEmbedChoice, CreateNoteBody, FrequentReaction, Note, Notificat
 import { normalizeNote } from "./types";
 
 /** `api.notes.create` の引数から投稿 API の本文を組み立てる（予約投稿も同じ本文を送る）。 */
+
+/** 投稿検索の条件（検索語とは別に指定する。すべて任意で、指定したものは AND）。 */
+export interface PostSearchConditions {
+  /** この時刻以降に作られた投稿（RFC 3339）。 */
+  since?: string;
+  /** この時刻より前に作られた投稿（RFC 3339）。 */
+  until?: string;
+  /** 投稿者のアクター ID。 */
+  user_id?: string;
+  /** 投稿者のサーバー。`local`・`fediverse`（Fedi 全体）・`bluesky`（Bluesky 全体）・ホスト名。 */
+  server?: string;
+  /** ハッシュタグ（先頭 `#` なし）。 */
+  tag?: string;
+}
 export function createNoteBody(
   text: string,
   deliverToFedi: boolean = true,
@@ -263,11 +277,16 @@ export const notes = {
       session_id?: string;
       until_id?: string;
       since_id?: string;
-    },
+    } & PostSearchConditions,
     signal?: AbortSignal,
   ) {
     const qs = new URLSearchParams();
     qs.set("q", params.q);
+    if (params.since) qs.set("since", params.since);
+    if (params.until) qs.set("until", params.until);
+    if (params.user_id) qs.set("user_id", params.user_id);
+    if (params.server) qs.set("server", params.server);
+    if (params.tag) qs.set("tag", params.tag);
     if (params.limit) qs.set("limit", String(params.limit));
     if (params.session_id) qs.set("session_id", params.session_id);
     if (params.until_id) qs.set("until_id", params.until_id);

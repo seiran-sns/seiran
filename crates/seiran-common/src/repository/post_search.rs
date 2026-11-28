@@ -346,9 +346,101 @@ fn escape_like(value: &str) -> String {
 }
 
 /// ローカル DB を検索し、閲覧者 `me`（`(actor_id, acct)`）に見える投稿の id を新しい順に返す。
+/// 検索語とは別に指定する投稿検索の条件（検索画面の条件欄、Misskey の `userId`/`host`、
+/// Mastodon の `account_id`）。種類どうしは AND で、空の項目は絞らない。投稿者・サーバー・
+/// ハッシュタグが1つずつなのは、Misskey・Mastodon の互換 API と
+/// Bluesky の `searchPosts` がどれも1つしか指定できないため（複数を OR にすると Bluesky に
+/// 値ごとに問い合わせることになる）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PostSearchFilters {
+    /// この時刻以降に作られた投稿。
+    pub since: Option<DateTime<Utc>>,
+    /// この時刻より前に作られた投稿。
+    pub until: Option<DateTime<Utc>>,
+    /// 投稿者。
+    pub actor_id: Option<i64>,
+    /// 投稿者のサーバー。
+    pub server: ServerFilter,
+    /// ハッシュタグ（`hashtags.name` と同じ正規化: 先頭 `#` なし・小文字）。
+    pub hashtag: Option<String>,
+}
+
+/// 投稿者のサーバーの指定。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ServerFilter {
+    #[default]
+    Any,
+    /// このサーバーのローカルユーザー。
+    Local,
+    /// ほかの Fedi サーバー1つ（ホスト名、小文字）。
+    Host(String),
+    /// Fedi 全体（ローカルを含む。Bluesky だけのアカウント以外）。
+    Fediverse,
+    /// Bluesky 全体（AT Protocol だけのアカウント。`actors.domain` が空）。PDS ごとには
+    /// 分けず1つのサーバーとして扱う。
+    Bluesky,
+}
+
+impl ServerFilter {
+    /// Bluesky の投稿が一致しうるか（AppView に問い合わせるか）。
+    pub fn includes_bluesky(&self) -> bool {
+        matches!(self, Self::Any | Self::Bluesky)
+    }
+}
+
+impl PostSearchFilters {
+    pub fn is_empty(&self) -> bool {
+        self.since.is_none()
+            && self.until.is_none()
+            && self.actor_id.is_none()
+            && self.server == ServerFilter::Any
+            && self.hashtag.is_none()
+    }
+}
+
+/// `filters` の条件を ` AND ...` として足す（`p` が posts、`a` が投稿者の actors）。
+fn append_filters_sql(filters: &PostSearchFilters, sql: &mut QueryBuilder<Postgres>) {
+    if let Some(since) = filters.since {
+        sql.push(" AND p.created_at >= ").push_bind(since);
+    }
+    if let Some(until) = filters.until {
+        sql.push(" AND p.created_at < ").push_bind(until);
+    }
+    if let Some(actor_id) = filters.actor_id {
+        sql.push(" AND p.actor_id = ").push_bind(actor_id);
+    }
+    match &filters.server {
+        ServerFilter::Any => {}
+        ServerFilter::Local => {
+            sql.push(" AND a.actor_type = 'local'");
+        }
+        ServerFilter::Host(host) => {
+            sql.push(" AND a.actor_type != 'local' AND LOWER(a.domain) = ")
+                .push_bind(host.clone());
+        }
+        ServerFilter::Fediverse => {
+            sql.push(" AND a.domain <> ''");
+        }
+        ServerFilter::Bluesky => {
+            sql.push(" AND a.actor_type != 'local' AND a.domain = ''");
+        }
+    }
+    if let Some(hashtag) = &filters.hashtag {
+        sql.push(
+            " AND EXISTS (SELECT 1 FROM post_hashtags ph JOIN hashtags h ON h.id = ph.hashtag_id
+                          WHERE ph.post_id = p.id AND h.name = ",
+        )
+        .push_bind(hashtag.clone())
+        .push(")");
+    }
+}
+
+/// ローカル DB の投稿検索。`query` は検索式（空なら条件だけで探す）。新しい順に
+/// `fetch_limit` 件まで。
 pub async fn search_local_post_ids(
     pool: &PgPool,
     query: &str,
+    filters: &PostSearchFilters,
     fetch_limit: i64,
     until_id: Option<i64>,
     since_id: Option<i64>,
@@ -360,6 +452,7 @@ pub async fn search_local_post_ids(
     let mut sql =
         QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
     append_sql(&condition, &mut sql, me);
+    append_filters_sql(filters, &mut sql);
     sql.push(" AND p.deleted_at IS NULL");
     sql.push(" AND post_is_visible_to(")
         .push_bind(me.map(|(actor_id, _)| actor_id))
@@ -372,6 +465,24 @@ pub async fn search_local_post_ids(
     }
     sql.push(" ORDER BY p.id DESC LIMIT ")
         .push_bind(fetch_limit);
+    sql.build_query_scalar().fetch_all(pool).await
+}
+
+/// `ids` のうち `filters` を満たす投稿（AppView の検索結果を、取り込んだ後に同じ条件で
+/// 確かめる。AppView に渡せる条件は一部だけで、渡し方の意味も完全には一致しないため）。
+pub async fn filter_post_ids(
+    pool: &PgPool,
+    ids: &[i64],
+    filters: &PostSearchFilters,
+) -> Result<Vec<i64>, sqlx::Error> {
+    if filters.is_empty() || ids.is_empty() {
+        return Ok(ids.to_vec());
+    }
+    let mut sql = QueryBuilder::new(
+        "SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE p.id = ANY(",
+    );
+    sql.push_bind(ids.to_vec()).push(")");
+    append_filters_sql(filters, &mut sql);
     sql.build_query_scalar().fetch_all(pool).await
 }
 

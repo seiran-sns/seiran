@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "搜索关键词（本地+Bluesky）",
+    "placeholder": "搜索",
     "noResults": "没有找到匹配的帖子。",
-    "prompt": "输入关键字进行搜索。",
+    "prompt": "输入关键词或添加条件进行搜索。",
     "loadMoreButton": "加载更多",
     "tabs": {
-      "quickNotifications": "快速通知"
+      "quickNotifications": "快速通知",
+      "posts": "帖子",
+      "users": "用户"
+    },
+    "conditions": {
+      "label": "搜索条件",
+      "add": "添加条件",
+      "remove": "移除条件",
+      "kindLabel": "条件类型",
+      "apply": "添加",
+      "replaceNote": "将替换同类型的现有条件。",
+      "kinds": {
+        "since": "日期（之后）",
+        "until": "日期（之前）",
+        "user": "用户",
+        "server": "服务器",
+        "tag": "话题标签"
+      },
+      "labels": {
+        "since": "{{date}} 之后",
+        "until": "{{date}} 之前",
+        "user": "用户：",
+        "server": "服务器：{{server}}"
+      },
+      "server": {
+        "local": "本站",
+        "fediverse": "整个联邦宇宙",
+        "bluesky": "整个 Bluesky",
+        "host": "指定服务器",
+        "hostPlaceholder": "例如 misskey.io"
+      },
+      "tagPlaceholder": "话题标签（可省略 #）",
+      "userNotFound": "找不到条件中的用户。"
+    },
+    "users": {
+      "noResults": "没有找到匹配的用户。",
+      "prompt": "可按名称、ID 或简介查找用户。"
     }
   },
   "searchPanel": {

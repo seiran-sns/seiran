@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "Suchbegriffe (lokal + Bluesky)",
+    "placeholder": "Suchen",
     "noResults": "Keine passenden Beiträge gefunden.",
-    "prompt": "Geben Sie ein Schlüsselwort für die Suche ein.",
+    "prompt": "Gib Suchbegriffe ein oder füge Bedingungen hinzu.",
     "loadMoreButton": "Mehr laden",
     "tabs": {
-      "quickNotifications": "Schnelle Benachrichtigungen"
+      "quickNotifications": "Schnelle Benachrichtigungen",
+      "posts": "Beiträge",
+      "users": "Benutzer"
+    },
+    "conditions": {
+      "label": "Suchbedingungen",
+      "add": "Bedingung hinzufügen",
+      "remove": "Bedingung entfernen",
+      "kindLabel": "Art der Bedingung",
+      "apply": "Hinzufügen",
+      "replaceNote": "Ersetzt die vorhandene Bedingung derselben Art.",
+      "kinds": {
+        "since": "Datum (ab)",
+        "until": "Datum (bis)",
+        "user": "Benutzer",
+        "server": "Server",
+        "tag": "Hashtag"
+      },
+      "labels": {
+        "since": "Ab {{date}}",
+        "until": "Bis {{date}}",
+        "user": "Benutzer: ",
+        "server": "Server: {{server}}"
+      },
+      "server": {
+        "local": "Lokal",
+        "fediverse": "Gesamtes Fediverse",
+        "bluesky": "Gesamtes Bluesky",
+        "host": "Bestimmter Server",
+        "hostPlaceholder": "z. B. misskey.io"
+      },
+      "tagPlaceholder": "Hashtag (# ist optional)",
+      "userNotFound": "Der Benutzer in den Bedingungen wurde nicht gefunden."
+    },
+    "users": {
+      "noResults": "Keine passenden Benutzer gefunden.",
+      "prompt": "Finde Benutzer nach Name, Handle oder Bio."
     }
   },
   "searchPanel": {

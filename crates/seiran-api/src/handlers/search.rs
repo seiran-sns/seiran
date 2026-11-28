@@ -1,6 +1,7 @@
 //! 検索エンドポイント（フェーズ6）
 //!
 //! GET /api/notes/search?q=<query>&limit=<n>&session_id=<id>&until_id=<id>&since_id=<id>
+//!   &since=<RFC 3339>&until=<RFC 3339>&user_id=<id>&server=<server>&tag=<tag>
 //!
 //! ローカル DB と Bsky AppView（public.api.bsky.app）を並行検索してブレンドする。
 //!
@@ -13,9 +14,14 @@ use axum::{
     response::IntoResponse,
     Json,
 };
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
+use seiran_common::atp::AppViewSearchOptions;
+use seiran_common::repository::post_search::{PostSearchFilters, ServerFilter};
+
 use super::notes::NoteResponse;
+use crate::error::ApiError;
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
@@ -31,6 +37,16 @@ pub struct SearchQuery {
     /// このIDより新しい投稿を取得する。AppViewには問い合わせない。
     #[serde(alias = "sinceId")]
     pub since_id: Option<i64>,
+    /// この時刻以降に作られた投稿（RFC 3339）。
+    pub since: Option<String>,
+    /// この時刻より前に作られた投稿（RFC 3339）。
+    pub until: Option<String>,
+    /// 投稿者のアクター ID。
+    pub user_id: Option<String>,
+    /// 投稿者のサーバー（`server_filter_from` の書式）。
+    pub server: Option<String>,
+    /// ハッシュタグ（先頭 `#` は有っても無くてもよい）。
+    pub tag: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -39,13 +55,88 @@ pub struct SearchResponse {
     pub session_id: Option<String>,
 }
 
+/// 投稿検索の要求（検索式と、検索式とは別に指定する条件）。
+pub(crate) struct PostSearch<'a> {
+    pub query: &'a str,
+    pub filters: PostSearchFilters,
+}
+
+impl PostSearch<'_> {
+    fn is_empty(&self) -> bool {
+        self.query.trim().is_empty() && self.filters.is_empty()
+    }
+}
+
+/// サーバーの指定を `ServerFilter` にする。`local`（Misskey 互換の `.`・自ドメインも同じ）・
+/// `fediverse`・`bluesky`・それ以外はホスト名。空なら絞らない。
+pub(crate) fn server_filter_from(value: Option<&str>, local_domain: &str) -> ServerFilter {
+    let Some(value) = value.map(str::trim).filter(|v| !v.is_empty()) else {
+        return ServerFilter::Any;
+    };
+    let host = value.to_lowercase();
+    match host.as_str() {
+        "local" | "." => ServerFilter::Local,
+        "fediverse" => ServerFilter::Fediverse,
+        "bluesky" => ServerFilter::Bluesky,
+        h if h.eq_ignore_ascii_case(local_domain) => ServerFilter::Local,
+        _ => ServerFilter::Host(host),
+    }
+}
+
+/// ハッシュタグの指定を `hashtags.name` と同じ形（先頭 `#` なし・小文字）にする。
+pub(crate) fn normalize_hashtag(value: Option<&str>) -> Option<String> {
+    value
+        .map(|v| v.trim().trim_start_matches('#').to_lowercase())
+        .filter(|v| !v.is_empty())
+}
+
+fn parse_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>, ApiError> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|v| {
+            DateTime::parse_from_rfc3339(v)
+                .map(|t| t.with_timezone(&Utc))
+                .map_err(|_| ApiError::BadRequest("INVALID_DATE".to_owned()))
+        })
+        .transpose()
+}
+
+fn filters_from_query(q: &SearchQuery, local_domain: &str) -> Result<PostSearchFilters, ApiError> {
+    let actor_id = q
+        .user_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(|id| {
+            id.parse::<i64>()
+                .map_err(|_| ApiError::BadRequest("INVALID_USER_ID".to_owned()))
+        })
+        .transpose()?;
+    Ok(PostSearchFilters {
+        since: parse_datetime(q.since.as_deref())?,
+        until: parse_datetime(q.until.as_deref())?,
+        actor_id,
+        server: server_filter_from(q.server.as_deref(), local_domain),
+        hashtag: normalize_hashtag(q.tag.as_deref()),
+    })
+}
+
 pub async fn search_notes(
     Query(q): Query<SearchQuery>,
     State(state): State<AppState>,
     user: AuthedUser,
 ) -> impl IntoResponse {
     let raw_query = q.q.as_deref().unwrap_or("").trim().to_string();
-    if raw_query.is_empty() {
+    let filters = match filters_from_query(&q, &state.local_domain) {
+        Ok(f) => f,
+        Err(e) => return e.into_response(),
+    };
+    let search = PostSearch {
+        query: &raw_query,
+        filters,
+    };
+    if search.is_empty() {
         return Json(SearchResponse {
             notes: vec![],
             session_id: None,
@@ -68,8 +159,7 @@ pub async fn search_notes(
     // since/until指定（Misskey互換のカーソルページング）はセッションを使わない。
     if q.since_id.is_some() || q.until_id.is_some() {
         let ids =
-            search_post_ids_by_cursor(&state, &raw_query, limit, q.until_id, q.since_id, viewer)
-                .await;
+            search_post_ids_by_cursor(&state, &search, limit, q.until_id, q.since_id, viewer).await;
         return fetch_and_respond(&state, ids, None, Some(viewer.0)).await;
     }
 
@@ -86,57 +176,60 @@ pub async fn search_notes(
                 return fetch_and_respond(&state, ids, Some(sid.clone()), Some(viewer.0)).await;
             }
 
-            // バッファ不足: ローカル DB を追加フェッチ
-            let mut extra_local = search_local_db(
-                &state.db,
-                &raw_query,
-                limit as i64,
-                local_until_id,
-                None,
-                viewer,
-            )
-            .await;
-            let new_local_until = extra_local.last().copied();
-            buf.append(&mut extra_local);
-
-            // AppView カーソルがあれば追加フェッチ
-            let new_appview_cursor = if let Some(cursor) = appview_cursor {
-                let (av_ids, next_cursor) = seiran_common::atp::search_appview_posts(
-                    &state.http_client,
-                    &raw_query,
-                    Some(&cursor),
-                    limit,
-                    None,
-                )
-                .await;
-                let mut av_ids_local = persist_appview_posts(&state, av_ids).await;
-                buf.append(&mut av_ids_local);
-                next_cursor
-            } else {
-                None
+            // バッファ不足: ローカル DB と、続きがあれば AppView を追加フェッチ
+            let appview = match appview_cursor {
+                Some(cursor) => appview_options(&state, &search)
+                    .await
+                    .map(|options| (options, cursor)),
+                None => None,
             };
+            let (mut extra_local, (mut av_ids, next_cursor)) = tokio::join!(
+                search_local_db(
+                    &state.db,
+                    &search,
+                    limit as i64,
+                    local_until_id,
+                    None,
+                    viewer
+                ),
+                async {
+                    match &appview {
+                        Some((options, cursor)) => {
+                            search_appview(&state, &search, options, Some(cursor), limit).await
+                        }
+                        None => (Vec::new(), None),
+                    }
+                },
+            );
+            let new_local_until = extra_local.last().copied().or(local_until_id);
+            buf.append(&mut extra_local);
+            buf.append(&mut av_ids);
 
             // ソート・重複除去・ページング分割
             let buf = resolve_bridge_ids_for_search(&state.db, buf).await;
             let (ids, remaining) = merge_sort_dedup_and_split(buf, limit);
             state
                 .search_store
-                .put_buffer(sid, remaining, new_local_until, new_appview_cursor);
+                .put_buffer(sid, remaining, new_local_until, next_cursor);
             return fetch_and_respond(&state, ids, Some(sid.clone()), Some(viewer.0)).await;
         }
-        // セッション消滅 → ローカル DB のみフォールバック
+        // セッション消滅 → 新しい検索としてやり直す
     }
 
     // ── 初回リクエスト: ローカル DB + AppView 並行フェッチ ───────────────────
-    let (local_ids, (av_post_ids, appview_cursor)) = tokio::join!(
-        search_local_db(&state.db, &raw_query, limit as i64, None, None, viewer,),
-        seiran_common::atp::search_appview_posts(&state.http_client, &raw_query, None, limit, None,),
+    let options = appview_options(&state, &search).await;
+    let (local_ids, (mut av_ids, appview_cursor)) = tokio::join!(
+        search_local_db(&state.db, &search, limit as i64, None, None, viewer),
+        async {
+            match &options {
+                Some(options) => search_appview(&state, &search, options, None, limit).await,
+                None => (Vec::new(), None),
+            }
+        },
     );
     let local_until_id = local_ids.last().copied();
-
-    let mut av_local_ids = persist_appview_posts(&state, av_post_ids).await;
     let mut all_ids = local_ids;
-    all_ids.append(&mut av_local_ids);
+    all_ids.append(&mut av_ids);
     let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
 
     let new_session_id = uuid::Uuid::new_v4().to_string();
@@ -144,7 +237,7 @@ pub async fn search_notes(
 
     state.search_store.create(
         new_session_id.clone(),
-        raw_query,
+        raw_query.clone(),
         remaining,
         local_until_id,
         appview_cursor,
@@ -153,21 +246,80 @@ pub async fn search_notes(
     fetch_and_respond(&state, return_ids, Some(new_session_id), Some(viewer.0)).await
 }
 
+/// 条件を AppView の `searchPosts` の絞り込みにする。Bluesky の投稿が一致しえない条件
+/// （サーバーに Bluesky 以外を指定した、指定したユーザーが Bluesky に投稿していない）なら
+/// `None`（問い合わせない）。
+async fn appview_options(
+    state: &AppState,
+    search: &PostSearch<'_>,
+) -> Option<AppViewSearchOptions> {
+    let f = &search.filters;
+    if !f.server.includes_bluesky() {
+        return None;
+    }
+    let author = match f.actor_id {
+        None => None,
+        Some(id) => {
+            // ローカルユーザーの Bluesky 側の投稿はローカル DB にある投稿そのものなので、
+            // AppView には問い合わせない。
+            let actor = state.actors.find_by_id(id).await.ok().flatten()?;
+            if actor.actor_type == "local" {
+                return None;
+            }
+            Some(actor.at_did?)
+        }
+    };
+    Some(AppViewSearchOptions {
+        since: f.since,
+        until: f.until,
+        author,
+        tag: f.hashtag.clone(),
+    })
+}
+
+/// AppView に問い合わせ、結果を取り込んで条件で確かめた post_id と次のカーソルを返す。
+/// 取り込んだ後に条件で確かめ直すのは、AppView の絞り込みとローカルの条件の意味が完全には
+/// 一致しないため（日時は AppView では `sortAt`、ローカルでは作成日時で比べる等）。
+async fn search_appview(
+    state: &AppState,
+    search: &PostSearch<'_>,
+    options: &AppViewSearchOptions,
+    cursor: Option<&str>,
+    limit: usize,
+) -> (Vec<i64>, Option<String>) {
+    // `searchPosts` は検索語が必須なので、条件だけの検索は `*` で問い合わせる。
+    let text = if search.query.trim().is_empty() {
+        "*"
+    } else {
+        search.query
+    };
+    let (posts, next) =
+        seiran_common::atp::search_appview_posts(&state.http_client, text, cursor, limit, options)
+            .await;
+    let ids = persist_appview_posts(state, posts).await;
+    let ids =
+        seiran_common::repository::post_search::filter_post_ids(&state.db, &ids, &search.filters)
+            .await
+            .unwrap_or_default();
+    (ids, next)
+}
+
 /// カーソル（`until_id`/`since_id`）指定の検索で、表示すべき post_id を新しい順に最大
-/// `limit` 件返す。frontend API（`search_notes`）と Misskey 互換 API（`notes/search`）の共通実装
+/// `limit` 件返す。frontend API（`search_notes`）と Misskey 互換 API（`notes/search`）・
+/// Mastodon 互換 API（`v2/search`）の共通実装。
 /// - `since_id` 指定: ローカル DB のみ（逆方向ページング。要件どおりAppViewには問い合わせない）。
-/// - それ以外: ローカル DB と AppView の双方から同数を取得してブレンドする。`until_id` 指定時は
+/// - それ以外: ローカル DB と AppView の双方から取得してブレンドする。`until_id` 指定時は
 ///   その投稿の作成時刻を AppView 側の上限にする。
 pub(crate) async fn search_post_ids_by_cursor(
     state: &AppState,
-    query: &str,
+    search: &PostSearch<'_>,
     limit: usize,
     until_id: Option<i64>,
     since_id: Option<i64>,
     viewer: (i64, &str),
 ) -> Vec<i64> {
     if since_id.is_some() {
-        let ids = search_local_db(&state.db, query, limit as i64, None, since_id, viewer).await;
+        let ids = search_local_db(&state.db, search, limit as i64, None, since_id, viewer).await;
         return resolve_bridge_ids_for_search(&state.db, ids).await;
     }
     let until = match until_id {
@@ -177,12 +329,24 @@ pub(crate) async fn search_post_ids_by_cursor(
             .flatten(),
         None => None,
     };
-    let (local_ids, (appview_posts, _)) = tokio::join!(
-        search_local_db(&state.db, query, limit as i64, until_id, None, viewer),
-        seiran_common::atp::search_appview_posts(&state.http_client, query, None, limit, until),
+    let options = appview_options(state, search).await.map(|mut o| {
+        o.until = match (o.until, until) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        o
+    });
+    let (local_ids, (mut av_ids, _)) = tokio::join!(
+        search_local_db(&state.db, search, limit as i64, until_id, None, viewer),
+        async {
+            match &options {
+                Some(options) => search_appview(state, search, options, None, limit).await,
+                None => (Vec::new(), None),
+            }
+        },
     );
     let mut all_ids = local_ids;
-    all_ids.append(&mut persist_appview_posts(state, appview_posts).await);
+    all_ids.append(&mut av_ids);
     let all_ids = resolve_bridge_ids_for_search(&state.db, all_ids).await;
     merge_sort_dedup_and_split(all_ids, limit).0
 }
@@ -225,7 +389,7 @@ fn merge_sort_dedup_and_split(mut ids: Vec<i64>, limit: usize) -> (Vec<i64>, Vec
 
 pub(crate) async fn search_local_db(
     db: &sqlx::PgPool,
-    query: &str,
+    search: &PostSearch<'_>,
     fetch_limit: i64,
     until_id: Option<i64>,
     since_id: Option<i64>,
@@ -233,7 +397,8 @@ pub(crate) async fn search_local_db(
 ) -> Vec<i64> {
     seiran_common::repository::post_search::search_local_post_ids(
         db,
-        query,
+        search.query,
+        &search.filters,
         fetch_limit,
         until_id,
         since_id,
@@ -248,39 +413,11 @@ pub(crate) async fn persist_appview_posts(
     state: &AppState,
     posts: Vec<seiran_common::atp::BskyPost>,
 ) -> Vec<i64> {
+    let actor_ids = resolve_appview_authors(state, &posts).await;
     let mut ids = Vec::with_capacity(posts.len());
     for post in posts {
-        let actor_id = match state.actors.find_by_did(&post.author_did).await {
-            Ok(Some(actor)) if actor.actor_type == "local" => actor.id,
-            Ok(_) => {
-                match seiran_common::seiran_actor_merge::discover_bsky_profile(
-                    &state.db,
-                    state.job_queue.as_ref(),
-                    &(&post).into(),
-                    seiran_common::seiran_actor_merge::DeclarationLookup::WhenNew,
-                    true,
-                )
-                .await
-                {
-                    Ok(outcome) => outcome.actor_id,
-                    Err(error) => {
-                        tracing::warn!(
-                            "[search] AppView actor保存失敗 did={}: {}",
-                            post.author_did,
-                            error
-                        );
-                        continue;
-                    }
-                }
-            }
-            Err(error) => {
-                tracing::warn!(
-                    "[search] AppView actor検索失敗 did={}: {}",
-                    post.author_did,
-                    error
-                );
-                continue;
-            }
+        let Some(&actor_id) = actor_ids.get(&post.author_did) else {
+            continue;
         };
         // 返信許可・引用可否の取得は検索の応答を待たせないようジョブへ回す
         match seiran_common::atp::upsert_bsky_post_deferring_gates(
@@ -299,6 +436,75 @@ pub(crate) async fn persist_appview_posts(
         }
     }
     ids
+}
+
+/// 同時に解決する投稿者の数。初めて見る投稿者は宣言レコードの取得（DID 文書の解決と
+/// PDS への `getRecord`）で1人あたり約1秒かかり、検索結果の投稿者は大半が初見なので、
+/// 順番に待つと1ページで数十秒になる。
+const AUTHOR_RESOLVE_CONCURRENCY: usize = 10;
+
+/// AppView の検索結果の投稿者を DID ごとに1度だけ、並列に保存・解決する（DID → actor_id）。
+/// 同じ DID を並列に解決しないよう先に重複を除く（どちらも「まだ行が無い」と見て宣言を
+/// 取りに行き、無駄な取得が増えるため）。解決できなかった投稿者は含めない。
+async fn resolve_appview_authors(
+    state: &AppState,
+    posts: &[seiran_common::atp::BskyPost],
+) -> std::collections::HashMap<String, i64> {
+    use futures_util::stream::{self, StreamExt};
+
+    let mut seen = std::collections::HashSet::new();
+    // future を先に作ってから流す（参照を取るクロージャを `map` に渡すと、axum のハンドラの
+    // `Send` 判定でライフタイムが一般化できずコンパイルできない）。
+    let lookups: Vec<_> = posts
+        .iter()
+        .filter(|p| seen.insert(p.author_did.as_str()))
+        .map(|post| async move {
+            resolve_appview_author(state, post)
+                .await
+                .map(|id| (post.author_did.clone(), id))
+        })
+        .collect();
+    stream::iter(lookups)
+        .buffer_unordered(AUTHOR_RESOLVE_CONCURRENCY)
+        .filter_map(std::future::ready)
+        .collect()
+        .await
+}
+
+async fn resolve_appview_author(
+    state: &AppState,
+    post: &seiran_common::atp::BskyPost,
+) -> Option<i64> {
+    match state.actors.find_by_did(&post.author_did).await {
+        Ok(Some(actor)) if actor.actor_type == "local" => Some(actor.id),
+        Ok(_) => match seiran_common::seiran_actor_merge::discover_bsky_profile(
+            &state.db,
+            state.job_queue.as_ref(),
+            &post.into(),
+            seiran_common::seiran_actor_merge::DeclarationLookup::WhenNew,
+            true,
+        )
+        .await
+        {
+            Ok(outcome) => Some(outcome.actor_id),
+            Err(error) => {
+                tracing::warn!(
+                    "[search] AppView actor保存失敗 did={}: {}",
+                    post.author_did,
+                    error
+                );
+                None
+            }
+        },
+        Err(error) => {
+            tracing::warn!(
+                "[search] AppView actor検索失敗 did={}: {}",
+                post.author_did,
+                error
+            );
+            None
+        }
+    }
 }
 
 /// post_id リストからノートレスポンスを構築して返す。検索時点で可視性を判定済みの ID でも、
@@ -320,7 +526,43 @@ async fn fetch_and_respond(
 
 #[cfg(test)]
 mod tests {
-    use super::merge_sort_dedup_and_split;
+    use super::{merge_sort_dedup_and_split, normalize_hashtag, server_filter_from, ServerFilter};
+
+    #[test]
+    fn server_filter_accepts_local_aliases_fediverse_bluesky_and_hosts() {
+        let d = "seiran.example";
+        assert_eq!(server_filter_from(None, d), ServerFilter::Any);
+        assert_eq!(server_filter_from(Some(" "), d), ServerFilter::Any);
+        assert_eq!(server_filter_from(Some("local"), d), ServerFilter::Local);
+        assert_eq!(server_filter_from(Some("."), d), ServerFilter::Local);
+        assert_eq!(
+            server_filter_from(Some("Seiran.Example"), d),
+            ServerFilter::Local
+        );
+        assert_eq!(
+            server_filter_from(Some("fediverse"), d),
+            ServerFilter::Fediverse
+        );
+        assert_eq!(
+            server_filter_from(Some("bluesky"), d),
+            ServerFilter::Bluesky
+        );
+        assert_eq!(
+            server_filter_from(Some("Misskey.IO"), d),
+            ServerFilter::Host("misskey.io".to_owned())
+        );
+    }
+
+    #[test]
+    fn hashtag_is_normalized_like_stored_names() {
+        assert_eq!(
+            normalize_hashtag(Some("#Seiran")),
+            Some("seiran".to_owned())
+        );
+        assert_eq!(normalize_hashtag(Some("猫")), Some("猫".to_owned()));
+        assert_eq!(normalize_hashtag(Some("#")), None);
+        assert_eq!(normalize_hashtag(None), None);
+    }
 
     /// 1ページ目: ローカル・Bsky合わせて limit 件を超える件数がある場合、
     /// 上位 limit 件が降順で返り、残りがバッファ用に残ること。

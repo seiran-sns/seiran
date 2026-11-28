@@ -226,3 +226,54 @@ test("未ログインでは投稿を検索できない", async ({ request }) => 
   expect(mastodon.ok(), await mastodon.text()).toBeTruthy();
   expect(((await mastodon.json()) as { statuses: unknown[] }).statuses).toEqual([]);
 });
+
+test("検索語とは別の条件（ハッシュタグ・サーバー・ユーザー）で絞り込める", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2esearchcond");
+  const viewers = [
+    await registerUserViaApi(request, "e2esearchcondv1"),
+    await registerUserViaApi(request, "e2esearchcondv2"),
+  ];
+  const tag = `condtag${Date.now().toString(36)}`;
+  const localText = `ローカルの投稿 #${tag}`;
+  const bskyText = `Blueskyの投稿 #${tag}`;
+  const did = `did:plc:e2econd${Date.now().toString(36)}`;
+
+  const create = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: localText, deliver_to_fedi: false, deliver_to_bsky: false, visibility: "public" },
+  });
+  expect(create.ok(), await create.text()).toBeTruthy();
+
+  // AppView スタブは条件を見ずに返すので、取り込んだ後に条件で確かめ直していることも確かめられる。
+  const configure = await request.post(`${APPVIEW_CONTROL_URL}/__control__/search`, {
+    data: {
+      posts: [
+        {
+          uri: `at://${did}/app.bsky.feed.post/cond`,
+          cid: `bafy${Date.now().toString(36)}`,
+          text: bskyText,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          author: { did, handle: `cond-${Date.now().toString(36)}.bsky.social`, displayName: "Cond" },
+        },
+      ],
+    },
+  });
+  expect(configure.ok(), await configure.text()).toBeTruthy();
+
+  let calls = 0;
+  const search = async (params: Record<string, string>) => {
+    // 検索の回数制限にかからないよう、閲覧者を2回ごとに替える。
+    const viewer = viewers[Math.floor(calls++ / 2)];
+    const response = await request.get(`/api/notes/search?${new URLSearchParams(params)}`, {
+      headers: { Authorization: `Bearer ${viewer.token}` },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return ((await response.json()) as { notes: { text: string }[] }).notes.map((n) => n.text);
+  };
+
+  // 検索語なしでハッシュタグだけ。AppView から取り込んだ投稿にもハッシュタグが記録される。
+  expect(await search({ tag: `#${tag}` })).toEqual(expect.arrayContaining([localText, bskyText]));
+  expect(await search({ tag, server: "local" })).toEqual([localText]);
+  expect(await search({ tag, server: "bluesky" })).toEqual([bskyText]);
+  expect(await search({ q: "投稿", user_id: alice.actorId })).toEqual([localText]);
+});

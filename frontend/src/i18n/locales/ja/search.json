@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "キーワードを検索（ローカル + Bluesky）",
+    "placeholder": "キーワードを検索",
     "noResults": "一致する投稿が見つかりませんでした。",
-    "prompt": "キーワードを入力して検索してください。",
+    "prompt": "キーワードを入力するか、条件を追加して検索してください。",
     "loadMoreButton": "さらに読み込む",
     "tabs": {
-      "quickNotifications": "クイック通知"
+      "quickNotifications": "クイック通知",
+      "posts": "ポスト",
+      "users": "ユーザー"
+    },
+    "conditions": {
+      "label": "検索条件",
+      "add": "条件を追加",
+      "remove": "条件を外す",
+      "kindLabel": "条件の種類",
+      "apply": "追加",
+      "replaceNote": "同じ種類の条件は置き換わります。",
+      "kinds": {
+        "since": "日付（以降）",
+        "until": "日付（以前）",
+        "user": "ユーザー",
+        "server": "サーバー",
+        "tag": "ハッシュタグ"
+      },
+      "labels": {
+        "since": "{{date}} 以降",
+        "until": "{{date}} 以前",
+        "user": "ユーザー: ",
+        "server": "サーバー: {{server}}"
+      },
+      "server": {
+        "local": "ローカル",
+        "fediverse": "Fedi 全体",
+        "bluesky": "Bluesky 全体",
+        "host": "サーバーを指定",
+        "hostPlaceholder": "misskey.io など"
+      },
+      "tagPlaceholder": "ハッシュタグ（# は省略できます）",
+      "userNotFound": "条件のユーザーが見つかりませんでした。"
+    },
+    "users": {
+      "noResults": "一致するユーザーが見つかりませんでした。",
+      "prompt": "名前・ID・自己紹介でユーザーを探せます。"
     }
   },
   "searchPanel": {

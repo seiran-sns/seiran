@@ -52,39 +52,69 @@ pub async fn search_actors(
         }
     };
 
-    let out: Vec<serde_json::Value> = rows
-        .into_iter()
-        .map(
-            |actor_search::ActorSearchRow {
-                 id,
-                 username,
-                 domain,
-                 display_name,
-                 emoji_map,
-                 actor_type,
-                 avatar_url,
-             }| {
-                // add_member/also-known-as にそのまま渡せるターゲット文字列を計算する。
-                // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
-                // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
-                let target = seiran_common::username::actor_handle(&username, &domain, &actor_type);
-                let avatar_url =
-                    seiran_common::avatar::resolve_avatar_url(avatar_url, &actor_type, &domain, id);
-                serde_json::json!({
-                    "actor_id": id.to_string(),
-                    "username": username,
-                    "domain": domain,
-                    "display_name": display_name,
-                    "emojis": seiran_common::emoji_map::to_string_map(emoji_map.as_ref()),
-                    "actor_type": actor_type,
-                    "avatar_url": avatar_url,
-                    "target": target,
-                })
-            },
-        )
-        .collect();
+    let out: Vec<serde_json::Value> = rows.into_iter().map(suggestion_json).collect();
 
     Json(out).into_response()
+}
+
+/// アクター候補1件の応答（`api.actors.search` の `ActorSuggestion`）。
+fn suggestion_json(row: actor_search::ActorSearchRow) -> serde_json::Value {
+    let actor_search::ActorSearchRow {
+        id,
+        username,
+        domain,
+        display_name,
+        emoji_map,
+        actor_type,
+        avatar_url,
+    } = row;
+    // add_member/also-known-as にそのまま渡せるターゲット文字列を計算する。
+    // `resolve_and_upsert_target` は先頭の`@`を無条件で除去するため無くても
+    // 動作はするが、ハンドルの慣習的な表記（`@user`/`@user@domain`）に揃える。
+    let target = seiran_common::username::actor_handle(&username, &domain, &actor_type);
+    let avatar_url =
+        seiran_common::avatar::resolve_avatar_url(avatar_url, &actor_type, &domain, id);
+    serde_json::json!({
+        "actor_id": id.to_string(),
+        "username": username,
+        "domain": domain,
+        "display_name": display_name,
+        "emojis": seiran_common::emoji_map::to_string_map(emoji_map.as_ref()),
+        "actor_type": actor_type,
+        "avatar_url": avatar_url,
+        "target": target,
+    })
+}
+
+#[derive(Deserialize)]
+pub struct UserSearchQuery {
+    pub q: String,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+/// `GET /api/users/search?q=...&limit=...&offset=...` — 検索画面の「ユーザー」タブ。
+/// 検索は Misskey 互換の `users/search`・Mastodon 互換の `accounts/search` と同じ
+/// `search_user_ids`（同じパスの `POST` が Misskey 互換）。応答は `api.actors.search` と同じ形。
+pub async fn search_users(
+    user: AuthedUser,
+    Query(q): Query<UserSearchQuery>,
+    State(state): State<AppState>,
+) -> Result<Json<Vec<serde_json::Value>>, ApiError> {
+    let search = UserSearch {
+        query: &q.q,
+        origin: ActorOrigin::Any,
+        viewer: Some(user.actor_id),
+        following_only: false,
+        resolve: true,
+        limit: q.limit.unwrap_or(30).clamp(1, 100),
+        offset: q.offset.unwrap_or(0),
+    };
+    let ids = search_user_ids(&state, &search).await?;
+    let rows = actor_search::find_rows_by_ids(&state.db, &ids)
+        .await
+        .map_err(|e| ApiError::Internal(e.to_string()))?;
+    Ok(Json(rows.into_iter().map(suggestion_json).collect()))
 }
 
 /// `GET /api/actors/suggest?q=...&limit=...`

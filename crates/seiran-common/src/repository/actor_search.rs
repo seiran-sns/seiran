@@ -84,6 +84,25 @@ pub async fn suggest_by_handle_prefix(
     .await
 }
 
+/// `ids` のアクターを、`ids` の順に（見つからない ID は除く）。
+pub async fn find_rows_by_ids(
+    pool: &PgPool,
+    ids: &[i64],
+) -> Result<Vec<ActorSearchRow>, sqlx::Error> {
+    sqlx::query_as(
+        "SELECT a.id, a.username, a.domain, a.display_name, a.emoji_map, a.actor_type::text AS actor_type,
+                COALESCE(rtrim(sp.public_url, '/') || '/' || mf.storage_key, a.avatar_url) AS avatar_url
+         FROM unnest($1::bigint[]) WITH ORDINALITY AS i(id, ord)
+         JOIN actors a ON a.id = i.id
+         LEFT JOIN media_files mf ON mf.id = a.avatar_media_id
+         LEFT JOIN storage_providers sp ON sp.id = mf.storage_provider_id
+         ORDER BY i.ord",
+    )
+    .bind(ids)
+    .fetch_all(pool)
+    .await
+}
+
 /// ユーザー検索の対象（Misskey の `origin`）。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ActorOrigin {

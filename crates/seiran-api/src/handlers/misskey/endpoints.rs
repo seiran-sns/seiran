@@ -139,8 +139,13 @@ pub struct NotesMentionsBody {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotesSearchBody {
     pub query: String,
+    /// この投稿者の投稿だけ。
+    pub user_id: Option<String>,
+    /// 投稿者のサーバー（`.` はこのサーバー）。
+    pub host: Option<String>,
     #[serde(flatten)]
     pub cursor: CursorParams,
 }
@@ -703,8 +708,23 @@ pub async fn notes_search(
     State(state): State<AppState>,
     Json(body): Json<NotesSearchBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let query = body.query.trim();
-    if query.is_empty() {
+    let filters = seiran_common::repository::post_search::PostSearchFilters {
+        actor_id: body
+            .user_id
+            .as_deref()
+            .map(|id| parse_id(id, "NO_SUCH_USER"))
+            .transpose()?,
+        server: crate::handlers::search::server_filter_from(
+            body.host.as_deref(),
+            &state.local_domain,
+        ),
+        ..Default::default()
+    };
+    let search = crate::handlers::search::PostSearch {
+        query: body.query.trim(),
+        filters,
+    };
+    if search.query.is_empty() && search.filters.is_empty() {
         return Ok(Json(Vec::new()));
     }
     let page = body.cursor.page(30);
@@ -714,7 +734,7 @@ pub async fn notes_search(
     let viewer = (user.actor_id, user.username.as_str());
     let ids = crate::handlers::search::search_post_ids_by_cursor(
         &state,
-        query,
+        &search,
         page.limit as usize,
         page.until_id,
         page.since_id,

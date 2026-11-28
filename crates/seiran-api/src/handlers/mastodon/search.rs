@@ -32,6 +32,9 @@ pub struct SearchParams {
     pub offset: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_bool")]
     pub following: Option<bool>,
+    /// この投稿者の投稿だけ（`statuses` の絞り込み）。
+    #[serde(default, deserialize_with = "lenient::opt_i64")]
+    pub account_id: Option<i64>,
     #[serde(flatten)]
     pub page: PageParams,
 }
@@ -61,9 +64,16 @@ async fn search_statuses(
     let is_initial_search = page.until_id.is_none() && page.since_id.is_none();
     crate::rate_limit::check_search_rate_limit(state, user.actor_id, is_initial_search).await?;
     let viewer = Some(user.actor_id);
+    let search = crate::handlers::search::PostSearch {
+        query: q,
+        filters: seiran_common::repository::post_search::PostSearchFilters {
+            actor_id: params.account_id,
+            ..Default::default()
+        },
+    };
     let ids = crate::handlers::search::search_post_ids_by_cursor(
         state,
-        q,
+        &search,
         page.limit as usize,
         page.until_id,
         page.since_id,
