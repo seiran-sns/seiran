@@ -1,4 +1,4 @@
-import { ReactNode, useEffect, useState } from "react";
+import { MouseEvent, ReactNode, useEffect, useState } from "react";
 import { flushSync } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation } from "react-router-dom";
@@ -59,6 +59,17 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
     }
   };
 
+  // 下段の🏠・🔔・🔍は、その画面にいるときに押したら移動せず先頭へスクロールする（ホームの
+  // タブの再押下と同じ）。同じパスへ移動し直すと、検索画面では検索語を含むクエリが消えてしまう。
+  const scrollTopIfCurrent = (path: string) => (event: MouseEvent<HTMLAnchorElement>) => {
+    if (location.pathname === path && !event.metaKey && !event.ctrlKey && !event.shiftKey) {
+      event.preventDefault();
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      return;
+    }
+    onBeforeNavigate?.();
+  };
+
   // ページ移動時にモバイルメニューを自動で閉じる
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -116,7 +127,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
             <Link
               to="/"
               className={styles.floatingHomeBtn}
-              onClick={() => onBeforeNavigate?.()}
+              onClick={scrollTopIfCurrent("/")}
               aria-label={t("nav:leftNav.home")}
               title={t("nav:leftNav.home")}
             >
@@ -127,7 +138,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
             <Link
               to="/notifications"
               className={styles.floatingNotifBtn}
-              onClick={() => onBeforeNavigate?.()}
+              onClick={scrollTopIfCurrent("/notifications")}
               aria-label={t("nav:leftNav.notifications")}
               title={t("nav:leftNav.notifications")}
             >
@@ -140,7 +151,7 @@ export default function AppShell({ center, right, onPosted, onBeforeNavigate, na
             <Link
               to="/search"
               className={styles.floatingSearchBtn}
-              onClick={() => onBeforeNavigate?.()}
+              onClick={scrollTopIfCurrent("/search")}
               aria-label={t("nav:leftNav.search")}
               title={t("nav:leftNav.search")}
             >
