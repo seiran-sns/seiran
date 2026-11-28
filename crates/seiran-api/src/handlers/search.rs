@@ -285,14 +285,14 @@ async fn search_appview(
     cursor: Option<&str>,
     limit: usize,
 ) -> (Vec<i64>, Option<String>) {
-    // `searchPosts` は検索語が必須なので、条件だけの検索は `*` で問い合わせる。
-    let text = if search.query.trim().is_empty() {
-        "*"
-    } else {
-        search.query
+    // 検索語の AST を AppView の検索式に組み直す（語は引用符で囲み、`from:` 等を指定子として
+    // 効かせない。`post_search::to_appview_query`）。何も一致しえない式なら問い合わせない。
+    use seiran_common::repository::post_search::{parse, to_appview_query};
+    let Some(text) = to_appview_query(&parse(search.query)) else {
+        return (Vec::new(), None);
     };
     let (posts, next) =
-        seiran_common::atp::search_appview_posts(&state.http_client, text, cursor, limit, options)
+        seiran_common::atp::search_appview_posts(&state.http_client, &text, cursor, limit, options)
             .await;
     let ids = persist_appview_posts(state, posts).await;
     // 投稿者・ハッシュタグ・日時は AppView が絞っているのでそのまま使う（DB 側の情報で

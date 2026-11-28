@@ -125,11 +125,13 @@ test("投稿本文で検索できる", async ({ page, request }) => {
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
 });
 
-test("Bluesky互換の検索式をローカル投稿にも適用する", async ({ request }) => {
+test("検索式（語句・グループ・縦棒の OR・除外）をローカル投稿にも適用し、指定子の形はただの語にする", async ({
+  request,
+}) => {
   const alice = await registerUserViaApi(request, "e2esearchopsa");
   const bob = await registerUserViaApi(request, "e2esearchopsb");
   const unique = `queryops${Date.now()}`;
-  const matchingText = `${unique} exact phrase #rust https://example.com/article @${bob.username}`;
+  const matchingText = `${unique} exact phrase #rust from:literal`;
   const excludedText = `${unique} exact phrase spam`;
 
   for (const [user, text] of [[alice, matchingText], [bob, excludedText]] as const) {
@@ -145,22 +147,18 @@ test("Bluesky互換の検索式をローカル投稿にも適用する", async (
       headers: { Authorization: `Bearer ${alice.token}` },
     });
     expect(response.ok(), `search failed: ${response.status()} ${await response.text()}`).toBeTruthy();
-    return (await response.json()) as { notes: { text: string }[] };
+    return ((await response.json()) as { notes: { text: string }[] }).notes.map((note) => note.text);
   };
 
-  const filtered = await search(
-    `from:me ("exact phrase" OR absent) -spam domain:example.com lang:ja ${unique}`,
-  );
-  expect(filtered.notes.map((note) => note.text)).toContain(matchingText);
-  expect(filtered.notes.map((note) => note.text)).not.toContain(excludedText);
+  const filtered = await search(`("exact phrase" | absent) -spam ${unique}`);
+  expect(filtered).toContain(matchingText);
+  expect(filtered).not.toContain(excludedText);
 
-  const unbalanced = await search(`(${unique} OR definitely-absent`);
-  expect(unbalanced.notes.map((note) => note.text)).toEqual(
-    expect.arrayContaining([matchingText, excludedText]),
-  );
+  const unbalanced = await search(`(${unique} | definitely-absent`);
+  expect(unbalanced).toEqual(expect.arrayContaining([matchingText, excludedText]));
 
-  const mention = await search(`mentions:${bob.username} ${unique}`);
-  expect(mention.notes.map((note) => note.text)).toContain(matchingText);
+  // `from:` は投稿者の指定ではなく、本文の語として探す。
+  expect(await search(`from:literal ${unique}`)).toEqual([matchingText]);
 });
 
 // 検索結果もタイムラインと同じくリアクション・引用元の埋め込みが付くこと。
