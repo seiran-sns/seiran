@@ -32,9 +32,46 @@ pub async fn handle(actor_id: i64, ctx: Arc<JobContext>) -> Result<(), String> {
 
     match actor.actor_type.as_str() {
         "fedi" => resolve_counterpart_via_atp(pool, &ctx, &actor).await,
-        "bsky" => resolve_counterpart_via_ap(pool, &ctx, &actor).await,
+        "bsky" => {
+            if crate::seiran_actor_merge::declaration_pending(pool, actor.id)
+                .await
+                .map_err(|e| format!("DB検索失敗: {}", e))?
+            {
+                return resolve_pending_declaration(pool, &ctx, &actor).await;
+            }
+            resolve_counterpart_via_ap(pool, &ctx, &actor).await
+        }
         _ => Ok(()),
     }
+}
+
+/// 宣言を確かめずに作った`bsky`行（`DeclarationLookup::Deferred`）の宣言レコードを取る。
+/// 申告があれば`discover_bsky_profile`がこのジョブを積み直し、次の回で相手を取りに行く。
+async fn resolve_pending_declaration(
+    pool: &sqlx::PgPool,
+    ctx: &JobContext,
+    actor: &Actor,
+) -> Result<(), String> {
+    let Some(did) = actor.at_did.as_deref() else {
+        return Ok(());
+    };
+    let profile = crate::repository::BskyActorProfile {
+        at_did: did,
+        handle: actor.at_handle.as_deref().unwrap_or(&actor.username),
+        display_name: actor.display_name.as_deref(),
+        avatar_url: None,
+        banner_url: None,
+    };
+    crate::seiran_actor_merge::discover_bsky_profile(
+        pool,
+        ctx.queue.as_ref(),
+        &profile,
+        crate::seiran_actor_merge::DeclarationLookup::Always,
+        true,
+    )
+    .await
+    .map_err(|e| format!("discover_bsky_actor 失敗: {}", e))?;
+    Ok(())
 }
 
 /// `fedi`型行が自己申告する`claimed_at_did`の実体（Bskyプロフィール）を取りに行く。

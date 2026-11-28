@@ -225,40 +225,53 @@ async fn discover_fedi_actor_once(
 }
 
 /// Bluesky 側の行を保存するときに、DID 側の宣言レコード（`org.seiran.actor.declaration`）を
-/// 取りに行くか。
+/// どう扱うか。
 #[derive(Clone, Copy)]
-pub enum DeclarationLookup {
+pub enum DeclarationLookup<'a> {
     /// 常に取りに行く（1人のプロフィールを取り直す・相手を確かめる経路）。
     Always,
-    /// 行がまだ無いときだけ取りに行く（検索結果・フォロワー一覧等、多数を一度に目にする経路）。
-    /// 既存行の申告は前回の値を保つ。新しく作る行には必ず申告が付く。
+    /// 行がまだ無いか、宣言を確かめずに作った行（`atp_declaration_pending`）のときだけ
+    /// 取りに行く（フォロワー一覧等、多数を一度に目にする経路）。既存行の申告は前回の値を保つ。
     WhenNew,
+    /// 投稿レコードの `seiranPost.counterpartAuthorId`（投稿者自身が AP 側の相手として
+    /// 申告する Actor URI）が分かっている。宣言レコードと同じく本人のリポジトリにある
+    /// 自己申告なので、取得に代えてこれを申告として使う。
+    Known(&'a str),
+    /// 取りに行かない。行を新しく作ったときは `atp_declaration_pending` を立て、
+    /// `Job::ActorMetadataResolve` で後から取る（AppView の検索結果のように、多数の初見の
+    /// アクターを一度に取り込み、すぐ応答したい経路）。
+    Deferred,
 }
 
 /// Bluesky のアクターを保存する唯一の入口。DID 側の宣言レコード（AP 側の相手の自己申告）を
-/// 取得し、相互申告マージ込みで保存し（`discover_bsky_actor`）、昇格処理
+/// 取得し（`lookup` による）、相互申告マージ込みで保存し（`discover_bsky_actor`）、昇格処理
 /// （`promote_after_discovery`）まで行う。Bluesky 側の行を作る・更新する経路は必ずこれを通す
-/// （宣言レコードを取らずに行を作ると、その行は申告を持たず、相手と結婚できなくなる）。
+/// （申告を確かめないまま印も付けずに行を作ると、その行は二度と宣言を取りに行かれず、
+/// 相手と結婚できなくなる）。
 ///
 /// `reenqueue_counterpart`が偽なら、未成立の自己申告を受けた相手側解決ジョブの再投入を抑止する
 /// （相手側解決ジョブ自身から呼ぶ場合。無限ジョブ再投入を避けるため）。
-/// 取得元は必ず DID 側の宣言レコードとする。呼び出し元が知っている相手（自分自身の
-/// `ap_uri`等）を渡すと自己参照で常に結婚が成立してしまう（`project_actor_merge_selfref_lessons`）。
+/// 申告は必ずその DID 自身のリポジトリにあるもの（宣言レコードか投稿の `seiranPost`）とする。
+/// 呼び出し元が知っている相手（自分自身の `ap_uri` 等）を渡すと自己参照で常に結婚が成立して
+/// しまう（`project_actor_merge_selfref_lessons`）。
 pub async fn discover_bsky_profile(
     pool: &PgPool,
     queue: &dyn JobQueue,
     profile: &BskyActorProfile<'_>,
-    lookup: DeclarationLookup,
+    lookup: DeclarationLookup<'_>,
     reenqueue_counterpart: bool,
 ) -> Result<DiscoveryOutcome, sqlx::Error> {
+    // None: 行が無い、Some(pending): 行があり、宣言を確かめていなければ true。
+    let state = declaration_state_by_did(pool, profile.at_did).await?;
     let fetch = match lookup {
         DeclarationLookup::Always => true,
-        DeclarationLookup::WhenNew => !actor_exists_by_did(pool, profile.at_did).await?,
+        DeclarationLookup::WhenNew => state.is_none_or(|pending| pending),
+        DeclarationLookup::Known(_) | DeclarationLookup::Deferred => false,
     };
-    let claimed_ap_uri = if fetch {
-        crate::atp::client::fetch_seiran_actor_declaration(profile.at_did).await
-    } else {
-        None
+    let claimed_ap_uri = match lookup {
+        _ if fetch => crate::atp::client::fetch_seiran_actor_declaration(profile.at_did).await,
+        DeclarationLookup::Known(uri) => Some(uri.to_owned()),
+        _ => None,
     };
     let now = Utc::now();
     let outcome = discover_bsky_actor(
@@ -269,6 +282,23 @@ pub async fn discover_bsky_profile(
         now,
     )
     .await?;
+    if fetch || matches!(lookup, DeclarationLookup::Known(_)) {
+        if state == Some(true) {
+            set_declaration_pending(pool, outcome.actor_id, false).await?;
+        }
+    } else if matches!(lookup, DeclarationLookup::Deferred)
+        && state.is_none()
+        && set_declaration_pending(pool, outcome.actor_id, true).await?
+    {
+        let _ = queue
+            .enqueue(
+                Job::ActorMetadataResolve {
+                    actor_id: outcome.actor_id,
+                },
+                priority::LOW,
+            )
+            .await;
+    }
     let claimed = claimed_ap_uri.as_deref().filter(|_| reenqueue_counterpart);
     promote_after_discovery(pool, queue, &outcome, claimed).await;
     Ok(outcome)
@@ -297,11 +327,40 @@ pub async fn discover_fedi_profile(
     Ok(outcome)
 }
 
-async fn actor_exists_by_did(pool: &PgPool, did: &str) -> Result<bool, sqlx::Error> {
-    sqlx::query_scalar("SELECT EXISTS (SELECT 1 FROM actors WHERE at_did = $1)")
+/// `did` の行があれば、宣言を確かめずに作った行か（`atp_declaration_pending`）。
+async fn declaration_state_by_did(pool: &PgPool, did: &str) -> Result<Option<bool>, sqlx::Error> {
+    sqlx::query_scalar("SELECT atp_declaration_pending FROM actors WHERE at_did = $1")
         .bind(did)
-        .fetch_one(pool)
+        .fetch_optional(pool)
         .await
+}
+
+/// `atp_declaration_pending` を変える。立てるのは結婚前の Bluesky 側の行（`bsky`）だけで、
+/// 実際に変わったら true。
+async fn set_declaration_pending(
+    pool: &PgPool,
+    actor_id: i64,
+    pending: bool,
+) -> Result<bool, sqlx::Error> {
+    let updated = sqlx::query(
+        "UPDATE actors SET atp_declaration_pending = $2
+         WHERE id = $1 AND atp_declaration_pending <> $2 AND (NOT $2 OR actor_type = 'bsky')",
+    )
+    .bind(actor_id)
+    .bind(pending)
+    .execute(pool)
+    .await?;
+    Ok(updated.rows_affected() > 0)
+}
+
+/// 宣言を確かめずに作った行か（`Job::ActorMetadataResolve` が取りに行くかを決める）。
+pub async fn declaration_pending(pool: &PgPool, actor_id: i64) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar(
+        "SELECT COALESCE((SELECT atp_declaration_pending FROM actors WHERE id = $1), false)",
+    )
+    .bind(actor_id)
+    .fetch_one(pool)
+    .await
 }
 
 /// ATP経由でアクター`at_did`を発見した際の upsert + 相互一致マージ判定。

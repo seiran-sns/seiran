@@ -109,6 +109,7 @@ ID の採番は2系統:
 - `atp_activation_pending`: DID 転入でレコードを取り込み終えて有効化するまで true。この間の ATP への書き込みはコミットせず `atp_deferred_writes` に積む（下記「ATP リポジトリ関連」）。転入のアカウント作成（`materialize_account`）で立て、有効化で積んだ書き込みを流し終えたら下ろす。
 - `did_moved_out_at`: DID 転出済みの時刻（`submitPlcOperation` 成功か `deactivateAccount` で設定）。読み取りは通常どおりで、書き込みだけ拒否する。
 - `claimed_ap_uri`/`claimed_at_did`: 相互申告マージ（#236）用の、まだ確認できていない自己申告（`bsky` 行が申告する AP Actor URI、`fedi` 行が申告する DID）。相互一致で結婚したら `remote_seiran` に昇格して NULL に戻す。相互に申告し合う2行の共存は複合 UNIQUE `actors_mutual_claim_key` で禁止し、既存行へ申告を書き足して相互に申告し合う形になるときは2行を統合する（`docs/protocols.md` 11節、`seiran_actor_merge`・`repository::actor_merge`・`unique_retry`）。
+- `atp_declaration_pending`: Bluesky 側の行（`bsky`）を、DID 側の宣言レコードを確かめずに作った印（AppView の検索結果の取り込み、`DeclarationLookup::Deferred`）。`ActorMetadataResolve` が宣言を取って下ろし、印のある行は `WhenNew` の経路でも取り直す（`docs/protocols.md` 11節）。既定 `false` で足したので、既存の行は確かめ済みの扱い。
 - `at_handle`: ATP ハンドル。`remote_seiran` の `username` は Fedi 側のまま固定されるので、Bsky ID の表示にはこれを使う。発見・再訪問のたびに最新にする（`discover_bsky_actor`）。
 - `bridge_real_actor_id`: ブリッジユーザーから実ユーザーへのリンク。
 - `seiran_pair_actor_id`: 使っていない（常に NULL）。削除を検討中。

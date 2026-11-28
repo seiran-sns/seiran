@@ -55,6 +55,9 @@ pub struct BskyPost {
     /// あれば `embed`・`is_sensitive` の代わりにこちらを保存する
     /// （`crate::seiran_post::SeiranPost::received_attachments`）。
     pub seiran_attachments: Option<Vec<(crate::atp::ParsedAttachment, bool)>>,
+    /// `record.seiranPost.counterpartAuthorId`（他 seiran の投稿者が AP 側の相手として申告する
+    /// Actor URI）。投稿者の保存で宣言レコードの代わりに使う（`DeclarationLookup::Known`）。
+    pub seiran_counterpart_author: Option<String>,
     /// AppView の PostView に付いてきた threadgate の `allow`（threadgate が無い、または
     /// PostView から読み取っていなければ `None`）。`upsert_bsky_post_deferring_gates` が
     /// 後追いのジョブを待たずに返信制限を保存するのに使う。
@@ -78,6 +81,14 @@ fn seiran_attachments_of(
     record: &serde_json::Value,
 ) -> Option<Vec<(crate::atp::ParsedAttachment, bool)>> {
     crate::seiran_post::SeiranPost::extract(record).map(|sp| sp.received_attachments())
+}
+
+/// `record.seiranPost.counterpartAuthorId` が `https://` の URI ならそれ（AP の Actor URI。
+/// AT DID 等は AP 側の相手の申告にならない）。
+fn seiran_counterpart_author_of(record: &serde_json::Value) -> Option<String> {
+    crate::seiran_post::SeiranPost::extract(record)
+        .map(|sp| sp.counterpart_author_id)
+        .filter(|id| id.starts_with("https://"))
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +282,7 @@ pub async fn fetch_atp_history(
                 bridged_original_url,
                 is_sensitive: crate::atp::record_has_media_self_label(record),
                 seiran_attachments: seiran_attachments_of(record),
+                seiran_counterpart_author: seiran_counterpart_author_of(record),
                 threadgate_allow: None,
             });
 
@@ -352,6 +364,7 @@ pub async fn fetch_single_bsky_post(
         bridged_original_url,
         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
         seiran_attachments: seiran_attachments_of(&p["record"]),
+        seiran_counterpart_author: seiran_counterpart_author_of(&p["record"]),
         threadgate_allow: None,
     }))
 }
@@ -1007,6 +1020,7 @@ pub async fn search_appview_posts(
                             .map(str::to_string),
                         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
                         seiran_attachments: seiran_attachments_of(&p["record"]),
+                        seiran_counterpart_author: seiran_counterpart_author_of(&p["record"]),
                         threadgate_allow: threadgate_allow_of_post_view(p),
                     })
                 })

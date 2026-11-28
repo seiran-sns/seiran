@@ -275,9 +275,9 @@ pub struct SearchSession {
 3. **未来掘り**（`sinceId`）: ローカルDBだけ（通過した AppView 投稿は保存済みなので取りこぼさない）。
 4. **セッション消滅時**: エラーにせず通常のローカル検索に落とす。
 
-**条件**（検索式とは別のパラメータ。`PostSearchFilters`）: 日時（以降・より前）、投稿者1人、サーバー1つ（ローカル・ほかの Fedi サーバー1つ・Fedi 全体・Bluesky 全体）、ハッシュタグ1つを AND で絞る。検索式が空でも条件があれば検索する。どれも1つずつなのは、Misskey 互換 `notes/search`（`userId`・`host`）・Mastodon 互換 `v2/search`（`account_id`）・AppView の `searchPosts`（`author`・`tag`）がどれも1つずつしか指定できないため（AppView の検索式の中の OR は、他の語と組み合わせると効かない）。ローカルは SQL の条件（ハッシュタグは `post_hashtags`）、AppView には `since`・`until`・`author`・`tag` として渡し、取り込んだ後にローカルと同じ条件で確かめ直す（AppView の日時は `sortAt` で比べる等、意味が完全には一致しないため）。サーバーに Bluesky 以外を指定したとき、投稿者がローカルユーザーか Bluesky のアカウントを持たないときは AppView に問い合わせない。検索式が空なら AppView には `*` を渡す（`q` が必須）。
+**条件**（検索式とは別のパラメータ。`PostSearchFilters`）: 日時（以降・より前）、投稿者1人、サーバー1つ（ローカル・ほかの Fedi サーバー1つ・Fedi 全体・Bluesky 全体）、ハッシュタグ1つを AND で絞る。検索式が空でも条件があれば検索する。どれも1つずつなのは、Misskey 互換 `notes/search`（`userId`・`host`）・Mastodon 互換 `v2/search`（`account_id`）・AppView の `searchPosts`（`author`・`tag`）がどれも1つずつしか指定できないため（AppView の検索式の中の OR は、他の語と組み合わせると効かない）。ローカルは SQL の条件（ハッシュタグは `post_hashtags`）、AppView には `since`・`until`・`author`・`tag` として渡し、その結果をそのまま使う（取り込み済みの投稿にはハッシュタグを記録していないものがあり、DB 側で確かめ直すと落ちる。AppView のタグの照合は本文に出ない `tags` まで見る）。サーバーだけは AppView が絞れない（ローカル・リモート seiran のユーザーの Bluesky 側の投稿も返る）ので、取り込んだ後に確かめる。サーバーに Bluesky 以外を指定したとき、投稿者がローカルユーザーか Bluesky のアカウントを持たないときは AppView に問い合わせない。検索式が空なら AppView には `*` を渡す（`q` が必須）。
 
-**AppView の結果の取り込み**: 初めて見る投稿者は宣言レコードの取得（DID 文書の解決と PDS への `getRecord`）で1人あたり約1秒かかり、検索結果の投稿者は大半が初見なので、投稿者を DID ごとに1度だけ、10並列で解決してから投稿を保存する（`persist_appview_posts`）。
+**AppView の結果の取り込み**（`persist_appview_posts`）: 投稿者を DID ごとに1度だけ並列に解決してから投稿を保存する。初見の投稿者でも宣言レコードは取りに行かない（取得は1人あたり約1秒かかり、検索結果の投稿者は大半が初見のため）。投稿の `seiranPost.counterpartAuthorId` があればそれを申告に使い、無ければジョブで後から取る（`DeclarationLookup::Known`/`Deferred`、`docs/protocols.md` 11節）。
 
 検索式は AppView にはそのまま渡し、ローカルには共通の AST に変換する。空白/`+` は AND、`OR` は OR、先頭 `-` は NOT、引用句と括弧が使える（括弧の不足は入力端で補う）。`from:`・`mentions:`・`domain:`・`since:`・`until:` をローカルにも適用し、`from:me`/`mentions:me` は自分に解決する。ローカル/Fedi 投稿は言語宣言が保証されないので `lang:` は常に TRUE。SQL は AST からプレースホルダー付きで生成し、LIKE のメタ文字をエスケープする。
 

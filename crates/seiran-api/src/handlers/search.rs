@@ -277,9 +277,7 @@ async fn appview_options(
     })
 }
 
-/// AppView に問い合わせ、結果を取り込んで条件で確かめた post_id と次のカーソルを返す。
-/// 取り込んだ後に条件で確かめ直すのは、AppView の絞り込みとローカルの条件の意味が完全には
-/// 一致しないため（日時は AppView では `sortAt`、ローカルでは作成日時で比べる等）。
+/// AppView に問い合わせ、結果を取り込んだ post_id と次のカーソルを返す。
 async fn search_appview(
     state: &AppState,
     search: &PostSearch<'_>,
@@ -297,8 +295,16 @@ async fn search_appview(
         seiran_common::atp::search_appview_posts(&state.http_client, text, cursor, limit, options)
             .await;
     let ids = persist_appview_posts(state, posts).await;
+    // 投稿者・ハッシュタグ・日時は AppView が絞っているのでそのまま使う（DB 側の情報で
+    // 確かめ直すと、ハッシュタグを記録していない取り込み済みの投稿が落ちる。AppView の
+    // タグの照合は本文に出ない `tags` まで見るので、むしろ正確）。サーバーだけは AppView が
+    // 絞れない（ローカル・リモート seiran のユーザーの Bluesky 側の投稿も返る）ので確かめる。
+    let server_only = PostSearchFilters {
+        server: search.filters.server.clone(),
+        ..Default::default()
+    };
     let ids =
-        seiran_common::repository::post_search::filter_post_ids(&state.db, &ids, &search.filters)
+        seiran_common::repository::post_search::filter_post_ids(&state.db, &ids, &server_only)
             .await
             .unwrap_or_default();
     (ids, next)
@@ -438,26 +444,39 @@ pub(crate) async fn persist_appview_posts(
     ids
 }
 
-/// 同時に解決する投稿者の数。初めて見る投稿者は宣言レコードの取得（DID 文書の解決と
-/// PDS への `getRecord`）で1人あたり約1秒かかり、検索結果の投稿者は大半が初見なので、
-/// 順番に待つと1ページで数十秒になる。
+/// 同時に解決する投稿者の数（解決は DB の読み書きだけ）。
 const AUTHOR_RESOLVE_CONCURRENCY: usize = 10;
 
 /// AppView の検索結果の投稿者を DID ごとに1度だけ、並列に保存・解決する（DID → actor_id）。
-/// 同じ DID を並列に解決しないよう先に重複を除く（どちらも「まだ行が無い」と見て宣言を
-/// 取りに行き、無駄な取得が増えるため）。解決できなかった投稿者は含めない。
+/// 宣言レコードは取りに行かない: 投稿の `seiranPost.counterpartAuthorId` があればそれを申告に
+/// 使い（`Known`）、無ければ後からジョブで取る（`Deferred`）。初見の投稿者は宣言の取得に
+/// 1人あたり約1秒かかり、検索結果の投稿者は大半が初見なので、待つと1ページで数秒〜数十秒に
+/// なる。解決できなかった投稿者は含めない。
 async fn resolve_appview_authors(
     state: &AppState,
     posts: &[seiran_common::atp::BskyPost],
 ) -> std::collections::HashMap<String, i64> {
     use futures_util::stream::{self, StreamExt};
 
-    let mut seen = std::collections::HashSet::new();
+    // 投稿者ごとに、`seiranPost` の申告があればそれを持つ投稿を代表にする。
+    let mut authors: std::collections::HashMap<&str, &seiran_common::atp::BskyPost> =
+        std::collections::HashMap::new();
+    for post in posts {
+        authors
+            .entry(post.author_did.as_str())
+            .and_modify(|current| {
+                if current.seiran_counterpart_author.is_none()
+                    && post.seiran_counterpart_author.is_some()
+                {
+                    *current = post;
+                }
+            })
+            .or_insert(post);
+    }
     // future を先に作ってから流す（参照を取るクロージャを `map` に渡すと、axum のハンドラの
     // `Send` 判定でライフタイムが一般化できずコンパイルできない）。
-    let lookups: Vec<_> = posts
-        .iter()
-        .filter(|p| seen.insert(p.author_did.as_str()))
+    let lookups: Vec<_> = authors
+        .into_values()
         .map(|post| async move {
             resolve_appview_author(state, post)
                 .await
@@ -475,27 +494,34 @@ async fn resolve_appview_author(
     state: &AppState,
     post: &seiran_common::atp::BskyPost,
 ) -> Option<i64> {
+    use seiran_common::seiran_actor_merge::DeclarationLookup;
     match state.actors.find_by_did(&post.author_did).await {
         Ok(Some(actor)) if actor.actor_type == "local" => Some(actor.id),
-        Ok(_) => match seiran_common::seiran_actor_merge::discover_bsky_profile(
-            &state.db,
-            state.job_queue.as_ref(),
-            &post.into(),
-            seiran_common::seiran_actor_merge::DeclarationLookup::WhenNew,
-            true,
-        )
-        .await
-        {
-            Ok(outcome) => Some(outcome.actor_id),
-            Err(error) => {
-                tracing::warn!(
-                    "[search] AppView actor保存失敗 did={}: {}",
-                    post.author_did,
-                    error
-                );
-                None
+        Ok(_) => {
+            let lookup = match post.seiran_counterpart_author.as_deref() {
+                Some(uri) => DeclarationLookup::Known(uri),
+                None => DeclarationLookup::Deferred,
+            };
+            match seiran_common::seiran_actor_merge::discover_bsky_profile(
+                &state.db,
+                state.job_queue.as_ref(),
+                &post.into(),
+                lookup,
+                true,
+            )
+            .await
+            {
+                Ok(outcome) => Some(outcome.actor_id),
+                Err(error) => {
+                    tracing::warn!(
+                        "[search] AppView actor保存失敗 did={}: {}",
+                        post.author_did,
+                        error
+                    );
+                    None
+                }
             }
-        },
+        }
         Err(error) => {
             tracing::warn!(
                 "[search] AppView actor検索失敗 did={}: {}",

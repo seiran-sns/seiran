@@ -999,7 +999,12 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 - **自己申告**: AP は Actor 文書の拡張フィールド `seiranAtDid` で自分の DID を、ATP は独自コレクション `org.seiran.actor.declaration`（rkey `self`）の `apActorUri` で自分の Actor URI を申告する。`app.bsky.actor.profile` に載せないのは、他クライアントがプロフィールを丸ごと上書きすると独自フィールドが消えるため。取得は公開 AppView が独自 NSID を中継しないので、DID を `atproto_pds` に解決してその PDS に直接 `getRecord` する（`atp::client::fetch_seiran_actor_declaration`）。
 - **発見時はすぐ INSERT、検証は後**: AP で u（ATP 相手 v を申告）を見つけたら `fedi` 型で `ap_uri=u`・`claimed_at_did=v` として INSERT し、v を取りに行く `Job::ActorMetadataResolve` を積む（結婚を早めるための先行取得で、成立の必須条件ではない）。ATP 側も対称に `bsky` 型で `at_did=v`・`claimed_ap_uri=u`。このジョブ（`jobs::actor_metadata_resolve`）は必ず相手側の申告（DID 側は `fetch_seiran_actor_declaration`、AP 側は取得した Actor 文書の `seiranAtDid`）を使う。呼び出し元が持つ値を渡すと下の相互一致が自己参照になり、一方的な申告だけで結婚が成立してしまう。
 - **保存の入口は1つ**: リモートアクターの行を作る・更新する経路は、すべて `seiran_actor_merge::discover_fedi_profile`（AP）か `discover_bsky_profile`（ATP）を通す（フォロー・受信 Activity・firehose・フォロワーのポーリング・検索・プロフィール表示・ターゲット解決・各種ジョブ）。申告を取らずに行を作る経路があると、その行は申告を持たないまま残り、相手と結婚できなくなる。
-  - AP の申告は Actor 文書に含まれるので、取得した文書から常に入る。ATP の申告は別に宣言レコードを取る必要があり、`DeclarationLookup` で取る時機を選ぶ。1人のプロフィールを取り直す経路（フォロー・プロフィール表示・ターゲット解決・相手の解決ジョブ等）は常に取り（`Always`）、多数を一度に目にする経路（検索結果・フォロワー一覧・ブリッジ）は行がまだ無いときだけ取る（`WhenNew`）。新しく作る行には必ず申告が付く。
+  - AP の申告は Actor 文書に含まれるので、取得した文書から常に入る。ATP の申告は別に宣言レコードを取る必要があり、`DeclarationLookup` で扱いを選ぶ。
+    - `Always`: 常に取る。1人のプロフィールを取り直す経路（フォロー・プロフィール表示・ターゲット解決・相手の解決ジョブ等）。
+    - `WhenNew`: 行がまだ無いか、宣言を確かめずに作った行（`actors.atp_declaration_pending`）のときだけ取る。多数を一度に目にする経路（フォロワー一覧・ブリッジ）。
+    - `Known`: 投稿レコードの `seiranPost.counterpartAuthorId`（`https://` の Actor URI）を申告として使い、取りに行かない。宣言レコードと同じくその DID 自身のリポジトリにある自己申告なので、重みは同じ。AppView の検索結果の投稿者で、その人の投稿に `seiranPost` があるとき。
+    - `Deferred`: 取りに行かない。行を新しく作ったときは `atp_declaration_pending` を立てて `ActorMetadataResolve` を積み、ジョブが宣言を取って印を下ろす。AppView の検索結果の投稿者で `seiranPost` が無いとき（初見の投稿者は宣言の取得に1人あたり約1秒かかり、待つと検索の1ページが数秒〜数十秒になる）。他のクライアントから投稿したリモート seiran ユーザーは、ジョブが走るまで（数秒〜数分）結婚前の行のまま見える。
+    - 宣言を確かめずに印も付けずに行を作る経路は無い（作ると二度と取りに行かれない）。ジョブが失われても、印のある行は次に `WhenNew` で目にしたときに取り直される。
   - 入口は、結婚成立時の Jetstream `wantedDids` 再構築と、未成立かつ申告ありのときの `ActorMetadataResolve` 投入（`promote_after_discovery`）まで行う。相手の解決ジョブ自身から呼ぶときは投入を抑止する（`reenqueue_counterpart`、無限投入を防ぐ）。
   - ローカルアクターの行に当たったら何も変えずに返す（ローカルユーザーの ATP ハンドル表記で `username` を上書きしない）。
 - **相互一致で結婚**: 相手の実体（真正な `ap_uri`、または DID 解決・署名済みコミットで裏付けられた `at_did`）がDBにあり、かつその既存行の申告が今回見つけた実体を指し返している場合だけ結婚させる。成立したら `remote_seiran` に昇格し `claimed_*` をクリアする。不一致・申告なしなら単独の `fedi`/`bsky` 行のまま残す。一方的な申告を受け入れると、他人の実在 URI を騙って結び付ける偽装ができてしまう。
@@ -1013,7 +1018,7 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 - **レース対策**: `actors` の複合 UNIQUE `actors_mutual_claim_key`（`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`、`actor_type IN ('fedi','bsky','remote_seiran')` の部分インデックス）で、相互に申告し合う2行の共存を禁じる。申告の無い行は NULL の非等価性で抵触しない。違反したら `unique_retry::retry_on_unique_violation` がトランザクションを最大5回やり直す（`discover_fedi_actor`/`discover_bsky_actor`）。advisory lock ではなく制約にしているのは、ロックキーの選び方次第で直列化が効かなくなる余地を無くすため。
 - **Fedi 系アクターの判定**: AP の inbox を持つのは `fedi` と `remote_seiran` の両方なので、AP 配送・DM・メンション等の宛先判定は `actor_type IN ('fedi', 'remote_seiran')` にする。`lists.rs` のプロキシフォロー関連だけは `fedi` 固定が正しい（`remote_seiran` は `wantedDids` 経由で ATP から投稿を受け取れるので、AP のプロキシフォローが要らない）。
 - **フォローの AP/ATP 同期（#238）**: 承認制は AP にしかないので、リモート seiran へのフォローは常に AP で送る（`follow_fedi`）。相手が非承認制で既に結婚済みなら同時に ATP の `commit_follow` もして `follows.atp_rkey` に記録し、承認制なら `Accept` 受信時（`handle_accept`）に同じことをする。アンフォロー・退会時の一括アンフォローは `atp_rkey` の有無で ATP 側の解除を判断するので対称に動く。
-- **未実装**: 投稿マージ（5節）の場で未結婚の投稿者同士を `counterpartAuthorId` で結婚させる処理。フォロー時に未結婚で後から結婚した相手への ATP フォローの追いコミット。`actors.seiran_pair_actor_id` は使っておらず（常に NULL）、削除を検討している。
+- **未実装**: 投稿マージ（5節）の場で未結婚の投稿者同士を `counterpartAuthorId` で結婚させる処理（AppView の検索結果の取り込みだけは `Known` で使っている。Jetstream の受信では使っていない）。フォロー時に未結婚で後から結婚した相手への ATP フォローの追いコミット。`actors.seiran_pair_actor_id` は使っておらず（常に NULL）、削除を検討している。
 
 ## 12. 未実装・スコープ外の機能
 

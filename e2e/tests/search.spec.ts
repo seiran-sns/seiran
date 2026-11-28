@@ -244,7 +244,8 @@ test("検索語とは別の条件（ハッシュタグ・サーバー・ユー�
   });
   expect(create.ok(), await create.text()).toBeTruthy();
 
-  // AppView スタブは条件を見ずに返すので、取り込んだ後に条件で確かめ直していることも確かめられる。
+  // AppView スタブは条件を見ずにこの投稿を返す。サーバーに Bluesky 以外を指定したときは
+  // AppView に問い合わせないので、ローカルの投稿だけになる。
   const configure = await request.post(`${APPVIEW_CONTROL_URL}/__control__/search`, {
     data: {
       posts: [
@@ -271,7 +272,7 @@ test("検索語とは別の条件（ハッシュタグ・サーバー・ユー�
     return ((await response.json()) as { notes: { text: string }[] }).notes.map((n) => n.text);
   };
 
-  // 検索語なしでハッシュタグだけ。AppView から取り込んだ投稿にもハッシュタグが記録される。
+  // 検索語なしでハッシュタグだけ。
   expect(await search({ tag: `#${tag}` })).toEqual(expect.arrayContaining([localText, bskyText]));
   expect(await search({ tag, server: "local" })).toEqual([localText]);
   expect(await search({ tag, server: "bluesky" })).toEqual([bskyText]);
