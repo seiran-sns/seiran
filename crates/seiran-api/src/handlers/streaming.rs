@@ -22,7 +22,9 @@ use axum::{
     },
     response::IntoResponse,
 };
-use seiran_common::streaming::{ChannelBroadcast, ChannelKind, NoteSubscriptions};
+use seiran_common::streaming::{
+    ChannelBroadcast, ChannelKind, NoteSubscriptions, ViewerFeedFilter,
+};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -123,6 +125,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
     // クライアント指定の subscription id（uuid文字列）-> 購読チャンネル。
     let mut subscriptions: HashMap<String, ChannelKind> = HashMap::new();
     let mut note_subscriptions = NoteSubscriptions::default();
+    let mut feed_filter = ViewerFeedFilter::load(&state.db, Some(actor_id)).await;
 
     loop {
         tokio::select! {
@@ -132,6 +135,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
+                    feed_filter.on_event(&state.db, &ev).await;
                     if (ev.broadcast_all
                         || ev.recipients.contains(&actor_id)
                         || note_subscriptions.admits(&ev, Some(actor_id)))
@@ -139,7 +143,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
                     {
                         break;
                     }
-                    if let Some(ref ch) = ev.channel {
+                    if let Some(ch) = ev.channel.as_ref().filter(|ch| feed_filter.admits(&ch.scope)) {
                         for (sub_id, kind) in subscriptions.iter() {
                             if ch.scope.matches(kind, actor_id) {
                                 let override_body = if *kind == ChannelKind::LocalTimelineModeration {
@@ -164,6 +168,7 @@ async fn handle_stream(mut socket: WebSocket, actor_id: i64, user_id: i64, state
                 Err(RecvError::Closed) => break,
             },
             _ = ping.tick() => {
+                feed_filter.refresh(&state.db).await;
                 if socket.send(Message::Ping(Vec::new())).await.is_err() {
                     break;
                 }

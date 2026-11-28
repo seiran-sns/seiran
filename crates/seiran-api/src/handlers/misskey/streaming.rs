@@ -39,7 +39,7 @@ use axum::{
 };
 use seiran_common::repository::NotificationFilter;
 use seiran_common::streaming::{
-    ChannelKind, NoteSubscriptions, NoteUpdatedBody, NOTE_UPDATED_EVENT,
+    ChannelKind, NoteSubscriptions, NoteUpdatedBody, ViewerFeedFilter, NOTE_UPDATED_EVENT,
 };
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
@@ -431,6 +431,7 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
         last_notification_id: None,
     };
 
+    let mut feed_filter = ViewerFeedFilter::load(&conn.state.db, viewer).await;
     let mut periodic = tokio::time::interval(PERIODIC);
     let settle = tokio::time::sleep(Duration::from_secs(u64::MAX / 4));
     tokio::pin!(settle);
@@ -444,6 +445,7 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
+                    feed_filter.on_event(&conn.state.db, &ev).await;
                     let addressed = viewer.is_some_and(|v| ev.recipients.contains(&v));
                     if addressed && !settle_armed && !conn.main_ids.is_empty() {
                         settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
@@ -455,7 +457,7 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
                             break;
                         }
                     }
-                    if let Some(ch) = ev.channel {
+                    if let Some(ch) = ev.channel.filter(|ch| feed_filter.admits(&ch.scope)) {
                         // 匿名接続が購読できるのは閲覧者に依らないチャンネルだけ（`authorize`）
                         // なので、閲覧者 ID の代わりの値は判定に使われない。
                         let viewer_id = viewer.unwrap_or_default();
@@ -478,6 +480,7 @@ async fn handle(mut socket: WebSocket, state: AppState, viewer: Option<i64>) {
                 }
             }
             _ = periodic.tick() => {
+                feed_filter.refresh(&conn.state.db).await;
                 let frames = conn.notification_frames().await;
                 if !send_all(&mut socket, frames).await || socket.send(Message::Ping(Vec::new())).await.is_err() {
                     break;
