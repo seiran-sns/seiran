@@ -15,7 +15,7 @@ import { ChannelSpec, useStreamingContext } from "../contexts/StreamingContext";
 import { useToast } from "../contexts/ToastContext";
 import { useCursorPagination } from "../hooks/useCursorPagination";
 import { useIsNarrowViewport } from "../hooks/useIsNarrowViewport";
-import { useSwipe } from "../hooks/useSwipe";
+import { type SlideSide, useSlideSwipe } from "../hooks/useSlideSwipe";
 import { filterTimelineNotes } from "../lib/timelineVisibility";
 import {
   applyTimelineScroll,
@@ -76,6 +76,18 @@ function fetchFeed(feed: Feed, params: { limit?: number; until_id?: string; sinc
   return request.then((notes) => filterTimelineNotes(feed, notes));
 }
 
+/** 隣のタブとして描くもの（スワイプ中だけ）。 */
+interface FeedPreview {
+  key: string;
+  side: SlideSide;
+  feed: Feed;
+  notes: Note[];
+  gapBeforeIds: Set<string>;
+  loading: boolean;
+  /** そのタブで覚えている位置。 */
+  scroll: TimelineScroll;
+}
+
 /** タブ（Feed）を対応するWebSocketタイムラインチャンネルへ変換する。 */
 function feedToChannelSpec(feed: Feed): ChannelSpec {
   switch (feed.kind) {
@@ -104,13 +116,11 @@ export default function HomePage() {
   // 別に保存し、ローカルタブ選択中だけ実際のフィードに反映する。以降の`feed`は反映後のもので、
   // キャッシュ・取得API・購読チャンネルが通常のローカルTLと分かれる。
   const [localModeration, setLocalModeration] = useState(loadLocalModeration);
-  const feed = useMemo(
-    (): Feed =>
-      selectedFeed.kind === "local" && isAdmin && localModeration
-        ? { kind: "local", moderation: true }
-        : selectedFeed,
-    [selectedFeed, isAdmin, localModeration],
+  const effectiveFeed = useCallback(
+    (f: Feed): Feed => (f.kind === "local" && isAdmin && localModeration ? { kind: "local", moderation: true } : f),
+    [isAdmin, localModeration],
   );
+  const feed = useMemo(() => effectiveFeed(selectedFeed), [effectiveFeed, selectedFeed]);
   const selectedFeedKey = feedKey(selectedFeed);
   const [lists, setLists] = useState<ListSummary[]>([]);
   const [pinnedHashtags, setPinnedHashtags] = useState<{ name: string }[]>([]);
@@ -144,6 +154,12 @@ export default function HomePage() {
   const timers = useRef<number[]>([]);
   const feedTabsRef = useRef<HTMLDivElement>(null);
   const centerRef = useRef<HTMLDivElement>(null);
+  // 横スワイプで動かす範囲（sliderRef）と、その中の表示中の一覧（trackRef）・隣のタブの一覧
+  // （previewPaneRef）。スクロール位置は表示中の一覧のポストで読む（隣のタブのポストも
+  // 同じ data-timeline-id を持つため、centerRef 全体から探すと混ざる）。
+  const sliderRef = useRef<HTMLDivElement>(null);
+  const trackRef = useRef<HTMLDivElement>(null);
+  const previewPaneRef = useRef<HTMLDivElement>(null);
 
   // スクロール位置は「トップにいる」か「どのポストが一番上に見えているか」で持つ
   // （lib/timelineScroll.ts）。画面より上のポストの高さが変わったら（リアクション・画像の
@@ -153,14 +169,14 @@ export default function HomePage() {
   const [atTop, setAtTop] = useState(true);
   const [pendingHead, setPendingHead] = useState<PendingHead>(NO_PENDING_HEAD);
   const captureScroll = useCallback(
-    () => captureTimelineScroll(centerRef.current, feedTabsRef.current?.getBoundingClientRect().bottom ?? 0),
+    () => captureTimelineScroll(trackRef.current, feedTabsRef.current?.getBoundingClientRect().bottom ?? 0),
     [],
   );
   // 位置を合わせた直後の window.scrollY。この値のままのスクロールイベントは自分で動かした
   // ものなので、ユーザーの位置として読まない（下の onScroll）。
   const pinnedScrollY = useRef<number | null>(null);
   const pinScroll = useCallback((scroll: TimelineScroll) => {
-    const applied = applyTimelineScroll(centerRef.current, scroll);
+    const applied = applyTimelineScroll(trackRef.current, scroll);
     pinnedScrollY.current = window.scrollY;
     return applied;
   }, []);
@@ -188,22 +204,11 @@ export default function HomePage() {
     return true;
   });
 
-  const handleSwipeLeft = useCallback(() => {
-    if (currentFeedIndex >= 0 && currentFeedIndex < availableFeeds.length - 1) {
-      setFeed(availableFeeds[currentFeedIndex + 1]);
-    }
-  }, [availableFeeds, currentFeedIndex, setFeed]);
-
-  const handleSwipeRight = useCallback(() => {
-    if (currentFeedIndex > 0) {
-      setFeed(availableFeeds[currentFeedIndex - 1]);
-    }
-  }, [availableFeeds, currentFeedIndex, setFeed]);
-
-  const swipeHandlers = useSwipe({
-    onSwipeLeft: handleSwipeLeft,
-    onSwipeRight: handleSwipeRight,
-  });
+  const neighborFeed = useCallback(
+    (side: SlideSide): Feed | undefined =>
+      currentFeedIndex < 0 ? undefined : availableFeeds[currentFeedIndex + side],
+    [availableFeeds, currentFeedIndex],
+  );
 
   // 選択中のタブを再度クリックした場合はタブ切替（実質no-op）ではなく先頭へスクロールする。
   const handleFeedTabClick = useCallback(
@@ -296,6 +301,16 @@ export default function HomePage() {
 
   // 復元待ちのスクロール位置（キャッシュヒット時のみセットされ、一覧の描画後に一度だけ使う）。
   const pendingScrollRestore = useRef<TimelineScroll | null>(null);
+  // スワイプで切り替えたタブで合わせる位置。隣のタブはスワイプ中に描いた位置のまま見せたいので、
+  // そのタブで覚えていた位置ではなく、描いた位置（placePreview）を使う。
+  const swipeScroll = useRef<{ key: string; scroll: TimelineScroll } | null>(null);
+  const takeSwipeScroll = (key: string): TimelineScroll | null => {
+    const s = swipeScroll.current;
+    swipeScroll.current = null;
+    return s?.key === key ? s.scroll : null;
+  };
+  // スワイプ中に隣のタブ用に始めた取得。切り替えた時点でまだ終わっていなければ、取り直さず待つ。
+  const previewFetches = useRef(new Map<string, Promise<Note[]>>());
 
   useEffect(() => {
     const key = feedKey(feed);
@@ -310,9 +325,10 @@ export default function HomePage() {
       setGapBeforeIds(cached.gapBeforeIds);
       setLoading(false);
       // 補完フェッチの結果を一覧へ入れるか溜めるかを、戻る位置で決めるので先に反映する。
-      pendingScrollRestore.current = cached.scroll;
-      scrollRef.current = cached.scroll;
-      setAtTop(cached.scroll.kind === "top");
+      const scroll = takeSwipeScroll(key) ?? cached.scroll;
+      pendingScrollRestore.current = scroll;
+      scrollRef.current = scroll;
+      setAtTop(scroll.kind === "top");
       // 離脱中に取りこぼした新着・状態変化を補うため、先頭ページ相当を再取得してマージする
       // （WS再接続時の補完と同じ処理、詳細は下記 mergeHeadIntoTimeline）。
       mergeHeadIntoTimeline();
@@ -323,14 +339,22 @@ export default function HomePage() {
     // キャッシュもスクロール位置の記憶も無い（一度も表示していない）タブへ切り替えた場合、
     // 前のタブのスクロール位置をそのまま持ち越すと、新しい一覧が読み込まれる前後で
     // 見た目上の高さが変わりスマホでは右ペイン領域まで巻き込んでスクロールしてしまう。
-    // 先頭へ明示的にリセットする。
-    window.scrollTo(0, 0);
-    scrollRef.current = TIMELINE_TOP;
-    setAtTop(true);
+    // 先頭へ明示的にリセットする。スワイプで切り替えたときは、スワイプ中に描いた位置
+    // （一覧の先頭をタブのすぐ下に置く）へ、取得した一覧を描いた後で合わせる。
+    const initialScroll = takeSwipeScroll(key);
+    if (initialScroll) {
+      pendingScrollRestore.current = initialScroll;
+      scrollRef.current = initialScroll;
+      setAtTop(initialScroll.kind === "top");
+    } else {
+      window.scrollTo(0, 0);
+      scrollRef.current = TIMELINE_TOP;
+      setAtTop(true);
+    }
     setLoading(true);
     setHasMore(true);
     setGapBeforeIds(new Set());
-    fetchFeed(feed, { limit: PAGE_SIZE })
+    (previewFetches.current.get(key) ?? fetchFeed(feed, { limit: PAGE_SIZE }))
       .then((n) => {
         if (cancelled) return;
         setNotes(n);
@@ -518,6 +542,147 @@ export default function HomePage() {
     );
   }, [feed, subscribeChannel, prepend, mergeHeadIntoTimeline]);
 
+  // 横スワイプ（docs/ui_spec.md 2.4g）。動き出した時点で隣のタブを描き、指に合わせて横へ動かす。
+  // 隣のタブはキャッシュがあればそれを、無ければ先頭ページの取得を始めて届いたら描く。
+  // WebSocket の購読は切り替えてから（上の subscribeChannel が feed の変化で張り直す）。
+  const [preview, setPreview] = useState<FeedPreview | null>(null);
+  const previewRef = useRef(preview);
+  previewRef.current = preview;
+  // 隣のタブを今描いている位置に相当するスクロール位置（切り替えたらこの位置へ合わせる）。
+  const previewScroll = useRef<TimelineScroll>(TIMELINE_TOP);
+  const committedKey = useRef<string | null>(null);
+
+  const fetchPreview = useCallback(
+    (target: Feed) => {
+      const key = feedKey(target);
+      const running = previewFetches.current.get(key);
+      if (running) return running;
+      const request = fetchFeed(target, { limit: PAGE_SIZE });
+      previewFetches.current.set(key, request);
+      request
+        .then((n) => {
+          // 切り替えたときにキャッシュから出せるよう入れておく。先に一覧が入っていれば触らない。
+          if (!getCache(key)?.notes.length) setCache(key, { notes: n, hasMore: n.length >= PAGE_SIZE });
+        })
+        .catch(() => {
+          // 隣の下描き用の取得はベストエフォート。切り替えた後の取得でエラーを出す。
+        })
+        .finally(() => {
+          if (previewFetches.current.get(key) === request) previewFetches.current.delete(key);
+        });
+      return request;
+    },
+    [getCache, setCache],
+  );
+
+  const handleNeighborChange = useCallback(
+    (side: SlideSide | null) => {
+      const target = side === null ? undefined : neighborFeed(side);
+      if (side === null || !target) {
+        setPreview(null);
+        return;
+      }
+      const shown = effectiveFeed(target);
+      const key = feedKey(shown);
+      const cached = getCache(key);
+      if (cached && cached.notes.length > 0) {
+        setPreview({ key, side, feed: shown, notes: cached.notes, gapBeforeIds: cached.gapBeforeIds, loading: false, scroll: cached.scroll });
+        return;
+      }
+      setPreview({ key, side, feed: shown, notes: [], gapBeforeIds: new Set(), loading: true, scroll: cached?.scroll ?? TIMELINE_TOP });
+      const settle = (notes: Note[]) =>
+        setPreview((p) => (p?.key === key ? { ...p, notes, loading: false } : p));
+      fetchPreview(shown).then(settle, () => settle([]));
+    },
+    [neighborFeed, effectiveFeed, getCache, fetchPreview],
+  );
+
+  const handleSwipeCommit = useCallback(
+    (side: SlideSide) => {
+      const target = neighborFeed(side);
+      const p = previewRef.current;
+      if (!target || !p) {
+        finishSwipe();
+        return;
+      }
+      committedKey.current = p.key;
+      swipeScroll.current = { key: p.key, scroll: previewScroll.current };
+      setFeed(target);
+    },
+    // finishSwipe は下の useSlideSwipe の戻り値（安定した関数）。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [neighborFeed, setFeed],
+  );
+
+  const {
+    phase: swipePhase,
+    onTouchStart: onSwipeTouchStart,
+    syncPane,
+    finish: finishSwipe,
+  } = useSlideSwipe({
+    sliderRef,
+    trackRef,
+    paneRef: previewPaneRef,
+    hasNeighbor: (side) => neighborFeed(side) !== undefined,
+    onNeighborChange: handleNeighborChange,
+    onCommit: handleSwipeCommit,
+  });
+
+  // 隣のタブを縦のどこに描くか。覚えている位置が「このポストが一番上」なら、そのポストを
+  // 覚えた位置に置く（切り替えた後に合わせる位置と同じなので、切り替えても動かない）。
+  // それ以外は一覧の先頭を表示中の一覧の先頭と揃え、表示中の一覧がタブの下へ隠れるほど
+  // 進んでいればタブのすぐ下に置く（そのタブで覚えていたスクロール量に戻すと、深く読み進めて
+  // いるときは隣の一覧が画面の外になり、スワイプ中に何も見えない）。
+  const placePreview = useCallback(() => {
+    const pane = previewPaneRef.current;
+    const slider = sliderRef.current;
+    const p = previewRef.current;
+    if (!pane || !slider || !p) return;
+    const sliderTop = slider.getBoundingClientRect().top;
+    if (p.scroll.kind === "anchor") {
+      const el = pane.querySelector<HTMLElement>(`[data-timeline-id="${CSS.escape(p.scroll.id)}"]`);
+      if (el) {
+        const offset = el.getBoundingClientRect().top - pane.getBoundingClientRect().top;
+        pane.style.top = `${p.scroll.top - sliderTop - offset}px`;
+        previewScroll.current = p.scroll;
+        return;
+      }
+    }
+    const lift = Math.max(0, (feedTabsRef.current?.getBoundingClientRect().bottom ?? 0) - sliderTop);
+    pane.style.top = `${lift}px`;
+    previewScroll.current = { kind: "top", y: Math.max(0, window.scrollY - lift) };
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!preview) return;
+    placePreview();
+    syncPane();
+  }, [preview, placePreview, syncPane]);
+
+  // 隣のタブの中身の高さ（画像の読み込み等）や縦スクロールが変わったら置き直す。
+  const previewShown = preview !== null;
+  useEffect(() => {
+    const pane = previewPaneRef.current;
+    if (!previewShown || !pane) return;
+    window.addEventListener("scroll", placePreview, { passive: true });
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(placePreview);
+    observer?.observe(pane);
+    return () => {
+      window.removeEventListener("scroll", placePreview);
+      observer?.disconnect();
+    };
+  }, [previewShown, placePreview]);
+
+  // 切り替えた先の一覧が出せたら（キャッシュから戻した・取得中の表示になった）、隣の下描きを
+  // 消して一覧を元の位置へ戻す。それまでは前のタブの一覧が残っているので、画面外に置いたまま
+  // 隣の下描きを見せておく。描画の前に行い、前のタブの一覧が一瞬見えないようにする。
+  useLayoutEffect(() => {
+    if (swipePhase !== "committed" || currentFeedKey !== committedKey.current) return;
+    if (notesFeedKey !== currentFeedKey && !loading) return;
+    committedKey.current = null;
+    finishSwipe();
+  }, [swipePhase, currentFeedKey, notesFeedKey, loading, finishSwipe]);
+
   function toggleComposerCollapsed() {
     setComposerCollapsed((prev) => {
       const next = !prev;
@@ -526,12 +691,25 @@ export default function HomePage() {
     });
   }
 
+  const emptyMessageFor = (f: Feed) =>
+    f.kind === "home"
+      ? t("home:homePage.emptyHome")
+      : f.kind === "local"
+      ? t("home:homePage.emptyLocal")
+      : f.kind === "social"
+      ? t("home:homePage.emptySocial")
+      : f.kind === "global"
+      ? t("home:homePage.emptyGlobal")
+      : f.kind === "hashtag"
+      ? t("hashtag:hashtagPage.empty")
+      : t("home:homePage.emptyList");
+
   const saveCurrentScroll = useCallback(() => {
     setCache(feedKey(feed), { scroll: captureScroll() });
   }, [feed, setCache, captureScroll]);
 
   const center = (
-    <div className={styles.swipeContainer} ref={centerRef} {...swipeHandlers}>
+    <div className={styles.swipeContainer} ref={centerRef}>
       <div className={styles.composerWrap}>
         <button
           type="button"
@@ -619,28 +797,39 @@ export default function HomePage() {
         </label>
       )}
 
-      <NoteList
-        notes={notes}
-        loading={loading}
-        enteringIds={enteringIds}
-        gapBeforeIds={gapBeforeIds}
-        onLoadMore={loadMore}
-        hasMore={hasMore}
-        loadingMore={loadingMore}
-        emptyMessage={
-          feed.kind === "home"
-            ? t("home:homePage.emptyHome")
-            : feed.kind === "local"
-            ? t("home:homePage.emptyLocal")
-            : feed.kind === "social"
-            ? t("home:homePage.emptySocial")
-            : feed.kind === "global"
-            ? t("home:homePage.emptyGlobal")
-            : feed.kind === "hashtag"
-            ? t("hashtag:hashtagPage.empty")
-            : t("home:homePage.emptyList")
-        }
-      />
+      <div
+        className={`${styles.slider} ${swipePhase !== "idle" ? styles.sliding : ""}`}
+        ref={sliderRef}
+        onTouchStart={onSwipeTouchStart}
+      >
+        <div ref={trackRef}>
+          <NoteList
+            notes={notes}
+            loading={loading}
+            enteringIds={enteringIds}
+            gapBeforeIds={gapBeforeIds}
+            onLoadMore={loadMore}
+            hasMore={hasMore}
+            loadingMore={loadingMore}
+            emptyMessage={emptyMessageFor(feed)}
+          />
+        </div>
+        {preview && (
+          <div
+            className={styles.previewPane}
+            ref={previewPaneRef}
+            style={{ transform: `translateX(${preview.side * 100}%)` }}
+            aria-hidden
+          >
+            <NoteList
+              notes={preview.notes}
+              loading={preview.loading}
+              gapBeforeIds={preview.gapBeforeIds}
+              emptyMessage={emptyMessageFor(preview.feed)}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 

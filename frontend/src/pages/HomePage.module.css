@@ -108,3 +108,24 @@
   color: var(--text-dim);
   cursor: pointer;
 }
+
+/* 横スワイプで動かす範囲（docs/ui_spec.md 2.4g）。隣のタブの一覧を横に並べて置く。 */
+.slider {
+  position: relative;
+}
+
+/* スワイプ中だけ、横と上へはみ出した分を切る（隣のタブの一覧は、覚えている位置に合わせて
+   上へ伸びることがある）。下は切らない。止まっている間は切らない（ノート内のメニュー等が
+   横へはみ出して表示されるため）。overflow-x: hidden はスクロールコンテナになって window
+   基準のスクロール位置の扱いを壊すので、clip-path で切る。 */
+.sliding {
+  clip-path: inset(0 0 -100000px 0);
+}
+
+.previewPane {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+}

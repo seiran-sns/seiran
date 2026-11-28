@@ -644,7 +644,7 @@ export default function ImageLightbox({
   }
 
   // ライトボックスはノートの中（Reactツリー上はタイムラインの子孫）に描画されるため、
-  // React合成イベントのタッチがホームのタブ切り替えスワイプ（`useSwipe`）まで伝播する。ここで止める。
+  // React合成イベントのタッチがホームのタブ切り替えスワイプ（`useSlideSwipe`）まで伝播する。ここで止める。
   function stopTouch(e: ReactTouchEvent) {
     e.stopPropagation();
   }
