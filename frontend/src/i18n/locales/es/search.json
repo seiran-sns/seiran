@@ -42,7 +42,8 @@
     "users": {
       "noResults": "No se encontraron usuarios.",
       "prompt": "Busca usuarios por nombre, identificador o biografía."
-    }
+    },
+    "pressSearchHint": "Pulsa Buscar para buscar publicaciones con estos ajustes (el número de búsquedas es limitado)."
   },
   "searchPanel": {
     "placeholder": "Buscar palabras clave"

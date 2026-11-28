@@ -42,7 +42,8 @@
     "users": {
       "noResults": "Keine passenden Benutzer gefunden.",
       "prompt": "Finde Benutzer nach Name, Handle oder Bio."
-    }
+    },
+    "pressSearchHint": "Drücke „Suchen“, um Beiträge mit diesen Einstellungen zu suchen (die Anzahl der Suchen ist begrenzt)."
   },
   "searchPanel": {
     "placeholder": "Suchbegriffe suchen"

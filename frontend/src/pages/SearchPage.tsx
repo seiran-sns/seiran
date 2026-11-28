@@ -20,6 +20,7 @@ import panel from "../components/common/Panel.module.css";
 import rp from "../components/right/RightPanels.module.css";
 import listStyles from "../components/right/FollowListPanel.module.css";
 import styles from "./HomePage.module.css";
+import pageStyles from "./SearchPage.module.css";
 
 const PAGE_SIZE = 30;
 type SearchTab = "posts" | "users";
@@ -41,6 +42,18 @@ function conditionsFromParams(params: URLSearchParams): SearchConditions & { use
     server: params.get("server") || undefined,
     tag: params.get("tag") || undefined,
   };
+}
+
+/** ポストの検索1回分（「検索」を押した時点の検索語と条件）。`seq` は同じ内容でも押すたびに増やす。 */
+interface PostRequest {
+  seq: number;
+  q: string;
+  conditions: SearchConditions;
+}
+
+/** 検索語と条件を比べるための文字列。 */
+function requestKey(q: string, c: SearchConditions): string {
+  return JSON.stringify([q, c.since ?? "", c.until ?? "", c.user?.handle ?? "", c.server ?? "", c.tag ?? ""]);
 }
 
 function toApiConditions(c: SearchConditions): PostSearchConditions {
@@ -125,28 +138,63 @@ export default function SearchPage() {
   // URL にユーザーがあるのにまだ引き直せていない間は、ユーザー抜きで検索しない。
   const userPending = Boolean(userHandle) && !conditions.user && !userResolveFailed;
 
-  /** 検索語・タブ・条件を URL に書く（URL が変わると検索し直す）。 */
-  const navigate = (next: { q?: string; tab?: SearchTab; conditions?: SearchConditions }) => {
-    const nextQ = next.q ?? q;
-    const nextTab = next.tab ?? tab;
-    const c = next.conditions ?? conditions;
+  // 条件欄の編集は下書きにとどめ、「検索」を押したときに検索語と一緒に確定する（ポストの
+  // 検索には回数制限があり、条件を1つ足すたびに検索すると回数を無駄に使う）。URL が変わったら
+  // （確定した・ほかの画面から来た）下書きを URL に合わせる。
+  const [draft, setDraft] = useState<SearchConditions>(conditions);
+  const urlKey = requestKey(q, { ...conditions, user: undefined }) + (userHandle ?? "");
+  useEffect(() => {
+    setDraft(conditions);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlKey, conditionUser]);
+
+  // ポストの検索を走らせる要求。「検索」を押したとき、またはほかの経路で URL の検索語・条件が
+  // 変わったとき（右ペインの検索窓・共有されたリンク・再読み込み）だけ作る。タブの切り替えでは
+  // 作らない（切り替えるたびに検索すると回数を使う）。
+  const [postRequest, setPostRequest] = useState<PostRequest | null>(null);
+  const handledUrlKey = useRef<string | null>(null);
+  useEffect(() => {
+    if (userPending || handledUrlKey.current === urlKey) return;
+    handledUrlKey.current = urlKey;
+    if (tab === "posts" && (q || hasConditions(conditions))) {
+      setPostRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q, conditions }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [urlKey, userPending]);
+
+  /** URL を書き換える（検索語・タブ・確定した条件）。 */
+  const writeUrl = (nextQ: string, nextTab: SearchTab, c: SearchConditions, handle?: string) => {
     const params = new URLSearchParams();
     if (nextQ) params.set("q", nextQ);
     if (nextTab === "users") params.set("type", "users");
     if (c.since) params.set("since", c.since);
     if (c.until) params.set("until", c.until);
-    if (c.user) params.set("user", c.user.handle);
-    else if (next.conditions === undefined && userHandle) params.set("user", userHandle);
+    const userParam = c.user?.handle ?? handle;
+    if (userParam) params.set("user", userParam);
     if (c.server) params.set("server", c.server);
     if (c.tag) params.set("tag", c.tag);
-    if (next.conditions?.user) setConditionUser(next.conditions.user);
     setSearchParams(params);
   };
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    navigate({ q: input.trim() });
+    const nextQ = input.trim();
+    const committed = draft;
+    if (committed.user) setConditionUser(committed.user);
+    // 自分で確定した URL は、上の「URL が変わったとき」の検索の対象にしない（二重に走らせない）。
+    handledUrlKey.current =
+      requestKey(nextQ, { ...committed, user: undefined }) + (committed.user?.handle ?? "");
+    if (tab === "posts" && (nextQ || hasConditions(committed))) {
+      setPostRequest((prev) => ({ seq: (prev?.seq ?? 0) + 1, q: nextQ, conditions: committed }));
+    }
+    writeUrl(nextQ, tab, committed);
   }
+
+  // 下書き（検索語・条件）が、表示中のポストの結果と違うか（「検索」で反映されることを示す）。
+  const draftKey = requestKey(input.trim(), draft);
+  const postsDirty = postRequest
+    ? draftKey !== requestKey(postRequest.q, postRequest.conditions)
+    : Boolean(input.trim()) || hasConditions(draft);
 
   const center = (
     <>
@@ -164,18 +212,17 @@ export default function SearchPage() {
       <Tabs
         tabs={[t("search:searchPage.tabs.posts"), t("search:searchPage.tabs.users")]}
         active={tab === "users" ? 1 : 0}
-        onChange={(i) => navigate({ tab: i === 1 ? "users" : "posts" })}
+        onChange={(i) => writeUrl(q, i === 1 ? "users" : "posts", conditions, userHandle)}
       />
 
-      {tab === "posts" ? (
-        <>
-          <SearchConditionsField value={conditions} onChange={(c) => navigate({ conditions: c })} />
-          {userResolveFailed && <p className={panel.message}>{t("search:searchPage.conditions.userNotFound")}</p>}
-          <PostResults q={q} conditions={conditions} pending={userPending} />
-        </>
-      ) : (
-        <UserResults q={q} />
-      )}
+      {/* ポストの結果はタブを切り替えても残す（戻るたびに検索し直すと回数を使う）。 */}
+      <div hidden={tab !== "posts"}>
+        <SearchConditionsField value={draft} onChange={setDraft} />
+        {postsDirty && <p className={pageStyles.hint}>{t("search:searchPage.pressSearchHint")}</p>}
+        {userResolveFailed && <p className={panel.message}>{t("search:searchPage.conditions.userNotFound")}</p>}
+        <PostResults request={postRequest} />
+      </div>
+      {tab === "users" && <UserResults q={q} />}
     </>
   );
 
@@ -197,8 +244,8 @@ export default function SearchPage() {
   return <AppShell center={center} right={isMobile ? undefined : right} />;
 }
 
-/** 「ポスト」タブの結果。検索語か条件のどちらかがあれば検索する。 */
-function PostResults({ q, conditions, pending }: { q: string; conditions: SearchConditions; pending: boolean }) {
+/** 「ポスト」タブの結果。`request` が変わったとき（「検索」を押したとき等）だけ検索する。 */
+function PostResults({ request }: { request: PostRequest | null }) {
   const { t } = useTranslation();
   const [notes, setNotes] = useState<Note[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>(undefined);
@@ -206,22 +253,19 @@ function PostResults({ q, conditions, pending }: { q: string; conditions: Search
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
   const [searched, setSearched] = useState(false);
-  const apiConditions = useMemo(() => toApiConditions(conditions), [conditions]);
-  const active = !pending && (Boolean(q) || hasConditions(conditions));
-  const key = JSON.stringify([q, apiConditions]);
+  const apiConditions = useMemo(
+    () => (request ? toApiConditions(request.conditions) : {}),
+    [request]
+  );
 
   useEffect(() => {
+    if (!request) return;
     setSessionId(undefined);
     setError("");
-    if (!active) {
-      setNotes([]);
-      setSearched(false);
-      return;
-    }
     let cancelled = false;
     setLoading(true);
     api.notes
-      .search({ q, limit: PAGE_SIZE, ...apiConditions })
+      .search({ q: request.q, limit: PAGE_SIZE, ...apiConditions })
       .then((res) => {
         if (cancelled) return;
         setNotes(res.notes);
@@ -234,13 +278,13 @@ function PostResults({ q, conditions, pending }: { q: string; conditions: Search
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, active]);
+  }, [request?.seq]);
 
   async function loadMore() {
-    if (!active || loadingMore) return;
+    if (!request || loadingMore) return;
     setLoadingMore(true);
     try {
-      const res = await api.notes.search({ q, limit: PAGE_SIZE, session_id: sessionId, ...apiConditions });
+      const res = await api.notes.search({ q: request.q, limit: PAGE_SIZE, session_id: sessionId, ...apiConditions });
       setNotes((prev) => [...prev, ...res.notes]);
       setSessionId(res.session_id);
     } catch (e) {
@@ -255,7 +299,7 @@ function PostResults({ q, conditions, pending }: { q: string; conditions: Search
       {error && <p className={panel.message}>{error}</p>}
       <NoteList
         notes={notes}
-        loading={loading || pending}
+        loading={loading}
         emptyMessage={searched ? t("search:searchPage.noResults") : t("search:searchPage.prompt")}
       />
       {searched && !loading && notes.length > 0 && (

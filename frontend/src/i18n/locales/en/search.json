@@ -42,7 +42,8 @@
     "users": {
       "noResults": "No matching users found.",
       "prompt": "Find users by name, handle, or bio."
-    }
+    },
+    "pressSearchHint": "Press Search to search posts with these settings (searches are rate-limited)."
   },
   "searchPanel": {
     "placeholder": "Search keywords"

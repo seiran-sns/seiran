@@ -1,0 +1,7 @@
+/* 条件欄の下に出す「「検索」を押すとこの内容で検索します」の案内。 */
+.hint {
+  margin: 0;
+  padding: 0 16px 8px;
+  color: var(--text-faint);
+  font-size: 12px;
+}

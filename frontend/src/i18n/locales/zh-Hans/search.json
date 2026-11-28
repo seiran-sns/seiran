@@ -42,7 +42,8 @@
     "users": {
       "noResults": "没有找到匹配的用户。",
       "prompt": "可按名称、ID 或简介查找用户。"
-    }
+    },
+    "pressSearchHint": "按“搜索”即可按此内容搜索帖子（搜索次数有上限）。"
   },
   "searchPanel": {
     "placeholder": "搜索关键词"
