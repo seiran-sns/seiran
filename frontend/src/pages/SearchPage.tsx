@@ -237,7 +237,14 @@ export default function SearchPage() {
       <Tabs
         tabs={[t("search:searchPage.tabs.posts"), t("search:searchPage.tabs.users")]}
         active={tab === "users" ? 1 : 0}
-        onChange={(i) => writeUrl(q, i === 1 ? "users" : "posts", conditions, userHandle)}
+        onChange={(i) => {
+          const next: SearchTab = i === 1 ? "users" : "posts";
+          // 選択中のタブをもう一度押したら、ホームのタブと同じく先頭へスクロールする。
+          if (next === tab) window.scrollTo({ top: 0, behavior: "smooth" });
+          else writeUrl(q, next, conditions, userHandle);
+        }}
+        sticky
+        top={0}
       />
 
       {/* 結果はタブごとに持ち、切り替えても残す（戻るたびに検索し直すと回数を使う）。 */}
