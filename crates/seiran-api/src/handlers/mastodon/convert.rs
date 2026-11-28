@@ -1046,6 +1046,7 @@ pub async fn build_notifications(
                     .filter(|_| is_emoji_reaction)
                     .map(|c| {
                         reaction_emoji(c, r.reaction_emoji_url.as_deref(), &state.local_domain)
+                            .into()
                     }),
                 emoji: r.reaction.clone().filter(|_| is_emoji_reaction),
                 emoji_url: r.reaction_emoji_url.clone().filter(|_| is_emoji_reaction),
