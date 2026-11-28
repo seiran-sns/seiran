@@ -49,6 +49,9 @@ pub async fn create_repost_mute(
         return ApiError::Internal(format!("[repost_mute] repost_mutes INSERT 失敗: {}", e))
             .into_response();
     }
+    state
+        .stream_hub
+        .publish_relations_changed(vec![user.actor_id]);
 
     tracing::info!(
         "[repost_mute] {} → {} リポストミュート完了",
@@ -127,6 +130,9 @@ pub async fn delete_repost_mute(
         return ApiError::Internal(format!("[unrepost_mute] repost_mutes DELETE 失敗: {}", e))
             .into_response();
     }
+    state
+        .stream_hub
+        .publish_relations_changed(vec![user.actor_id]);
 
     tracing::info!(
         "[unrepost_mute] {} → {} リポストミュート解除完了",

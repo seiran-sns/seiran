@@ -27,7 +27,9 @@ use axum::{
     response::{IntoResponse, Response},
 };
 use seiran_common::repository::note_extras;
-use seiran_common::streaming::{ChannelKind, NoteUpdatedBody, NOTE_UPDATED_EVENT};
+use seiran_common::streaming::{
+    ChannelKind, NoteUpdatedBody, ViewerFeedFilter, NOTE_UPDATED_EVENT,
+};
 use serde::Deserialize;
 use tokio::sync::broadcast::error::RecvError;
 
@@ -388,6 +390,7 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
         conn.last_notification_id = Some(0);
     }
 
+    let mut feed_filter = ViewerFeedFilter::load(&conn.state.db, Some(actor_id)).await;
     let mut periodic = tokio::time::interval(PERIODIC);
     let settle = tokio::time::sleep(Duration::from_secs(u64::MAX / 4));
     tokio::pin!(settle);
@@ -401,6 +404,7 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
             }
             recv = rx.recv() => match recv {
                 Ok(ev) => {
+                    feed_filter.on_event(&conn.state.db, &ev).await;
                     if ev.recipients.contains(&actor_id) {
                         if !settle_armed && conn.wants_notifications() {
                             settle.as_mut().reset(tokio::time::Instant::now() + NOTIFICATION_SETTLE);
@@ -411,7 +415,7 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
                             break;
                         }
                     }
-                    if let Some(ch) = ev.channel {
+                    if let Some(ch) = ev.channel.filter(|ch| feed_filter.admits(&ch.scope)) {
                         let frames = conn
                             .update_frames(&ch.note_json, |kind| ch.scope.matches(kind, actor_id))
                             .await;
@@ -431,6 +435,7 @@ async fn handle(mut socket: WebSocket, state: AppState, actor_id: i64, initial: 
                 }
             }
             _ = periodic.tick() => {
+                feed_filter.refresh(&conn.state.db).await;
                 let frames = conn.notification_frames().await;
                 if !send_all(&mut socket, frames).await || socket.send(Message::Ping(Vec::new())).await.is_err() {
                     break;

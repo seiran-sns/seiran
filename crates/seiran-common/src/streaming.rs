@@ -93,6 +93,13 @@ pub struct ChannelScope {
     /// 無いので既定値を持たせる。
     #[serde(default)]
     pub kept_off_public_feeds: bool,
+    /// 投稿者のアクター ID と、この投稿がリポストか。閲覧者ごとのミュート・ブロック・
+    /// リポストミュートの判定（`ViewerFeedFilter`）に使う。旧版のプロセスが送るイベントには
+    /// 無く、既定値（0）なら判定しない。
+    #[serde(default)]
+    pub author_actor_id: i64,
+    #[serde(default)]
+    pub is_repost: bool,
 }
 
 impl ChannelScope {
@@ -147,6 +154,10 @@ pub struct StreamEvent {
     /// 旧版のイベントも読めるよう既定値を置く。
     #[serde(default)]
     pub note_subscribers: Option<NoteSubscribers>,
+    /// ミュート・ブロック・リポストミュートが変わったローカルアクター。その接続は
+    /// `ViewerFeedFilter` を読み直す。クライアントへは何も送らない。
+    #[serde(default)]
+    pub relations_changed: Vec<i64>,
 }
 
 /// `subNote` で購読している接続にイベントを配ってよい範囲。
@@ -290,6 +301,7 @@ impl StreamHub {
             channel: None,
             broadcast_all: false,
             note_subscribers: subscribers,
+            relations_changed: Vec::new(),
         });
     }
 
@@ -304,6 +316,7 @@ impl StreamHub {
             channel: None,
             broadcast_all: true,
             note_subscribers: None,
+            relations_changed: Vec::new(),
         });
     }
 
@@ -324,7 +337,82 @@ impl StreamHub {
             }),
             broadcast_all: false,
             note_subscribers: None,
+            relations_changed: Vec::new(),
         });
+    }
+
+    /// `actor_ids` のミュート・ブロック・リポストミュートが変わったことを、その接続へ知らせる
+    /// （`ViewerFeedFilter::on_event`）。
+    pub fn publish_relations_changed(&self, actor_ids: Vec<i64>) {
+        if actor_ids.is_empty() {
+            return;
+        }
+        self.publish(StreamEvent {
+            recipients: Arc::new(HashSet::new()),
+            payload: Arc::new(String::new()),
+            channel: None,
+            broadcast_all: false,
+            note_subscribers: None,
+            relations_changed: actor_ids,
+        });
+    }
+}
+
+/// 閲覧者のタイムラインから隠す投稿者（ミュート・ブロック・リポストミュート）の判定。
+///
+/// REST のタイムラインはこれらを SQL で除く（`actor_is_hidden_for_viewer`・
+/// `repost_is_muted_for_viewer`）。新着の配信で同じものを隠さないと、開いている間だけ
+/// ミュートした相手の投稿が流れ込み、読み直すと消える。投稿ごとに DB を引くと接続数×投稿数の
+/// 問い合わせになるので、接続ごとに相手の集合を持って照合する。集合は接続時に読み、本人が
+/// 関係を変えたとき（`StreamEvent::relations_changed`）と、相手からのブロックなど本人の操作に
+/// よらない変化を拾うため定期的に読み直す（`refresh`）。
+#[derive(Debug, Default)]
+pub struct ViewerFeedFilter {
+    viewer: Option<i64>,
+    actors: crate::repository::mute::ViewerHiddenActors,
+}
+
+impl ViewerFeedFilter {
+    /// `viewer` の集合を読む。未ログイン（`None`）なら何も隠さない。
+    pub async fn load(pool: &sqlx::PgPool, viewer: Option<i64>) -> Self {
+        let mut filter = Self {
+            viewer,
+            actors: Default::default(),
+        };
+        filter.refresh(pool).await;
+        filter
+    }
+
+    /// 集合を読み直す。読めなければ前の集合のまま。
+    pub async fn refresh(&mut self, pool: &sqlx::PgPool) {
+        let Some(viewer) = self.viewer else {
+            return;
+        };
+        match crate::repository::mute::viewer_hidden_actors(pool, viewer).await {
+            Ok(actors) => self.actors = actors,
+            Err(e) => tracing::warn!("[streaming] 非表示アクターの読み込み失敗: {}", e),
+        }
+    }
+
+    /// 本人の関係が変わったイベントなら集合を読み直す。
+    pub async fn on_event(&mut self, pool: &sqlx::PgPool, ev: &StreamEvent) {
+        if self
+            .viewer
+            .is_some_and(|v| ev.relations_changed.contains(&v))
+        {
+            self.refresh(pool).await;
+        }
+    }
+
+    /// この投稿を閲覧者のタイムラインへ流してよいか。
+    pub fn admits(&self, scope: &ChannelScope) -> bool {
+        let author = scope.author_actor_id;
+        if self.viewer == Some(author) {
+            return true;
+        }
+        let hidden = self.actors.hidden.contains(&author)
+            || (scope.is_repost && self.actors.repost_hidden.contains(&author));
+        !hidden
     }
 }
 
@@ -560,6 +648,8 @@ mod tests {
             list_ids: Arc::new(lists.iter().copied().collect::<HashSet<i64>>()),
             hashtags: Arc::new(tags.iter().map(|s| s.to_string()).collect()),
             kept_off_public_feeds: false,
+            author_actor_id: 0,
+            is_repost: false,
         }
     }
 
@@ -705,6 +795,7 @@ mod note_subscription_tests {
             channel: None,
             broadcast_all: false,
             note_subscribers,
+            relations_changed: Vec::new(),
         }
     }
 
@@ -760,5 +851,88 @@ mod note_subscription_tests {
         let json = r#"{"recipients":[1],"payload":"x","channel":null,"broadcast_all":false}"#;
         let ev: StreamEvent = serde_json::from_str(json).unwrap();
         assert!(ev.note_subscribers.is_none());
+    }
+}
+
+#[cfg(test)]
+mod viewer_feed_filter_tests {
+    use super::{ChannelScope, StreamEvent, ViewerFeedFilter};
+    use crate::repository::mute::ViewerHiddenActors;
+    use std::collections::HashSet;
+    use std::sync::Arc;
+
+    const VIEWER: i64 = 1;
+    const MUTED: i64 = 2;
+    const REPOST_MUTED: i64 = 3;
+    const OTHER: i64 = 4;
+
+    fn filter() -> ViewerFeedFilter {
+        ViewerFeedFilter {
+            viewer: Some(VIEWER),
+            actors: ViewerHiddenActors {
+                hidden: [MUTED].into_iter().collect(),
+                repost_hidden: [REPOST_MUTED].into_iter().collect(),
+            },
+        }
+    }
+
+    fn scope(author_actor_id: i64, is_repost: bool) -> ChannelScope {
+        ChannelScope {
+            is_local: true,
+            visibility: "public".to_string(),
+            home_recipients: Arc::new(HashSet::new()),
+            list_ids: Arc::new(HashSet::new()),
+            hashtags: Arc::new(HashSet::new()),
+            kept_off_public_feeds: false,
+            author_actor_id,
+            is_repost,
+        }
+    }
+
+    #[test]
+    fn hides_posts_and_reposts_of_hidden_actors() {
+        let f = filter();
+        assert!(!f.admits(&scope(MUTED, false)));
+        assert!(!f.admits(&scope(MUTED, true)));
+        assert!(f.admits(&scope(OTHER, false)));
+        assert!(f.admits(&scope(OTHER, true)));
+    }
+
+    #[test]
+    fn repost_mute_hides_only_reposts() {
+        let f = filter();
+        assert!(f.admits(&scope(REPOST_MUTED, false)));
+        assert!(!f.admits(&scope(REPOST_MUTED, true)));
+    }
+
+    #[test]
+    fn anonymous_viewer_hides_nothing() {
+        let f = ViewerFeedFilter::default();
+        assert!(f.admits(&scope(MUTED, false)));
+    }
+
+    #[test]
+    fn events_without_relation_fields_still_deserialize() {
+        // 旧版のプロセスが Redis 経由で送るイベント・スコープには新しい欄が無い。
+        let ev: StreamEvent = serde_json::from_value(serde_json::json!({
+            "recipients": [],
+            "payload": "",
+            "channel": {
+                "scope": {
+                    "is_local": true,
+                    "visibility": "public",
+                    "home_recipients": [],
+                    "list_ids": [],
+                    "hashtags": [],
+                },
+                "note_json": {},
+            },
+            "broadcast_all": false,
+        }))
+        .unwrap();
+        assert!(ev.relations_changed.is_empty());
+        let scope = &ev.channel.unwrap().scope;
+        assert_eq!(scope.author_actor_id, 0);
+        assert!(filter().admits(scope));
     }
 }

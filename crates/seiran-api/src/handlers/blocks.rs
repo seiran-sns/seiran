@@ -131,6 +131,10 @@ pub(crate) async fn block_actor(
         .insert(user.actor_id, target_actor.id, atp_rkey.as_deref())
         .await
         .map_err(|e| ApiError::Internal(format!("[block] blocks INSERT 失敗: {}", e)))?;
+    // ブロックは双方のタイムラインから相手を隠す（`actor_is_hidden_for_viewer`）。
+    state
+        .stream_hub
+        .publish_relations_changed(vec![user.actor_id, target_actor.id]);
 
     tracing::info!(
         "[block] {} → {} ブロック完了",
@@ -263,6 +267,9 @@ pub(crate) async fn unblock_actor(
         .delete_by_actors(user.actor_id, target_actor.id)
         .await
         .map_err(|e| ApiError::Internal(format!("[unblock] blocks DELETE 失敗: {}", e)))?;
+    state
+        .stream_hub
+        .publish_relations_changed(vec![user.actor_id, target_actor.id]);
 
     tracing::info!(
         "[unblock] {} → {} アンブロック完了",

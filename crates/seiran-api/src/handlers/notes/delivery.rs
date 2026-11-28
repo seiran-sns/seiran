@@ -494,6 +494,8 @@ pub async fn broadcast_new_note(state: &AppState, actor_id: i64, note: &NoteResp
             )
             .await
             .unwrap_or(false),
+        author_actor_id: actor_id,
+        is_repost: note.renote_id.is_some() || note.renote_status.is_some(),
     };
     if let Ok(v) = serde_json::to_value(note) {
         state.stream_hub.publish_channel_note(scope, v);

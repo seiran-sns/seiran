@@ -128,3 +128,44 @@ impl MuteRepository for PgMuteRepository {
         Ok(rows.into_iter().collect())
     }
 }
+
+/// 閲覧者のタイムラインから投稿を隠すアクターと、リポストだけを隠すアクター。
+/// WebSocket の新着配信（`streaming::ViewerFeedFilter`）が接続ごとに持ち、REST の
+/// タイムラインと同じものを隠すために使う。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ViewerHiddenActors {
+    /// `actor_is_hidden_for_viewer` のうち関係で決まる分（閲覧者のミュート・ブロックと、
+    /// 閲覧者をブロックしている相手）。凍結・退会は閲覧者によらないアクターの状態なので
+    /// ここでは扱わない。
+    pub hidden: HashSet<i64>,
+    /// `repost_is_muted_for_viewer` の相手（閲覧者がリポストをミュートしている相手）。
+    pub repost_hidden: HashSet<i64>,
+}
+
+/// `viewer_actor_id` の `ViewerHiddenActors` を読む。
+pub async fn viewer_hidden_actors(
+    pool: &PgPool,
+    viewer_actor_id: i64,
+) -> Result<ViewerHiddenActors, sqlx::Error> {
+    let rows: Vec<(i64, bool)> = sqlx::query_as(
+        "SELECT muted_actor_id, false FROM mutes WHERE muter_actor_id = $1
+         UNION ALL
+         SELECT blocked_actor_id, false FROM blocks WHERE blocker_actor_id = $1
+         UNION ALL
+         SELECT blocker_actor_id, false FROM blocks WHERE blocked_actor_id = $1
+         UNION ALL
+         SELECT muted_actor_id, true FROM repost_mutes WHERE muter_actor_id = $1",
+    )
+    .bind(viewer_actor_id)
+    .fetch_all(pool)
+    .await?;
+    let mut out = ViewerHiddenActors::default();
+    for (actor_id, repost_only) in rows {
+        if repost_only {
+            out.repost_hidden.insert(actor_id);
+        } else {
+            out.hidden.insert(actor_id);
+        }
+    }
+    Ok(out)
+}
