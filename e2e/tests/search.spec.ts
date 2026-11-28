@@ -119,7 +119,7 @@ test("投稿本文で検索できる", async ({ page, request }) => {
 
   await seedAuth(page, user.token);
   await page.goto("/search");
-  await page.getByPlaceholder("キーワードを検索（ローカル + Bluesky）").fill(keyword);
+  await page.getByPlaceholder("キーワードを検索", { exact: true }).fill(keyword);
   await page.getByRole("button", { name: "検索", exact: true }).click();
 
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
