@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { Note } from "../../api/client";
 import { useInfiniteScrollSentinel } from "../../hooks/useInfiniteScrollSentinel";
@@ -23,7 +23,7 @@ interface NoteListProps {
   loadingMore?: boolean;
 }
 
-export default function NoteList({
+function NoteList({
   notes,
   loading,
   emptyMessage,
@@ -82,3 +82,7 @@ export default function NoteList({
     </div>
   );
 }
+
+// 親（ホームのタイムライン等）はスワイプの状態・隣のタブの下描き等で頻繁に描き直される。
+// 一覧の中身が変わっていなければ、ノート全件の描き直しを省く（指への追従が止まるため）。
+export default memo(NoteList);

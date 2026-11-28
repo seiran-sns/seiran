@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { api, getErrorMessage, ListSummary, Note } from "../api/client";
@@ -86,6 +86,37 @@ interface FeedPreview {
   loading: boolean;
   /** そのタブで覚えている位置。 */
   scroll: TimelineScroll;
+}
+
+/** 隣のタブの下描きに描く件数。スワイプ中に画面に入る分だけ描く（全件描くと、描き始めた
+ * 瞬間に指への追従が止まる）。切り替えた後は一覧全体を描く。 */
+const PREVIEW_NOTES = 12;
+
+/** 隣のタブの下描きに描くポスト。覚えている「一番上のポスト」から、無ければ先頭から。
+ * 一番上のポストはまとまり（重ねたリポスト）の先頭なので、そこで切ってもまとまり方は変わらない。 */
+function previewNotes(notes: Note[], scroll: TimelineScroll): Note[] {
+  const anchor = scroll.kind === "anchor" ? notes.findIndex((n) => n.id === scroll.id) : -1;
+  const start = Math.max(0, anchor);
+  return notes.slice(start, start + PREVIEW_NOTES);
+}
+
+/** 下描きのポストを1フレームに足す件数。 */
+const PREVIEW_STEP = 2;
+
+/**
+ * 隣のタブの下描き。ポストを数件ずつ、フレームごとに足して描く。ノートカードは差し込んだ
+ * 直後にリアクション欄の幅を測って描き直すので、まとめて差し込むと1回の処理が長くなり、
+ * その間は指への追従が止まる。
+ */
+function PreviewNoteList({ notes, ...rest }: React.ComponentProps<typeof NoteList>) {
+  const [count, setCount] = useState(PREVIEW_STEP);
+  useEffect(() => {
+    if (count >= notes.length) return;
+    const id = requestAnimationFrame(() => startTransition(() => setCount((c) => c + PREVIEW_STEP)));
+    return () => cancelAnimationFrame(id);
+  }, [count, notes.length]);
+  const shown = useMemo(() => notes.slice(0, count), [notes, count]);
+  return <NoteList notes={shown} {...rest} />;
 }
 
 /** タブ（Feed）を対応するWebSocketタイムラインチャンネルへ変換する。 */
@@ -575,43 +606,64 @@ export default function HomePage() {
     [getCache, setCache],
   );
 
+  // 隣として描くものを決めた回数。遅れて反映される下描き（startTransition・取得の完了）が、
+  // その後に消した・別のタブへ替えた下描きを上書きしないようにする。
+  const previewGeneration = useRef(0);
+
+  const showPreview = useCallback(
+    (side: SlideSide, target: Feed, generation: number) => {
+      const shown = effectiveFeed(target);
+      const key = feedKey(shown);
+      const cached = getCache(key);
+      const show = (next: FeedPreview) =>
+        setPreview((prev) => (previewGeneration.current === generation ? next : prev));
+      if (cached && cached.notes.length > 0) {
+        show({ key, side, feed: shown, notes: previewNotes(cached.notes, cached.scroll), gapBeforeIds: cached.gapBeforeIds, loading: false, scroll: cached.scroll });
+        return;
+      }
+      show({ key, side, feed: shown, notes: [], gapBeforeIds: new Set(), loading: true, scroll: cached?.scroll ?? TIMELINE_TOP });
+      const settle = (notes: Note[]) =>
+        startTransition(() =>
+          setPreview((p) => (p?.key === key ? { ...p, notes: previewNotes(notes, p.scroll), loading: false } : p)),
+        );
+      fetchPreview(shown).then(settle, () => settle([]));
+    },
+    [effectiveFeed, getCache, fetchPreview],
+  );
+
+  // 下描きの描画は中断できる更新（startTransition）にする。ノートカードを描く間も、指の動きの
+  // 処理（useSlideSwipe が DOM へ直接書く）を先に通す（同期で描くと、その間は追従が止まる）。
   const handleNeighborChange = useCallback(
     (side: SlideSide | null) => {
+      const generation = ++previewGeneration.current;
       const target = side === null ? undefined : neighborFeed(side);
       if (side === null || !target) {
         setPreview(null);
         return;
       }
-      const shown = effectiveFeed(target);
-      const key = feedKey(shown);
-      const cached = getCache(key);
-      if (cached && cached.notes.length > 0) {
-        setPreview({ key, side, feed: shown, notes: cached.notes, gapBeforeIds: cached.gapBeforeIds, loading: false, scroll: cached.scroll });
-        return;
-      }
-      setPreview({ key, side, feed: shown, notes: [], gapBeforeIds: new Set(), loading: true, scroll: cached?.scroll ?? TIMELINE_TOP });
-      const settle = (notes: Note[]) =>
-        setPreview((p) => (p?.key === key ? { ...p, notes, loading: false } : p));
-      fetchPreview(shown).then(settle, () => settle([]));
+      startTransition(() => showPreview(side, target, generation));
     },
-    [neighborFeed, effectiveFeed, getCache, fetchPreview],
+    [neighborFeed, showPreview],
   );
 
   const handleSwipeCommit = useCallback(
     (side: SlideSide) => {
       const target = neighborFeed(side);
-      const p = previewRef.current;
-      if (!target || !p) {
+      if (!target) {
         finishSwipe();
         return;
       }
-      committedKey.current = p.key;
-      swipeScroll.current = { key: p.key, scroll: previewScroll.current };
+      // 速くはじくと、下描きがまだ描かれていない（描画が後回しになっている）ことがある。
+      // そのときは下描きの位置を引き継がず、普通に切り替える。
+      const key = feedKey(effectiveFeed(target));
+      const p = previewRef.current;
+      committedKey.current = key;
+      swipeScroll.current = p?.key === key ? { key, scroll: previewScroll.current } : null;
       setFeed(target);
     },
     // finishSwipe は下の useSlideSwipe の戻り値（安定した関数）。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [neighborFeed, setFeed],
+    [neighborFeed, effectiveFeed, setFeed],
   );
 
   const {
@@ -832,7 +884,8 @@ export default function HomePage() {
             aria-hidden
           >
             {preview.feed.kind === "local" && isAdmin && moderationToggle(true)}
-            <NoteList
+            <PreviewNoteList
+              key={preview.key}
               notes={preview.notes}
               loading={preview.loading}
               gapBeforeIds={preview.gapBeforeIds}
