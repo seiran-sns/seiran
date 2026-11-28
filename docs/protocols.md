@@ -798,6 +798,8 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **CORS**: `/api/v1/*`・`/api/v2/*`・`/oauth/token`・`/oauth/revoke` はブラウザ上の Web クライアント（任意のオリジン）から直接叩かれるので、`/xrpc/*` と同じくオリジン制限の対象外（Bearer 認証だけで Cookie を使わない）。SPA 専用の `/api/oauth/*` は対象外にしない。
 
+**日時**: エンティティの日時（`created_at`・`expires_at`・`scheduled_at` 等）はすべて `convert::mastodon_timestamp` で本家と同じ UTC・ミリ秒3桁・`Z` 終わり（`2026-01-02T03:04:05.678Z`）にする。小数秒の桁数やオフセット表記が値ごとに変わると、固定書式で日時を読む iOS クライアント（Feather 等）が一覧全体のデコードに失敗する。
+
 **`Status`（`convert::to_status`）**:
 - `content` はリモート Fedi 投稿なら `content_html`（内部パスの `href="/..."` を `https://{local_domain}/...` に戻す）、それ以外は `body` を `text_to_html` で HTML にする（生 URL・内部リンクマーカー `[text](url)`・`@メンション`（`https://{local_domain}/@handle` へ）・`#タグ`（`/tags/{小文字}` へ、`class="mention hashtag"`）をリンクにし、空行で `<p>`、改行で `<br>`）。URL・ハッシュタグの走査は送信時と同じ `mention::scan_url`/`scan_hashtag`。
 - `uri` はローカルなら `https://{local_domain}/notes/{id}`、リモートは AP ID か AT URI。`url` はローカルは同じ URL、リモートは AP ID か bsky.app URL。

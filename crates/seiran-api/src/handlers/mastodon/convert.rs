@@ -28,6 +28,14 @@ use super::types::{
     MastodonTag,
 };
 
+/// Mastodon エンティティの日時文字列。本家と同じ UTC・ミリ秒3桁・`Z` 終わりに揃える。
+/// `to_rfc3339()` だと小数秒の桁数が値ごとに変わり（0〜9桁）末尾も `+00:00` になるため、
+/// 固定書式の日付フォーマッタで読む iOS クライアント（Feather 等）がタイムライン全体の
+/// デコードに失敗する。
+pub(super) fn mastodon_timestamp(t: chrono::DateTime<chrono::Utc>) -> String {
+    t.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
+}
+
 /// Mastodon の favourite に対応させるリアクション。
 pub const FAVOURITE_REACTION: &str = "❤️";
 
@@ -366,11 +374,10 @@ pub async fn build_accounts(
                 group: false,
                 discoverable: true,
                 indexable: true,
-                created_at: m
-                    .as_ref()
-                    .map(|m| m.created_at)
-                    .unwrap_or_else(chrono::Utc::now)
-                    .to_rfc3339(),
+                created_at: m.as_ref().map(|m| m.created_at).map_or_else(
+                    || mastodon_timestamp(chrono::Utc::now()),
+                    mastodon_timestamp,
+                ),
                 last_status_at: None,
                 statuses_count: m.as_ref().map_or(0, |m| m.notes_count),
                 followers_count: m.as_ref().map_or(0, |m| m.followers_count),
@@ -643,11 +650,12 @@ fn to_poll(
             votes_count: o["votes"].as_i64().unwrap_or(0),
         })
         .collect();
-    let expires_at = poll["endTime"].as_str().map(str::to_owned);
-    let expired = expires_at
-        .as_deref()
+    let end_time = poll["endTime"]
+        .as_str()
         .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-        .is_some_and(|t| t < chrono::Utc::now());
+        .map(|t| t.with_timezone(&chrono::Utc));
+    let expired = end_time.is_some_and(|t| t < chrono::Utc::now());
+    let expires_at = end_time.map(mastodon_timestamp);
     Some(MastodonPoll {
         id: post_id.to_string(),
         expires_at,
@@ -731,7 +739,7 @@ fn to_status(
         id: p.id.to_string(),
         uri,
         url,
-        created_at: p.created_at.to_rfc3339(),
+        created_at: mastodon_timestamp(p.created_at),
         edited_at: None,
         account,
         content,
@@ -1029,7 +1037,7 @@ pub async fn build_notifications(
             Some(MastodonNotification {
                 id: r.id.to_string(),
                 kind,
-                created_at: r.created_at.to_rfc3339(),
+                created_at: mastodon_timestamp(r.created_at),
                 account,
                 status,
                 emoji_reaction: r
@@ -1051,6 +1059,15 @@ mod tests {
     use super::*;
 
     const D: &str = "seiran.example";
+
+    #[test]
+    fn timestamps_always_have_millis_and_z() {
+        use chrono::TimeZone;
+        let whole = chrono::Utc.with_ymd_and_hms(2026, 1, 2, 3, 4, 5).unwrap();
+        assert_eq!(mastodon_timestamp(whole), "2026-01-02T03:04:05.000Z");
+        let micros = whole + chrono::Duration::microseconds(678_901);
+        assert_eq!(mastodon_timestamp(micros), "2026-01-02T03:04:05.678Z");
+    }
 
     #[test]
     fn plain_text_becomes_paragraphs_with_line_breaks() {
