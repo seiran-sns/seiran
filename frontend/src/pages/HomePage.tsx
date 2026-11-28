@@ -691,6 +691,28 @@ export default function HomePage() {
     });
   }
 
+  // 管理者のローカルTLのモデレーション表示の切り替え。ローカルTLの一覧の一部としてスワイプで
+  // 一緒に動かすので、隣のタブの下描き（inPreview）にも同じものを描く（下描きは操作させない）。
+  const moderationToggle = (inPreview: boolean) => (
+    <label className={styles.moderationToggle}>
+      <input
+        type="checkbox"
+        checked={localModeration}
+        readOnly={inPreview}
+        tabIndex={inPreview ? -1 : undefined}
+        onChange={
+          inPreview
+            ? undefined
+            : (e) => {
+                setLocalModeration(e.target.checked);
+                saveLocalModeration(e.target.checked);
+              }
+        }
+      />
+      {t("home:homePage.localModerationToggle")}
+    </label>
+  );
+
   const emptyMessageFor = (f: Feed) =>
     f.kind === "home"
       ? t("home:homePage.emptyHome")
@@ -783,19 +805,6 @@ export default function HomePage() {
         </div>
       )}
 
-      {selectedFeed.kind === "local" && isAdmin && (
-        <label className={styles.moderationToggle}>
-          <input
-            type="checkbox"
-            checked={localModeration}
-            onChange={(e) => {
-              setLocalModeration(e.target.checked);
-              saveLocalModeration(e.target.checked);
-            }}
-          />
-          {t("home:homePage.localModerationToggle")}
-        </label>
-      )}
 
       <div
         className={`${styles.slider} ${swipePhase !== "idle" ? styles.sliding : ""}`}
@@ -803,6 +812,7 @@ export default function HomePage() {
         onTouchStart={onSwipeTouchStart}
       >
         <div ref={trackRef}>
+          {selectedFeed.kind === "local" && isAdmin && moderationToggle(false)}
           <NoteList
             notes={notes}
             loading={loading}
@@ -821,6 +831,7 @@ export default function HomePage() {
             style={{ transform: `translateX(${preview.side * 100}%)` }}
             aria-hidden
           >
+            {preview.feed.kind === "local" && isAdmin && moderationToggle(true)}
             <NoteList
               notes={preview.notes}
               loading={preview.loading}
