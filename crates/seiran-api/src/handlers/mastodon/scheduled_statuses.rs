@@ -16,7 +16,7 @@ use crate::handlers::scheduled_posts::{self as scheduled, ScheduledPostRow};
 use crate::middleware::AuthedUser;
 use crate::AppState;
 
-use super::convert::to_mastodon_visibility;
+use super::convert::{mastodon_timestamp, to_mastodon_visibility};
 use super::extract::{MastodonParams, MastodonQuery, PageParams};
 use super::statuses::parse_id;
 use super::types::MastodonMediaAttachment;
@@ -92,7 +92,7 @@ pub(super) async fn to_scheduled_status(
     let media_ids = req.attachment_ids.clone().filter(|ids| !ids.is_empty());
     Ok(MastodonScheduledStatus {
         id: row.id.to_string(),
-        scheduled_at: row.scheduled_at.to_rfc3339(),
+        scheduled_at: mastodon_timestamp(row.scheduled_at),
         params: MastodonScheduledParams {
             text: req.text.clone().unwrap_or_default(),
             poll: poll_of(&req, row.scheduled_at),
