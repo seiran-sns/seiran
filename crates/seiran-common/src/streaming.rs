@@ -410,8 +410,9 @@ impl ViewerFeedFilter {
         if self.viewer == Some(author) {
             return true;
         }
-        !self.actors.hidden.contains(&author)
-            && !(scope.is_repost && self.actors.repost_hidden.contains(&author))
+        let hidden = self.actors.hidden.contains(&author)
+            || (scope.is_repost && self.actors.repost_hidden.contains(&author));
+        !hidden
     }
 }
 
