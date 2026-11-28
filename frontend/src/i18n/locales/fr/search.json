@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "Rechercher des mots-clés (local + Bluesky)",
+    "placeholder": "Rechercher",
     "noResults": "Aucun message correspondant trouvé.",
-    "prompt": "Entrez un mot-clé pour rechercher.",
-    "loadMoreButton": "Charger plus",
+    "prompt": "Saisissez des mots-clés ou ajoutez des conditions pour rechercher.",
+    "end": "C'est tout.",
     "tabs": {
-      "quickNotifications": "Notifications rapides"
+      "quickNotifications": "Notifications rapides",
+      "posts": "Publications",
+      "users": "Utilisateurs"
+    },
+    "conditions": {
+      "label": "Conditions de recherche",
+      "add": "Ajouter une condition",
+      "remove": "Retirer la condition",
+      "kindLabel": "Type de condition",
+      "apply": "Ajouter",
+      "replaceNote": "Remplace la condition existante du même type.",
+      "kinds": {
+        "since": "Date (à partir du)",
+        "until": "Date (jusqu’au)",
+        "user": "Utilisateur",
+        "server": "Serveur",
+        "tag": "Hashtag"
+      },
+      "labels": {
+        "since": "À partir du {{date}}",
+        "until": "Jusqu’au {{date}}",
+        "user": "Utilisateur : ",
+        "server": "Serveur : {{server}}"
+      },
+      "server": {
+        "local": "Local",
+        "fediverse": "Tout le Fédivers",
+        "bluesky": "Tout Bluesky",
+        "host": "Serveur précis",
+        "hostPlaceholder": "ex. misskey.io"
+      },
+      "tagPlaceholder": "Hashtag (# facultatif)",
+      "userNotFound": "L’utilisateur des conditions est introuvable."
+    },
+    "users": {
+      "noResults": "Aucun utilisateur trouvé.",
+      "prompt": "Trouvez des utilisateurs par nom, identifiant ou bio."
     }
   },
   "searchPanel": {

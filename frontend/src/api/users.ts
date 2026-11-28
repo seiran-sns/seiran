@@ -164,6 +164,13 @@ export const repostMutes = {
 };
 
 export const actors = {
+  /** 検索画面「ユーザー」タブ。表示名・ハンドル・自己紹介で探す（Misskey 互換 `users/search` と同じ検索）。 */
+  searchUsers(q: string, params: { limit?: number; offset?: number } = {}, signal?: AbortSignal) {
+    const query = new URLSearchParams({ q });
+    if (params.limit) query.set("limit", String(params.limit));
+    if (params.offset) query.set("offset", String(params.offset));
+    return request<ActorSuggestion[]>("GET", `/users/search?${query.toString()}`, undefined, signal);
+  },
   /** DB上のアクターを表示名・ハンドルの部分一致で検索する（リスト・DM用）。 */
   search(q: string, limit = 10, signal?: AbortSignal) {
     const query = new URLSearchParams({ q, limit: String(limit) });

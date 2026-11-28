@@ -78,9 +78,13 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
+use seiran_common::repository::actor_search::ActorOrigin;
 use seiran_common::repository::{Actor, FollowListRow, NotificationFilter, Page};
 
 use crate::error::ApiError;
+use crate::handlers::actor_search::{
+    search_user_ids, search_user_ids_by_username_and_host, UserSearch,
+};
 use crate::handlers::follows::FollowTargetRequest;
 use crate::handlers::notes::dto::CreateNoteRequest;
 use crate::handlers::notes::ReactRequest;
@@ -135,8 +139,13 @@ pub struct NotesMentionsBody {
 }
 
 #[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct NotesSearchBody {
     pub query: String,
+    /// この投稿者の投稿だけ。
+    pub user_id: Option<String>,
+    /// 投稿者のサーバー（`.` はこのサーバー）。
+    pub host: Option<String>,
     #[serde(flatten)]
     pub cursor: CursorParams,
 }
@@ -347,6 +356,123 @@ pub async fn users_notes(
         .await
         .map_err(internal)?;
     Ok(Json(build_notes(&state, rows, my_actor_id).await))
+}
+
+/// `POST /api/users/search` のリクエストボディ（Misskey 準拠）。
+#[derive(Deserialize)]
+pub struct UsersSearchBody {
+    pub query: String,
+    #[serde(default)]
+    pub offset: i64,
+    pub limit: Option<i64>,
+    #[serde(default)]
+    pub origin: UsersSearchOrigin,
+    #[serde(default = "default_true")]
+    pub detail: bool,
+}
+
+#[derive(Deserialize, Default, Clone, Copy)]
+#[serde(rename_all = "lowercase")]
+pub enum UsersSearchOrigin {
+    Local,
+    Remote,
+    #[default]
+    Combined,
+}
+
+impl From<UsersSearchOrigin> for ActorOrigin {
+    fn from(o: UsersSearchOrigin) -> Self {
+        match o {
+            UsersSearchOrigin::Local => Self::Local,
+            UsersSearchOrigin::Remote => Self::Remote,
+            UsersSearchOrigin::Combined => Self::Any,
+        }
+    }
+}
+
+/// `POST /api/users/search-by-username-and-host` のリクエストボディ（Misskey 準拠）。
+#[derive(Deserialize)]
+pub struct UsersSearchByUsernameAndHostBody {
+    pub username: Option<String>,
+    pub host: Option<String>,
+    pub limit: Option<i64>,
+    #[serde(default = "default_true")]
+    pub detail: bool,
+}
+
+/// ユーザー一覧の応答。`detail: false` なら `UserLite`（Misskey 準拠）。
+#[derive(Serialize)]
+#[serde(untagged)]
+pub enum UsersListResponse {
+    Detailed(Vec<MisskeyUserDetailed>),
+    Lite(Vec<MisskeyUserLite>),
+}
+
+/// 検索結果の ID 列を、その順のまま `UserDetailed`（`detail: false` なら `UserLite`）にする。
+async fn build_users_in_order(
+    state: &AppState,
+    ids: &[i64],
+    viewer: Option<i64>,
+    detail: bool,
+) -> Result<UsersListResponse, ApiError> {
+    let actors = state.actors.find_by_ids(ids).await.map_err(internal)?;
+    let mut by_id = build_users_detailed(state, &actors, viewer).await;
+    let ordered = ids.iter().filter_map(|id| by_id.remove(id));
+    Ok(if detail {
+        UsersListResponse::Detailed(ordered.collect())
+    } else {
+        UsersListResponse::Lite(ordered.map(|u| u.lite).collect())
+    })
+}
+
+/// POST /api/users/search — 表示名・ハンドルでユーザーを探す。検索は Mastodon 互換の
+/// `accounts/search` と同じ `actor_search::search_user_ids`。検索画面からの検索なので、
+/// ポストの検索（`notes/search`）と同じくログイン必須で、同じ回数制限の枠で数える（続きの
+/// 読み込みは数えない）。メンションの補完（`search-by-username-and-host`）は数えない。
+pub async fn users_search(
+    user: AuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UsersSearchBody>,
+) -> Result<Json<UsersListResponse>, ApiError> {
+    if body.query.trim().is_empty() {
+        return Ok(Json(UsersListResponse::Detailed(Vec::new())));
+    }
+    crate::rate_limit::check_search_rate_limit(&state, user.actor_id, body.offset == 0).await?;
+    let viewer = Some(user.actor_id);
+    let search = UserSearch {
+        query: &body.query,
+        origin: body.origin.into(),
+        viewer,
+        following_only: false,
+        resolve: false,
+        limit: body.limit.unwrap_or(10).clamp(1, 100),
+        offset: body.offset,
+    };
+    let ids = search_user_ids(&state, &search).await?;
+    Ok(Json(
+        build_users_in_order(&state, &ids, viewer, body.detail).await?,
+    ))
+}
+
+/// POST /api/users/search-by-username-and-host — メンションの補完。ユーザー名の前方一致と
+/// サーバーで絞り、フォロー中の相手を先に並べる。
+pub async fn users_search_by_username_and_host(
+    MaybeAuthedUser(me): MaybeAuthedUser,
+    State(state): State<AppState>,
+    Json(body): Json<UsersSearchByUsernameAndHostBody>,
+) -> Result<Json<UsersListResponse>, ApiError> {
+    let viewer = me.map(|u| u.actor_id);
+    let ids = search_user_ids_by_username_and_host(
+        &state,
+        viewer,
+        body.username.as_deref(),
+        body.host.as_deref(),
+        body.limit.unwrap_or(10).clamp(1, 100),
+    )
+    .await?;
+    Ok(Json(
+        build_users_in_order(&state, &ids, viewer, body.detail).await?,
+    ))
 }
 
 // ─── ノート ──────────────────────────────────────────────────────────
@@ -588,8 +714,23 @@ pub async fn notes_search(
     State(state): State<AppState>,
     Json(body): Json<NotesSearchBody>,
 ) -> Result<Json<Vec<MisskeyNote>>, ApiError> {
-    let query = body.query.trim();
-    if query.is_empty() {
+    let filters = seiran_common::repository::post_search::PostSearchFilters {
+        actor_id: body
+            .user_id
+            .as_deref()
+            .map(|id| parse_id(id, "NO_SUCH_USER"))
+            .transpose()?,
+        server: crate::handlers::search::server_filter_from(
+            body.host.as_deref(),
+            &state.local_domain,
+        ),
+        ..Default::default()
+    };
+    let search = crate::handlers::search::PostSearch {
+        query: body.query.trim(),
+        filters,
+    };
+    if search.query.is_empty() && search.filters.is_empty() {
         return Ok(Json(Vec::new()));
     }
     let page = body.cursor.page(30);
@@ -599,7 +740,7 @@ pub async fn notes_search(
     let viewer = (user.actor_id, user.username.as_str());
     let ids = crate::handlers::search::search_post_ids_by_cursor(
         &state,
-        query,
+        &search,
         page.limit as usize,
         page.until_id,
         page.since_id,

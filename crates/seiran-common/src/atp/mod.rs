@@ -18,8 +18,8 @@ pub use client::{
     apply_bsky_post_facets, create_atp_post, create_atp_session, fetch_atp_history,
     fetch_bsky_followers, fetch_bsky_gates, fetch_bsky_list_members, fetch_bsky_profile,
     fetch_single_bsky_post, search_appview_posts, upsert_bsky_post,
-    upsert_bsky_post_deferring_gates, AtpSession, BskyFollowerProfile, BskyPinnedPostRef, BskyPost,
-    BskyProfile,
+    upsert_bsky_post_deferring_gates, AppViewSearchOptions, AtpSession, BskyFollowerProfile,
+    BskyPinnedPostRef, BskyPost, BskyProfile,
 };
 pub use did_resolve::{
     fetch_raw_did_document, resolve_atproto_verification_key, resolve_service_endpoint,

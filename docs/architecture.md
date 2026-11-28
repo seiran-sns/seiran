@@ -116,6 +116,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 - 更新は blue-green（`scripts/deploy.sh`）: 動いていない方の色を新しい版で起動し、`/health` が通ったら `lb`（標準の nginx。版の入れ替えでは作り直さない）の向き先 `docker/lb/active.conf` を書き換えて reload し、古い方を `docker stop` する。reload は graceful なので処理中のリクエストは古い方で終わり、新しいリクエストは新しい方にだけ流れる。新しい方が healthy にならなければ止めて終わり、動いている方には触れない。版を戻すのも `SEIRAN_VERSION` を戻して同じ手順。
 - 新旧が重なっている間は、ジョブキュー・リアルタイム配信・subscribeRepos を Redis で共有し、常駐処理は片方だけが動く（3節）。同じアクターの ATP コミットが両方で起きても SERIALIZABLE のトランザクションで直列化される（`docs/protocols.md` 6節）。
 - 新しい版は起動時にマイグレーションを適用し、古い版はそのスキーマのまま動き続ける。管理者は版を大きく飛ばして更新しうるので、スキーマは互換を保つ範囲のすべての版（1.0.0 以降は同じメジャー版のそれより前のすべての版と、1つ前のメジャー版の最終版。0.x では1つ前の版）が動けるものにし、守れない変更はメジャー版を上げる（`docs/coding_rules.md` 21）。管理者は各メジャー版の最終版を順に経由すれば、どの版からでも更新できる（例: 1.4.2 → 1 系の最終版 → 2 系の最新）。
+- 同時に起動した複数のプロセスがマイグレーションを適用するのは1つずつにする（`db::run_migrations`）。sqlx の Migrator 自体の直列化は `pg_advisory_lock` で文の途中のまま待つので、先行側が `CREATE INDEX CONCURRENTLY`（ほかのトランザクションの終了を待つ）を流すと待ち合ってデッドロックになり、待っていた側の起動が失敗する。そこで先に別の advisory lock を `pg_try_advisory_lock` で間隔を空けて取り直し、取れたプロセスだけが Migrator を動かす。
 - `lb` は Docker の内部 DNS で毎回名前を引くので（`resolver 127.0.0.11`）、色のコンテナを作り直して IP が変わっても追従する。`active.conf` はファイルを置き換えて書くので、ファイル単体ではなくディレクトリごとマウントする。
 
 **リリース**（開発機、`scripts/release.sh`）: `Cargo.toml` の版（と `frontend/package.json` の一致）を確かめ、未コミットの変更が無く push 済みであることを確かめてから、linux/amd64・linux/arm64 のイメージを両方のレジストリへ `<版>` と浮動タグ（`<メジャー>`・`<メジャー>.<マイナー>`・`latest`。版に接尾辞があるときは付けない）で push し、git タグ `v<版>` を付けて push する。
@@ -275,7 +276,11 @@ pub struct SearchSession {
 3. **未来掘り**（`sinceId`）: ローカルDBだけ（通過した AppView 投稿は保存済みなので取りこぼさない）。
 4. **セッション消滅時**: エラーにせず通常のローカル検索に落とす。
 
-検索式は AppView にはそのまま渡し、ローカルには共通の AST に変換する。空白/`+` は AND、`OR` は OR、先頭 `-` は NOT、引用句と括弧が使える（括弧の不足は入力端で補う）。`from:`・`mentions:`・`domain:`・`since:`・`until:` をローカルにも適用し、`from:me`/`mentions:me` は自分に解決する。ローカル/Fedi 投稿は言語宣言が保証されないので `lang:` は常に TRUE。SQL は AST からプレースホルダー付きで生成し、LIKE のメタ文字をエスケープする。
+**条件**（検索式とは別のパラメータ。`PostSearchFilters`）: 日時（以降・より前）、投稿者1人、サーバー1つ（ローカル・ほかの Fedi サーバー1つ・Fedi 全体・Bluesky 全体）、ハッシュタグ1つを AND で絞る。検索式が空でも条件があれば検索する。どれも1つずつなのは、Misskey 互換 `notes/search`（`userId`・`host`）・Mastodon 互換 `v2/search`（`account_id`）・AppView の `searchPosts`（`author`・`tag`）がどれも1つずつしか指定できないため（AppView の検索式の中の `from:` の OR は、他の語と組み合わせると効かない）。ローカルは SQL の条件（ハッシュタグは `post_hashtags`）、AppView には `since`・`until`・`author`・`tag` として渡し、その結果をそのまま使う（取り込み済みの投稿にはハッシュタグを記録していないものがあり、DB 側で確かめ直すと落ちる。AppView のタグの照合は本文に出ない `tags` まで見る）。サーバーだけは AppView が絞れない（ローカル・リモート seiran のユーザーの Bluesky 側の投稿も返る）ので、取り込んだ後に確かめる。サーバーに Bluesky 以外を指定したとき、投稿者がローカルユーザーか Bluesky のアカウントを持たないときは AppView に問い合わせない。検索式が空なら AppView には `*` を渡す（`q` が必須）。
+
+**AppView の結果の取り込み**（`persist_appview_posts`）: 投稿者を DID ごとに1度だけ並列に解決してから投稿を保存する。初見の投稿者でも宣言レコードは取りに行かない（取得は1人あたり約1秒かかり、検索結果の投稿者は大半が初見のため）。投稿の `seiranPost.counterpartAuthorId` があればそれを申告に使い、無ければジョブで後から取る（`DeclarationLookup::Known`/`Deferred`、`docs/protocols.md` 11節）。
+
+**検索式**（`repository::post_search`）: 検索語を AST にし、同じ AST からローカルの SQL と AppView の検索式を作る。空白/`+` は AND、`|` は OR、先頭 `-` は NOT、二重引用符で語句、括弧でグループ（括弧の不足は入力端で補う）。`from:`・`since:` 等の指定子の形や `OR` という語もただの語として扱う（条件は条件欄で指定するので、検索語の中の指定子が条件とかち合わないように。AppView も `OR` という語は OR として扱わない）。AppView へは語を必ず二重引用符で囲んで組み直す（`to_appview_query`。囲まないと `from:` 等が AppView の指定子として効く。括弧で囲むだけでは指定子の形の語が捨てられ、バックスラッシュでの打ち消しは効かない）。入れ子の AND・OR は必ず括弧で囲む。何も一致しえない式なら AppView に問い合わせない。AppView は曖昧一致（語形の揺れや本文以外の照合）もするので、結果は検索語と厳密には一致しない。SQL は AST からプレースホルダー付きで生成し、LIKE のメタ文字をエスケープする。
 
 マージ・降順ソート・重複排除・返却分とバッファへの分割は `search.rs::merge_sort_dedup_and_split()`（純粋関数）で、`InMemorySearchStore` とともに単体テストがある。
 

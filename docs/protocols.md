@@ -708,19 +708,19 @@ DID 解決は常に公開 AppView（`public.api.bsky.app` の `getProfile`/`reso
 
 ## 6.1 投稿検索とBluesky AppView
 
-投稿の検索はログイン必須（`GET /api/notes/search`・Misskey 互換 `POST /api/notes/search` は未ログインなら 401、Mastodon 互換 `/api/v2/search` は `statuses` だけを空にする）。全文検索はクエリによって重く、AppView の結果の保存も伴うので、回数制限（`check_search_rate_limit`、ユーザー単位）の掛からない未ログインには開かない。共通関数（`search_post_ids_by_cursor` 等）は閲覧者を必須の引数に取る。
+投稿の検索はログイン必須（`GET /api/notes/search`・Misskey 互換 `POST /api/notes/search` は未ログインなら 401、Mastodon 互換 `/api/v2/search` は `statuses` だけを空にする）。全文検索はクエリによって重く、AppView の結果の保存も伴うので、回数制限（`check_search_rate_limit`、ユーザー単位）の掛からない未ログインには開かない。ユーザーの検索も、検索画面に当たるもの（`GET /api/users/search`・Misskey 互換 `POST /api/users/search`・Mastodon 互換 `/api/v2/search` の `accounts`）は同じくログイン必須で、同じ回数制限の枠で数える（最初のページだけ。`v2/search` はアカウントと投稿を一度に探しても1回）。メンションの補完に使われるもの（`GET /api/actors/suggest`・`users/search-by-username-and-host`・`/api/v1/accounts/search`）は入力のたびに呼ばれるので数えない。共通関数（`search_post_ids_by_cursor` 等）は閲覧者を必須の引数に取る。
 
 `GET /api/notes/search` は、初回検索でローカルDBと AppView の `app.bsky.feed.searchPosts` から `limit` 件ずつ取り、AppView の結果は author を `actors`、投稿を `posts` へ upsert してから、ローカル結果と ID 降順でマージ・重複排除して `limit` 件返す。AppView 障害時はローカル結果だけにする。
 
 Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by_cursor`（ブレンド・ブリッジポスト解決）と検索回数制限（`check_search_rate_limit`、初回のみ）を使い、`query`/`limit`/`sinceId`/`untilId` を受け付ける。`POST /api/notes/search-by-tag` は `tag`/`limit`/`sinceId`/`untilId` でハッシュタイムラインを返す（Aria 等）。
 
-`until_id` 指定時は対象の `created_at` を AppView の `until` に渡し、DBにも `p.id < until_id` を適用してブレンドする。`since_id` は Misskey 互換の逆方向ページングで、AppView を使わずDBの `p.id > since_id` だけを返す。既存フロントの過去掘りは `session_id` バッファも使える。
+`until_id` 指定時は対象の `created_at` を AppView の `until` に渡し、DBにも `p.id < until_id` を適用してブレンドする。`since_id` は Misskey 互換の逆方向ページングで、AppView を使わずDBの `p.id > since_id` だけを返す。既存フロントの過去掘りは `session_id` バッファも使える。続きがもう無い（返し残しが無く、ローカル DB の取得がページに満たず、AppView の続きも無い）ときは `session_id` を返さない。返した件数では終わりを判定できない（取得時に可視性で絞るので、続きがあっても1ページに満たないことがある）。
 
 ## 7. Misskey API 互換レイヤー
 
 `middleware::misskey_auth_bridge` は、`Authorization` ヘッダーが無ければ JSON ボディ/クエリの `i` から `Authorization: Bearer` を合成する。`handlers::misskey`（`endpoints.rs`/`convert.rs`/`types.rs`）が Misskey 形式のエンドポイントを提供する。データ取得・検証・副作用はカスタム API と共通の関数を使い、Misskey 側はレスポンス整形だけを持つ（`docs/coding_rules.md` 2節）。`POST /api/drive/files/create` は multipart なのでブリッジの対象外で、ハンドラが multipart の `i` を読む（misskey_dart の `postWithBinary` はトークンを multipart フィールドで送る）。
 
-**対応エンドポイント**: `meta`、MiAuth、`i`、`users/show`（`userIds` 指定時は配列、`userId`/`username` 指定時は単一。`UsersShowResponse` の untagged で切り替え）、`users/notes`、`users/following`・`followers`（`MisskeyFollowRelation` が `follower`/`followee` の片方だけを出す）、`users/reactions`、`users/lists/list`・`show`・`push`・`pull`、`notes/show`・`create`・`delete`・`reactions`・`reactions/create`・`reactions/delete`・`unrenote`・`mentions`・`search`・`search-by-tag`・`polls/vote`、`notes/local-timeline`・`timeline`・`hybrid-timeline`（ソーシャル）・`global-timeline`・`user-list-timeline`、`following/create`・`delete`、`i/notifications`、`ap/show`、`stats`、`endpoints`、`emojis`（GET/POST）、`drive/files/create`・`files`・`files/show`・`folders`、`notifications/create`。カスタム API と同じパスの `GET` とはメソッドで共存する。
+**対応エンドポイント**: `meta`、MiAuth、`i`、`users/show`（`userIds` 指定時は配列、`userId`/`username` 指定時は単一。`UsersShowResponse` の untagged で切り替え）、`users/notes`、`users/search`・`search-by-username-and-host`、`users/following`・`followers`（`MisskeyFollowRelation` が `follower`/`followee` の片方だけを出す）、`users/reactions`、`users/lists/list`・`show`・`push`・`pull`、`notes/show`・`create`・`delete`・`reactions`・`reactions/create`・`reactions/delete`・`unrenote`・`mentions`・`search`（`userId`・`host` の絞り込みはカスタム API の検索の条件と同じ。`host` の `.` はローカル）・`search-by-tag`・`polls/vote`、`notes/local-timeline`・`timeline`・`hybrid-timeline`（ソーシャル）・`global-timeline`・`user-list-timeline`、`following/create`・`delete`、`i/notifications`、`ap/show`、`stats`、`endpoints`、`emojis`（GET/POST）、`drive/files/create`・`files`・`files/show`・`folders`、`notifications/create`。カスタム API と同じパスの `GET` とはメソッドで共存する。
 
 **ドライブ（`drive/files`・`files/show`・`files/update`・`files/attached-notes`・`folders`・`folders/show`・`folders/create`）**: seiran のドライブはフォルダ階層を持たない（`media_files` に `folder_id` が無い）フラットな構造のため、`drive/files` は `folderId` の指定を無視し、常にアップロード者自身の全ファイルをカーソルページネーションで返す（Mewk作者と合意済みのいい加減な互換実装：「存在しないフォルダ」ではなく「指定されたフォルダの中身は常にルート＝全ファイル」として振る舞う）。`drive/folders` は常に空配列（ルート直下にフォルダは無い）。`drive/folders/show` は何を指定されても`{id: 指定されたfolderId, name: "Drive", parentId: null}` 相当のダミーを返して常に成功、`drive/folders/create` も何も永続化せずその場で生成したIDを含むダミーの`DriveFolder`を返して常に成功する（フォルダは持てないが、作成・参照そのものを失敗させるとクライアントの添付整理フローが止まるため）。`drive/files/update` も同じ方針で、`folderId`（フォルダ間移動）・`name`・`comment`は保存先が無いため無視し、ファイルの存在・所有権だけ検証して現在の`DriveFile`をそのまま返す。`isSensitive` だけは呼んだ本人の指定として `drive_file_sensitivity` に保存し（`drive/files/create` の `isSensitive` も同じ）、`notes/create` で添付へ写す。`DriveFile.isSensitive` もこの本人の指定を返す。指定を変えても投稿済みの添付は変わらない（Aria等の「ファイルをフォルダ移動」操作を404にせずルートに留め置く）。`drive/files/show`・`files/update`・`files/attached-notes`はいずれもアップロード者本人のファイルのみ対象。`drive/files/attached-notes`は`post_attachments`を実際に引いて添付投稿を返す（ここは本物のデータで実装）。
 
@@ -753,6 +753,8 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 **`notes/reactions`**: `type` 省略時は空配列（集計が単一絵文字指定前提のため）。`notes/reactions/create` の `reaction` はそのまま `validate_reaction_content` に渡す（内部表現が Misskey と同じ `:shortcode@.:` なので変換不要。リモートホスト付きはホストを捨てて同名のローカル絵文字として扱う）。
 
 **`stats`**: `notesCount`/`usersCount`（と同値の `original*`）はローカルの実数（削除済み投稿・退会済みユーザー・リモートを除く）。`instances`・`driveUsage*` は0固定。
+
+**ユーザー検索（`users/search`・`users/search-by-username-and-host`）**: `users/search` は Mastodon 互換の `accounts/search`・`v2/search` と同じ共通関数 `actor_search::search_user_ids` を通し、差は応答の整形だけ（`detail: false` なら `UserLite`）。照合は表示名・各ハンドル表記・自己紹介の部分一致で、ユーザー名が語で始まる人、表示名かハンドルに一致した人、自己紹介だけに一致した人の順に、それぞれユーザー名順に並べる（`offset` で続き、`origin` は `local`/`remote`/`combined`）。語が `user@host`・`@user`・Bsky ハンドル・ローカルのユーザー名として既知のアクターに引き当たれば最初のページの先頭に置き、以降のページには出さない。部分一致は2文字以上のときだけ行う（1文字はほぼ全アクターに一致して並べ替えに秒単位かかる。入力のたびに検索するクライアントが最初の1文字で投げてくる）。ブロック・ミュートの相手、凍結・退会済みは出さない。`users/search` はログイン必須で、検索回数制限（初回のみ）を数える（6.1節）。`search-by-username-and-host`（メンションの補完）はユーザー名の前方一致と `host`（省略で全サーバー、自ドメインか `.` でローカル、それ以外はサーバー名の前方一致）で絞り、フォロー中の相手を先に並べる（Misskey と同じ）。
 
 **未実装機能のスタブ**: `announcements`、`users/featured-notes`・`clips`・`pages`・`flashs`・`gallery/posts` は `empty_list_stub`（常に `[]`）。エンドポイントが無いと Aria が該当タブをエラー表示にするため。実装するときは個別ハンドラに差し替える。
 
@@ -811,6 +813,10 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 
 **`Account`**: `acct` はローカルが `username`、Bsky（`domain` 空）がハンドル、他は `username@domain`（`username::actor_handle` と同じ規則）。アバター未設定は `/api/avatars/:id`、ヘッダー未設定は `/api/headers/missing.png`（1x1 透明 PNG。空文字だと Swift 系クライアントの URL デコードが失敗する）。`note`・`fields[].value` も `text_to_html`。
 
+**投稿検索（`GET /api/v2/search` の `statuses`）**: カスタム API の検索と同じ `search_post_ids_by_cursor`。`account_id` はその投稿者の投稿だけに絞る（カスタム API の検索の条件と同じ）。
+
+**アカウント検索（`GET /api/v1/accounts/search`、`GET /api/v2/search` の `accounts`）**: Misskey 互換の `users/search` と同じ共通関数で、照合・並び・除外の規則も同じ（7節）。`offset` で続き、`following=true` でフォロー中の相手だけ（follows から引く）、`resolve=true`（ログイン時、最初のページだけ）で未知の `@user@host` を取り込んで先頭に置く。
+
 **投稿（`POST /api/v1/statuses`）**: `status`・`in_reply_to_id`・`quoted_status_id`（Fedibird 等の `quote_id` も可）・`media_ids[]`・`poll[options][]`/`poll[expires_in]`/`poll[multiple]`・`spoiler_text`（CW）・`visibility`・`language`（`SUPPORTED_LANGUAGES` 外は付けない）を `CreateNoteRequest` に変換する。`direct` の宛先は本文のメンションを既知のアクター（`@user`→ローカル、`@user@host`、`.` を含む単独ハンドル→Bsky）に引き当てる（引き当たらなければ `DIRECT_REQUIRES_KNOWN_MENTION`）。`sensitive=true` は添付すべてを NSFW 指定にする。`scheduled_at`・`Idempotency-Key` は無視する。削除（`DELETE /api/v1/statuses/:id`）は下書き復元用に元の本文を `text` に入れて返す。
 
 **予約投稿（`mastodon::scheduled_statuses`）**: `POST /api/v1/statuses` に `scheduled_at`（ISO 8601）があれば投稿せずに予約し、`ScheduledStatus` を返す。`GET /api/v1/scheduled_statuses`（ID の降順、`Link` ヘッダー付き）・`GET`/`PUT`（`scheduled_at` だけを変える）/`DELETE /api/v1/scheduled_statuses/:id`。検証・保存・実行は予約投稿の共通関数（`handlers::scheduled_posts`、`docs/architecture.md` 11節）と同じで、予約日時は5分後から1年後まで。投稿できなかった予約（seiran 独自）も一覧に含め、`PUT` で予約日時を変えると再予約になる。`params.poll.expires_in` は、絶対時刻で指定された期限なら予約日時からの秒数にして返す。
@@ -818,7 +824,7 @@ Misskey 向けの `POST /api/notes/search` も同じ `search::search_post_ids_by
 **その他のエンドポイント**:
 - インスタンス: `GET /api/v1/instance`・`/api/v2/instance`（`version` は `4.5.0 (compatible; seiran x.y.z)`、`api_versions.mastodon` は7。クライアントはこれで引用 UI 等の機能有無を決める）、`custom_emojis`、`preferences`。
 - タイムライン: `timelines/home`・`public`（`local=true` でローカル、それ以外はグローバル）・`tag/:hashtag`・`list/:id`、`tags/:name`、`lists`・`lists/:id`。
-- 閲覧: `statuses/:id`・`context`（祖先は返信先を最大40件たどる。子孫は `thread_descendants` のうち返信でつながるものを古い順）・`reblogged_by`・`favourited_by`、`accounts/:id`・`statuses`（`pinned`・`exclude_replies`・`exclude_reblogs`・`only_media`）・`followers`・`following`・`relationships`・`lookup`（未知の `acct` は `resolve_open_target` で取り込む）・`search`、`GET /api/v2/search`（URL は `resolve=true` のとき「開く」と同じ解決。投稿検索の回数制限はカスタム API と共通。`offset` によるページングは未対応で、`max_id` 無しの `offset` には空を返す）。
+- 閲覧: `statuses/:id`・`context`（祖先は返信先を最大40件たどる。子孫は `thread_descendants` のうち返信でつながるものを古い順）・`reblogged_by`・`favourited_by`、`accounts/:id`・`statuses`（`pinned`・`exclude_replies`・`exclude_reblogs`・`only_media`）・`followers`・`following`・`relationships`・`lookup`（未知の `acct` は `resolve_open_target` で取り込む）・`search`、`GET /api/v2/search`（URL は `resolve=true` のとき「開く」と同じ解決。アカウント・投稿の検索はログイン時だけで、未ログインは空を返す。回数制限はカスタム API と共通で、1回の呼び出しを1回と数える。`offset` によるページングは未対応で、`max_id` 無しの `offset` には空を返す）。
 - 操作: `accounts/:id/follow`・`unfollow`（既にフォロー済みでも関係を返す）、`statuses/:id/favourite`・`unfavourite`・`reblog`・`unreblog`、`POST /api/v1/media`・`/api/v2/media`（`create_drive_file` に委譲。同期処理なので常に 200）、`GET`/`PUT /api/v1/media/:id`（更新内容は保存しない）。
 - 通知: `GET /api/v1/notifications`。`follow`→`follow`、`followRequest`→`follow_request`、`mention`/`reply`→`mention`、`repost`→`reblog`（`status` はリポストされた自分の投稿）、`quote`→`quote`、`❤️` リアクション→`favourite`、他のリアクション→`emoji_reaction`（Fedibird の形の `emoji_reaction` に加え、Pleroma の形の `emoji`・`emoji_url` も付ける。`types[]`・`exclude_types[]` の `pleroma:emoji_reaction` も同じ通知に当てる）。引っ越し関連等は出さない。既読化しない。
 - ブロック・ミュート: `accounts/:id/block`・`unblock`・`mute`・`unmute` はカスタム API と共通の `blocks::block_actor`/`unblock_actor`・`mutes::mute_actor`/`unmute_actor`（対象文字列の解決と処理本体を分けたもの）を呼んで関係を返す。ミュートの `notifications`・`duration` は無視する（常に通知も含めて無期限）。`GET /api/v1/blocks`・`mutes` はページングせず全件。
@@ -995,7 +1001,12 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 - **自己申告**: AP は Actor 文書の拡張フィールド `seiranAtDid` で自分の DID を、ATP は独自コレクション `org.seiran.actor.declaration`（rkey `self`）の `apActorUri` で自分の Actor URI を申告する。`app.bsky.actor.profile` に載せないのは、他クライアントがプロフィールを丸ごと上書きすると独自フィールドが消えるため。取得は公開 AppView が独自 NSID を中継しないので、DID を `atproto_pds` に解決してその PDS に直接 `getRecord` する（`atp::client::fetch_seiran_actor_declaration`）。
 - **発見時はすぐ INSERT、検証は後**: AP で u（ATP 相手 v を申告）を見つけたら `fedi` 型で `ap_uri=u`・`claimed_at_did=v` として INSERT し、v を取りに行く `Job::ActorMetadataResolve` を積む（結婚を早めるための先行取得で、成立の必須条件ではない）。ATP 側も対称に `bsky` 型で `at_did=v`・`claimed_ap_uri=u`。このジョブ（`jobs::actor_metadata_resolve`）は必ず相手側の申告（DID 側は `fetch_seiran_actor_declaration`、AP 側は取得した Actor 文書の `seiranAtDid`）を使う。呼び出し元が持つ値を渡すと下の相互一致が自己参照になり、一方的な申告だけで結婚が成立してしまう。
 - **保存の入口は1つ**: リモートアクターの行を作る・更新する経路は、すべて `seiran_actor_merge::discover_fedi_profile`（AP）か `discover_bsky_profile`（ATP）を通す（フォロー・受信 Activity・firehose・フォロワーのポーリング・検索・プロフィール表示・ターゲット解決・各種ジョブ）。申告を取らずに行を作る経路があると、その行は申告を持たないまま残り、相手と結婚できなくなる。
-  - AP の申告は Actor 文書に含まれるので、取得した文書から常に入る。ATP の申告は別に宣言レコードを取る必要があり、`DeclarationLookup` で取る時機を選ぶ。1人のプロフィールを取り直す経路（フォロー・プロフィール表示・ターゲット解決・相手の解決ジョブ等）は常に取り（`Always`）、多数を一度に目にする経路（検索結果・フォロワー一覧・ブリッジ）は行がまだ無いときだけ取る（`WhenNew`）。新しく作る行には必ず申告が付く。
+  - AP の申告は Actor 文書に含まれるので、取得した文書から常に入る。ATP の申告は別に宣言レコードを取る必要があり、`DeclarationLookup` で扱いを選ぶ。
+    - `Always`: 常に取る。1人のプロフィールを取り直す経路（フォロー・プロフィール表示・ターゲット解決・相手の解決ジョブ等）。
+    - `WhenNew`: 行がまだ無いか、宣言を確かめずに作った行（`actors.atp_declaration_pending`）のときだけ取る。多数を一度に目にする経路（フォロワー一覧・ブリッジ）。
+    - `Known`: 投稿レコードの `seiranPost.counterpartAuthorId`（`https://` の Actor URI）を申告として使い、取りに行かない。宣言レコードと同じくその DID 自身のリポジトリにある自己申告なので、重みは同じ。AppView の検索結果の投稿者で、その人の投稿に `seiranPost` があるとき。
+    - `Deferred`: 取りに行かない。行を新しく作ったときは `atp_declaration_pending` を立てて `ActorMetadataResolve` を積み、ジョブが宣言を取って印を下ろす。AppView の検索結果の投稿者で `seiranPost` が無いとき（初見の投稿者は宣言の取得に1人あたり約1秒かかり、待つと検索の1ページが数秒〜数十秒になる）。他のクライアントから投稿したリモート seiran ユーザーは、ジョブが走るまで（数秒〜数分）結婚前の行のまま見える。
+    - 宣言を確かめずに印も付けずに行を作る経路は無い（作ると二度と取りに行かれない）。ジョブが失われても、印のある行は次に `WhenNew` で目にしたときに取り直される。
   - 入口は、結婚成立時の Jetstream `wantedDids` 再構築と、未成立かつ申告ありのときの `ActorMetadataResolve` 投入（`promote_after_discovery`）まで行う。相手の解決ジョブ自身から呼ぶときは投入を抑止する（`reenqueue_counterpart`、無限投入を防ぐ）。
   - ローカルアクターの行に当たったら何も変えずに返す（ローカルユーザーの ATP ハンドル表記で `username` を上書きしない）。
 - **相互一致で結婚**: 相手の実体（真正な `ap_uri`、または DID 解決・署名済みコミットで裏付けられた `at_did`）がDBにあり、かつその既存行の申告が今回見つけた実体を指し返している場合だけ結婚させる。成立したら `remote_seiran` に昇格し `claimed_*` をクリアする。不一致・申告なしなら単独の `fedi`/`bsky` 行のまま残す。一方的な申告を受け入れると、他人の実在 URI を騙って結び付ける偽装ができてしまう。
@@ -1009,7 +1020,7 @@ fedi/local のみのメッセージは通常の削除（`DELETE /api/notes/:id`�
 - **レース対策**: `actors` の複合 UNIQUE `actors_mutual_claim_key`（`(COALESCE(ap_uri, claimed_ap_uri), COALESCE(at_did, claimed_at_did))`、`actor_type IN ('fedi','bsky','remote_seiran')` の部分インデックス）で、相互に申告し合う2行の共存を禁じる。申告の無い行は NULL の非等価性で抵触しない。違反したら `unique_retry::retry_on_unique_violation` がトランザクションを最大5回やり直す（`discover_fedi_actor`/`discover_bsky_actor`）。advisory lock ではなく制約にしているのは、ロックキーの選び方次第で直列化が効かなくなる余地を無くすため。
 - **Fedi 系アクターの判定**: AP の inbox を持つのは `fedi` と `remote_seiran` の両方なので、AP 配送・DM・メンション等の宛先判定は `actor_type IN ('fedi', 'remote_seiran')` にする。`lists.rs` のプロキシフォロー関連だけは `fedi` 固定が正しい（`remote_seiran` は `wantedDids` 経由で ATP から投稿を受け取れるので、AP のプロキシフォローが要らない）。
 - **フォローの AP/ATP 同期（#238）**: 承認制は AP にしかないので、リモート seiran へのフォローは常に AP で送る（`follow_fedi`）。相手が非承認制で既に結婚済みなら同時に ATP の `commit_follow` もして `follows.atp_rkey` に記録し、承認制なら `Accept` 受信時（`handle_accept`）に同じことをする。アンフォロー・退会時の一括アンフォローは `atp_rkey` の有無で ATP 側の解除を判断するので対称に動く。
-- **未実装**: 投稿マージ（5節）の場で未結婚の投稿者同士を `counterpartAuthorId` で結婚させる処理。フォロー時に未結婚で後から結婚した相手への ATP フォローの追いコミット。`actors.seiran_pair_actor_id` は使っておらず（常に NULL）、削除を検討している。
+- **未実装**: 投稿マージ（5節）の場で未結婚の投稿者同士を `counterpartAuthorId` で結婚させる処理（AppView の検索結果の取り込みだけは `Known` で使っている。Jetstream の受信では使っていない）。フォロー時に未結婚で後から結婚した相手への ATP フォローの追いコミット。`actors.seiran_pair_actor_id` は使っておらず（常に NULL）、削除を検討している。
 
 ## 12. 未実装・スコープ外の機能
 

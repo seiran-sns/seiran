@@ -126,6 +126,8 @@
 - [x] **タブ選択・スクロール位置の保持（#90）** — `docs/ui_spec.md` 2.4節・2.6節
 - [x] **投稿検索（Bluesky AppView統合・検索式）（#146, #101）** — `docs/architecture.md` 6節
 - [x] **用途別ユーザー検索** — `docs/architecture.md`
+- [x] **投稿検索の条件（日付・ユーザー・サーバー・ハッシュタグ）とユーザー検索タブ** — `docs/architecture.md` 6節、`docs/ui_spec.md` 2.4h節
+- [x] **Misskey 互換 `users/search`・`search-by-username-and-host` とアカウント検索の共通化** — `docs/protocols.md` 7節
 
 ### ソーシャル機能
 

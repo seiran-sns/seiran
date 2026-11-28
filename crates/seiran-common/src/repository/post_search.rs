@@ -1,16 +1,18 @@
-//! Bluesky 互換の投稿検索クエリ（`from:` `lang:` `OR` 等）の解析と、ローカル DB の検索。
+//! 投稿検索の検索語の解析と、ローカル DB の検索。
+//!
+//! 検索語は語・引用符で囲んだ語句・括弧・縦棒（OR）・先頭の `-`（除外）・`+`（AND）だけを
+//! 解釈して AST（`SearchCondition`）にする。`from:`・`since:` 等の指定子の形もただの語として
+//! 扱う。条件は検索語とは別のパラメータ（`PostSearchFilters`）で指定するので、検索語の中の
+//! 指定子が条件とかち合わないようにするため。同じ AST をローカル DB の SQL と AppView の
+//! 検索式（`to_appview_query`）の両方に使い、どちらでも同じ意味にする。
 
-use chrono::{DateTime, NaiveDate, Utc};
+use chrono::{DateTime, Utc};
 use sqlx::{PgPool, Postgres, QueryBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum SearchCondition {
+    /// 語（引用符で囲んだ語句を含む。部分一致で探す）。
     Text(String),
-    From(String),
-    Mentions(String),
-    Domain(String),
-    Since(DateTime<Utc>),
-    Until(DateTime<Utc>),
     Not(Box<SearchCondition>),
     And(Vec<SearchCondition>),
     Or(Vec<SearchCondition>),
@@ -55,25 +57,29 @@ impl<'a> Tokenizer<'a> {
                         self.pos = absolute + ch.len_utf8();
                     } else {
                         self.pos = absolute;
-                        return Some(classify_text(text));
+                        return Some(Token::Text(text));
                     }
                 }
                 '\\' if !escaped => {
                     escaped = true;
                     self.pos = absolute + ch.len_utf8();
                 }
-                '(' | ')' if !quoted && !escaped => {
+                '(' | ')' | '|' if !quoted && !escaped => {
                     if text.is_empty() {
                         self.pos = absolute + ch.len_utf8();
-                        return Some(Token::Control(ch));
+                        return Some(if ch == '|' {
+                            Token::Or
+                        } else {
+                            Token::Control(ch)
+                        });
                     }
                     self.pos = absolute;
-                    return Some(classify_text(text));
+                    return Some(Token::Text(text));
                 }
                 ch if !quoted && !escaped && ch.is_whitespace() => {
                     self.pos = absolute + ch.len_utf8();
                     if !text.is_empty() {
-                        return Some(classify_text(text));
+                        return Some(Token::Text(text));
                     }
                 }
                 '+' | '-' if !quoted && !escaped && text.is_empty() => {
@@ -87,15 +93,7 @@ impl<'a> Tokenizer<'a> {
                 }
             }
         }
-        (!text.is_empty()).then(|| classify_text(text))
-    }
-}
-
-fn classify_text(text: String) -> Token {
-    if text.eq_ignore_ascii_case("or") {
-        Token::Or
-    } else {
-        Token::Text(text)
+        (!text.is_empty()).then_some(Token::Text(text))
     }
 }
 
@@ -125,7 +123,7 @@ fn parse_partial(tokenizer: &mut Tokenizer<'_>, root: bool) -> SearchCondition {
             Token::Control('+') => join = Join::And,
             Token::Or => join = Join::Or,
             Token::Text(text) if !text.is_empty() => {
-                current = combine(current, parse_term(text), join);
+                current = combine(current, SearchCondition::Text(text), join);
                 join = Join::And;
             }
             _ => {}
@@ -160,43 +158,6 @@ fn combine(left: SearchCondition, right: SearchCondition, join: Join) -> SearchC
         (left, Join::Or) => SearchCondition::Or(vec![left, right]),
         (left, _) => SearchCondition::And(vec![left, right]),
     }
-}
-
-fn parse_term(text: String) -> SearchCondition {
-    let Some((operator, value)) = text.split_once(':') else {
-        return SearchCondition::Text(text);
-    };
-    if value.is_empty() {
-        return SearchCondition::Text(text);
-    }
-    match operator.to_ascii_lowercase().as_str() {
-        "from" => SearchCondition::From(normalize_handle(value)),
-        "mentions" => SearchCondition::Mentions(normalize_handle(value)),
-        "domain" => SearchCondition::Domain(value.to_ascii_lowercase()),
-        // Local and federated posts do not reliably declare a language.
-        "lang" => SearchCondition::True,
-        "since" => parse_date(value)
-            .map(SearchCondition::Since)
-            .unwrap_or(SearchCondition::Text(text)),
-        "until" => parse_date(value)
-            .map(SearchCondition::Until)
-            .unwrap_or(SearchCondition::Text(text)),
-        _ => SearchCondition::Text(text),
-    }
-}
-
-fn parse_date(value: &str) -> Option<DateTime<Utc>> {
-    if let Ok(value) = DateTime::parse_from_rfc3339(value) {
-        return Some(value.with_timezone(&Utc));
-    }
-    NaiveDate::parse_from_str(value, "%Y-%m-%d")
-        .ok()?
-        .and_hms_opt(0, 0, 0)
-        .map(|value| value.and_utc())
-}
-
-fn normalize_handle(value: &str) -> String {
-    value.trim_start_matches('@').to_ascii_lowercase()
 }
 
 fn optimize(condition: SearchCondition) -> SearchCondition {
@@ -246,11 +207,8 @@ fn optimize_list(values: Vec<SearchCondition>, and: bool) -> SearchCondition {
     }
 }
 
-pub fn append_sql(
-    condition: &SearchCondition,
-    builder: &mut QueryBuilder<Postgres>,
-    me: Option<(i64, &str)>,
-) {
+/// AST を SQL の条件として足す（`p` が posts）。語は本文の部分一致（大文字小文字を問わない）。
+pub fn append_sql(condition: &SearchCondition, builder: &mut QueryBuilder<Postgres>) {
     match condition {
         SearchCondition::Text(value) => {
             builder
@@ -258,44 +216,9 @@ pub fn append_sql(
                 .push_bind(format!("%{}%", escape_like(&value.to_lowercase())))
                 .push(" ESCAPE '\\'");
         }
-        SearchCondition::From(value) => {
-            if value.eq_ignore_ascii_case("me") {
-                builder
-                    .push("a.id = ")
-                    .push_bind(me.map(|(actor_id, _)| actor_id).unwrap_or(i64::MIN));
-            } else {
-                builder.push("(");
-                append_actor_handle_sql(builder, value, "a");
-                builder.push(")");
-            }
-        }
-        SearchCondition::Mentions(value) => {
-            let value = if value.eq_ignore_ascii_case("me") {
-                me.map(|(_, username)| username)
-                    .unwrap_or("__unauthenticated_me__")
-            } else {
-                value
-            };
-            builder
-                .push("LOWER(p.body) LIKE ")
-                .push_bind(format!("%@{}%", escape_like(value)))
-                .push(" ESCAPE '\\'");
-        }
-        SearchCondition::Domain(value) => {
-            builder
-                .push("LOWER(p.body) LIKE ")
-                .push_bind(format!("%{}%", escape_like(value)))
-                .push(" ESCAPE '\\'");
-        }
-        SearchCondition::Since(value) => {
-            builder.push("p.created_at >= ").push_bind(*value);
-        }
-        SearchCondition::Until(value) => {
-            builder.push("p.created_at < ").push_bind(*value);
-        }
         SearchCondition::Not(inner) => {
             builder.push("NOT (");
-            append_sql(inner, builder, me);
+            append_sql(inner, builder);
             builder.push(")");
         }
         SearchCondition::And(values) | SearchCondition::Or(values) => {
@@ -309,7 +232,7 @@ pub fn append_sql(
                 if index > 0 {
                     builder.push(separator);
                 }
-                append_sql(value, builder, me);
+                append_sql(value, builder);
             }
             builder.push(")");
         }
@@ -322,19 +245,37 @@ pub fn append_sql(
     }
 }
 
-fn append_actor_handle_sql(builder: &mut QueryBuilder<Postgres>, value: &str, alias: &str) {
-    let (username, domain) = value.split_once('@').unwrap_or((value, ""));
-    builder
-        .push("LOWER(")
-        .push(alias)
-        .push(".username) = ")
-        .push_bind(username.to_string());
-    if !domain.is_empty() {
-        builder
-            .push(" AND LOWER(")
-            .push(alias)
-            .push(".domain) = ")
-            .push_bind(domain.to_string());
+/// AST を AppView（`app.bsky.feed.searchPosts`）の検索式に組み直す。語は必ず二重引用符で
+/// 囲む（囲まないと `from:` 等が AppView の指定子として効き、条件欄から渡すパラメータと
+/// かち合う）。AND は空白、OR は `|`（AppView は `OR` という語を OR として扱わない）、除外は
+/// 先頭の `-`、入れ子は括弧。何も一致しえない式（`False`）なら `None`（問い合わせない）、
+/// 語が無ければ `*`（`q` は必須）。語の中の `"` は空白にする（引用符を閉じてしまうため）。
+pub fn to_appview_query(condition: &SearchCondition) -> Option<String> {
+    fn join(values: &[SearchCondition], separator: &str) -> String {
+        values
+            .iter()
+            .map(nested)
+            .collect::<Vec<_>>()
+            .join(separator)
+    }
+    // 入れ子の AND・OR は必ず括弧で囲む（AND と `|` の優先順位に頼らない）。
+    fn nested(condition: &SearchCondition) -> String {
+        match condition {
+            SearchCondition::Text(value) => format!("\"{}\"", value.replace('"', " ")),
+            SearchCondition::Not(inner) => format!("-{}", nested(inner)),
+            SearchCondition::And(values) => format!("({})", join(values, " ")),
+            SearchCondition::Or(values) => format!("({})", join(values, " | ")),
+            // `optimize` 済みの AST では入れ子に現れない。
+            SearchCondition::True => "*".to_owned(),
+            SearchCondition::False => String::new(),
+        }
+    }
+    match condition {
+        SearchCondition::False => None,
+        SearchCondition::True => Some("*".to_owned()),
+        SearchCondition::And(values) => Some(join(values, " ")),
+        SearchCondition::Or(values) => Some(join(values, " | ")),
+        other => Some(nested(other)),
     }
 }
 
@@ -346,9 +287,101 @@ fn escape_like(value: &str) -> String {
 }
 
 /// ローカル DB を検索し、閲覧者 `me`（`(actor_id, acct)`）に見える投稿の id を新しい順に返す。
+/// 検索語とは別に指定する投稿検索の条件（検索画面の条件欄、Misskey の `userId`/`host`、
+/// Mastodon の `account_id`）。種類どうしは AND で、空の項目は絞らない。投稿者・サーバー・
+/// ハッシュタグが1つずつなのは、Misskey・Mastodon の互換 API と
+/// Bluesky の `searchPosts` がどれも1つしか指定できないため（複数を OR にすると Bluesky に
+/// 値ごとに問い合わせることになる）。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PostSearchFilters {
+    /// この時刻以降に作られた投稿。
+    pub since: Option<DateTime<Utc>>,
+    /// この時刻より前に作られた投稿。
+    pub until: Option<DateTime<Utc>>,
+    /// 投稿者。
+    pub actor_id: Option<i64>,
+    /// 投稿者のサーバー。
+    pub server: ServerFilter,
+    /// ハッシュタグ（`hashtags.name` と同じ正規化: 先頭 `#` なし・小文字）。
+    pub hashtag: Option<String>,
+}
+
+/// 投稿者のサーバーの指定。
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum ServerFilter {
+    #[default]
+    Any,
+    /// このサーバーのローカルユーザー。
+    Local,
+    /// ほかの Fedi サーバー1つ（ホスト名、小文字）。
+    Host(String),
+    /// Fedi 全体（ローカルを含む。Bluesky だけのアカウント以外）。
+    Fediverse,
+    /// Bluesky 全体（AT Protocol だけのアカウント。`actors.domain` が空）。PDS ごとには
+    /// 分けず1つのサーバーとして扱う。
+    Bluesky,
+}
+
+impl ServerFilter {
+    /// Bluesky の投稿が一致しうるか（AppView に問い合わせるか）。
+    pub fn includes_bluesky(&self) -> bool {
+        matches!(self, Self::Any | Self::Bluesky)
+    }
+}
+
+impl PostSearchFilters {
+    pub fn is_empty(&self) -> bool {
+        self.since.is_none()
+            && self.until.is_none()
+            && self.actor_id.is_none()
+            && self.server == ServerFilter::Any
+            && self.hashtag.is_none()
+    }
+}
+
+/// `filters` の条件を ` AND ...` として足す（`p` が posts、`a` が投稿者の actors）。
+fn append_filters_sql(filters: &PostSearchFilters, sql: &mut QueryBuilder<Postgres>) {
+    if let Some(since) = filters.since {
+        sql.push(" AND p.created_at >= ").push_bind(since);
+    }
+    if let Some(until) = filters.until {
+        sql.push(" AND p.created_at < ").push_bind(until);
+    }
+    if let Some(actor_id) = filters.actor_id {
+        sql.push(" AND p.actor_id = ").push_bind(actor_id);
+    }
+    match &filters.server {
+        ServerFilter::Any => {}
+        ServerFilter::Local => {
+            sql.push(" AND a.actor_type = 'local'");
+        }
+        ServerFilter::Host(host) => {
+            sql.push(" AND a.actor_type != 'local' AND LOWER(a.domain) = ")
+                .push_bind(host.clone());
+        }
+        ServerFilter::Fediverse => {
+            sql.push(" AND a.domain <> ''");
+        }
+        ServerFilter::Bluesky => {
+            sql.push(" AND a.actor_type != 'local' AND a.domain = ''");
+        }
+    }
+    if let Some(hashtag) = &filters.hashtag {
+        sql.push(
+            " AND EXISTS (SELECT 1 FROM post_hashtags ph JOIN hashtags h ON h.id = ph.hashtag_id
+                          WHERE ph.post_id = p.id AND h.name = ",
+        )
+        .push_bind(hashtag.clone())
+        .push(")");
+    }
+}
+
+/// ローカル DB の投稿検索。`query` は検索式（空なら条件だけで探す）。新しい順に
+/// `fetch_limit` 件まで。
 pub async fn search_local_post_ids(
     pool: &PgPool,
     query: &str,
+    filters: &PostSearchFilters,
     fetch_limit: i64,
     until_id: Option<i64>,
     since_id: Option<i64>,
@@ -359,7 +392,8 @@ pub async fn search_local_post_ids(
     let condition = parse(query);
     let mut sql =
         QueryBuilder::new("SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE ");
-    append_sql(&condition, &mut sql, me);
+    append_sql(&condition, &mut sql);
+    append_filters_sql(filters, &mut sql);
     sql.push(" AND p.deleted_at IS NULL");
     sql.push(" AND post_is_visible_to(")
         .push_bind(me.map(|(actor_id, _)| actor_id))
@@ -375,49 +409,85 @@ pub async fn search_local_post_ids(
     sql.build_query_scalar().fetch_all(pool).await
 }
 
+/// `ids` のうち `filters` を満たす投稿（AppView の検索結果を、取り込んだ後に同じ条件で
+/// 確かめる。AppView に渡せる条件は一部だけで、渡し方の意味も完全には一致しないため）。
+pub async fn filter_post_ids(
+    pool: &PgPool,
+    ids: &[i64],
+    filters: &PostSearchFilters,
+) -> Result<Vec<i64>, sqlx::Error> {
+    if filters.is_empty() || ids.is_empty() {
+        return Ok(ids.to_vec());
+    }
+    let mut sql = QueryBuilder::new(
+        "SELECT p.id FROM posts p JOIN actors a ON a.id = p.actor_id WHERE p.id = ANY(",
+    );
+    sql.push_bind(ids.to_vec()).push(")");
+    append_filters_sql(filters, &mut sql);
+    sql.build_query_scalar().fetch_all(pool).await
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn text(value: &str) -> SearchCondition {
+        SearchCondition::Text(value.into())
+    }
+
     #[test]
-    fn parses_operators_quotes_and_boolean_groups() {
+    fn parses_quotes_groups_bar_and_exclusion() {
         assert_eq!(
-            parse(r#"from:@alice.example ("exact phrase" OR #rust) -domain:spam.example lang:ja"#),
+            parse(r#"cat ("exact phrase" | #rust) -spam"#),
             SearchCondition::And(vec![
-                SearchCondition::From("alice.example".into()),
-                SearchCondition::Or(vec![
-                    SearchCondition::Text("exact phrase".into()),
-                    SearchCondition::Text("#rust".into()),
-                ]),
-                SearchCondition::Not(Box::new(SearchCondition::Domain("spam.example".into()))),
+                text("cat"),
+                SearchCondition::Or(vec![text("exact phrase"), text("#rust")]),
+                SearchCondition::Not(Box::new(text("spam"))),
             ])
         );
     }
 
     #[test]
-    fn balances_missing_parentheses() {
-        assert_eq!(parse("(one OR two"), parse("one OR two)"));
-    }
-
-    #[test]
-    fn ignores_lang_and_deduplicates_terms() {
+    fn operator_like_words_and_or_keyword_are_plain_words() {
         assert_eq!(
-            parse("lang:ja hello hello"),
-            SearchCondition::Text("hello".into())
+            parse("from:alice since:2026-01-02 lang:ja OR"),
+            SearchCondition::And(vec![
+                text("from:alice"),
+                text("since:2026-01-02"),
+                text("lang:ja"),
+                text("OR"),
+            ])
         );
-        assert_eq!(parse("hello OR lang:ja"), SearchCondition::True);
-        assert_eq!(parse("-lang:ja"), SearchCondition::False);
+        assert_eq!(
+            parse("a|b"),
+            SearchCondition::Or(vec![text("a"), text("b")])
+        );
     }
 
     #[test]
-    fn parses_dates() {
-        assert!(matches!(
-            parse("since:2026-01-02"),
-            SearchCondition::Since(_)
-        ));
-        assert!(matches!(
-            parse("until:2026-01-02T03:04:05Z"),
-            SearchCondition::Until(_)
-        ));
+    fn balances_missing_parentheses() {
+        assert_eq!(parse("(one | two"), parse("one | two)"));
+    }
+
+    #[test]
+    fn deduplicates_terms() {
+        assert_eq!(parse("hello hello"), text("hello"));
+    }
+
+    #[test]
+    fn appview_query_quotes_every_word() {
+        let q = |s: &str| to_appview_query(&parse(s));
+        assert_eq!(
+            q("cat from:bsky.app").as_deref(),
+            Some(r#""cat" "from:bsky.app""#)
+        );
+        assert_eq!(
+            q(r#"orange (kitten | "puppy dog") -spam"#).as_deref(),
+            Some(r#""orange" ("kitten" | "puppy dog") -"spam""#)
+        );
+        assert_eq!(q("(a b) | c").as_deref(), Some(r#"("a" "b") | "c""#));
+        assert_eq!(q("-(a | b)").as_deref(), Some(r#"-("a" | "b")"#));
+        assert_eq!(q("").as_deref(), Some("*"));
+        assert_eq!(q(r#"say \"hi"#).as_deref(), Some(r#""say" " hi""#));
     }
 }

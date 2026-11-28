@@ -526,3 +526,37 @@ test("Mastodon互換API: Fedibird互換の絵文字リアクションを付け�
     ws.close();
   }
 });
+
+test("Mastodon互換API: accounts/searchのfollowing・offsetと、ハンドル完全一致の先頭表示", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2emdsrcha");
+  const bob = await registerUserViaApi(request, "e2emdsrchb");
+  const viewer = await registerUserViaApi(request, "e2emdsrchv");
+  const asViewer = { Authorization: `Bearer ${await mastodonToken(request, viewer.token)}` };
+  const word = `srch${Date.now().toString(36)}`;
+  for (const u of [alice, bob]) {
+    const res = await request.patch("/api/users/profile", {
+      headers: { Authorization: `Bearer ${u.token}` },
+      data: { display_name: `${word} ${u.username}` },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  }
+  const usernames = async (query: string) => {
+    const res = await request.get(`/api/v1/accounts/search?${query}`, { headers: asViewer });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return ((await res.json()) as { username: string }[]).map((a) => a.username);
+  };
+
+  const all = await usernames(`q=${word}`);
+  expect([...all].sort()).toEqual([alice.username, bob.username].sort());
+  expect(await usernames(`q=${word}&limit=1&offset=1`)).toEqual([all[1]]);
+
+  const aliceAccount = await (await request.get(`/api/v1/accounts/lookup?acct=${alice.username}`)).json();
+  const follow = await request.post(`/api/v1/accounts/${aliceAccount.id}/follow`, { headers: asViewer });
+  expect(follow.ok(), await follow.text()).toBeTruthy();
+  expect(await usernames(`q=${word}&following=true`)).toEqual([alice.username]);
+
+  // `@user` の完全一致は先頭に置き、続きのページには重ねて出さない。
+  const exact = await usernames(`q=@${bob.username}&limit=1`);
+  expect(exact).toEqual([bob.username]);
+  expect(await usernames(`q=@${bob.username}&limit=1&offset=1`)).not.toContain(bob.username);
+});

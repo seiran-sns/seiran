@@ -119,17 +119,19 @@ test("投稿本文で検索できる", async ({ page, request }) => {
 
   await seedAuth(page, user.token);
   await page.goto("/search");
-  await page.getByPlaceholder("キーワードを検索（ローカル + Bluesky）").fill(keyword);
+  await page.getByPlaceholder("キーワードを検索", { exact: true }).fill(keyword);
   await page.getByRole("button", { name: "検索", exact: true }).click();
 
   await expect(page.getByText(text)).toBeVisible({ timeout: 15_000 });
 });
 
-test("Bluesky互換の検索式をローカル投稿にも適用する", async ({ request }) => {
+test("検索式（語句・グループ・縦棒の OR・除外）をローカル投稿にも適用し、指定子の形はただの語にする", async ({
+  request,
+}) => {
   const alice = await registerUserViaApi(request, "e2esearchopsa");
   const bob = await registerUserViaApi(request, "e2esearchopsb");
   const unique = `queryops${Date.now()}`;
-  const matchingText = `${unique} exact phrase #rust https://example.com/article @${bob.username}`;
+  const matchingText = `${unique} exact phrase #rust from:literal`;
   const excludedText = `${unique} exact phrase spam`;
 
   for (const [user, text] of [[alice, matchingText], [bob, excludedText]] as const) {
@@ -145,22 +147,18 @@ test("Bluesky互換の検索式をローカル投稿にも適用する", async (
       headers: { Authorization: `Bearer ${alice.token}` },
     });
     expect(response.ok(), `search failed: ${response.status()} ${await response.text()}`).toBeTruthy();
-    return (await response.json()) as { notes: { text: string }[] };
+    return ((await response.json()) as { notes: { text: string }[] }).notes.map((note) => note.text);
   };
 
-  const filtered = await search(
-    `from:me ("exact phrase" OR absent) -spam domain:example.com lang:ja ${unique}`,
-  );
-  expect(filtered.notes.map((note) => note.text)).toContain(matchingText);
-  expect(filtered.notes.map((note) => note.text)).not.toContain(excludedText);
+  const filtered = await search(`("exact phrase" | absent) -spam ${unique}`);
+  expect(filtered).toContain(matchingText);
+  expect(filtered).not.toContain(excludedText);
 
-  const unbalanced = await search(`(${unique} OR definitely-absent`);
-  expect(unbalanced.notes.map((note) => note.text)).toEqual(
-    expect.arrayContaining([matchingText, excludedText]),
-  );
+  const unbalanced = await search(`(${unique} | definitely-absent`);
+  expect(unbalanced).toEqual(expect.arrayContaining([matchingText, excludedText]));
 
-  const mention = await search(`mentions:${bob.username} ${unique}`);
-  expect(mention.notes.map((note) => note.text)).toContain(matchingText);
+  // `from:` は投稿者の指定ではなく、本文の語として探す。
+  expect(await search(`from:literal ${unique}`)).toEqual([matchingText]);
 });
 
 // 検索結果もタイムラインと同じくリアクション・引用元の埋め込みが付くこと。
@@ -214,15 +212,74 @@ test("検索結果にもリアクションと引用元の埋め込みが付く",
 
 // 検索はログイン必須（crates/seiran-api/src/handlers/search.rs）。全文検索はクエリによって
 // 重く、AppView の結果の保存も伴うので、回数制限の掛からない未ログインには開かない。
-test("未ログインでは投稿を検索できない", async ({ request }) => {
+test("未ログインでは投稿もユーザーも検索できない", async ({ request }) => {
   const custom = await request.get("/api/notes/search?q=hello");
   expect(custom.status()).toBe(401);
+  const customUsers = await request.get("/api/users/search?q=hello");
+  expect(customUsers.status()).toBe(401);
 
   const misskey = await request.post("/api/notes/search", { data: { query: "hello" } });
   expect(misskey.status()).toBe(401);
+  const misskeyUsers = await request.post("/api/users/search", { data: { query: "hello" } });
+  expect(misskeyUsers.status()).toBe(401);
 
-  // Mastodon 互換はアカウント等の結果を返せるよう、投稿だけを空にする
-  const mastodon = await request.get("/api/v2/search?q=hello&type=statuses");
+  // Mastodon 互換はハッシュタグの結果を返せるよう、エラーにせず投稿とアカウントを空にする
+  const mastodon = await request.get("/api/v2/search?q=hello");
   expect(mastodon.ok(), await mastodon.text()).toBeTruthy();
-  expect(((await mastodon.json()) as { statuses: unknown[] }).statuses).toEqual([]);
+  const body = (await mastodon.json()) as { statuses: unknown[]; accounts: unknown[]; hashtags: unknown[] };
+  expect(body.statuses).toEqual([]);
+  expect(body.accounts).toEqual([]);
+  expect(body.hashtags.length).toBe(1);
+});
+
+test("検索語とは別の条件（ハッシュタグ・サーバー・ユーザー）で絞り込める", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2esearchcond");
+  const viewers = [
+    await registerUserViaApi(request, "e2esearchcondv1"),
+    await registerUserViaApi(request, "e2esearchcondv2"),
+  ];
+  const tag = `condtag${Date.now().toString(36)}`;
+  const localText = `ローカルの投稿 #${tag}`;
+  const bskyText = `Blueskyの投稿 #${tag}`;
+  const did = `did:plc:e2econd${Date.now().toString(36)}`;
+
+  const create = await request.post("/api/notes/create", {
+    headers: { Authorization: `Bearer ${alice.token}` },
+    data: { text: localText, deliver_to_fedi: false, deliver_to_bsky: false, visibility: "public" },
+  });
+  expect(create.ok(), await create.text()).toBeTruthy();
+
+  // AppView スタブは条件を見ずにこの投稿を返す。サーバーに Bluesky 以外を指定したときは
+  // AppView に問い合わせないので、ローカルの投稿だけになる。
+  const configure = await request.post(`${APPVIEW_CONTROL_URL}/__control__/search`, {
+    data: {
+      posts: [
+        {
+          uri: `at://${did}/app.bsky.feed.post/cond`,
+          cid: `bafy${Date.now().toString(36)}`,
+          text: bskyText,
+          createdAt: new Date(Date.now() - 60_000).toISOString(),
+          author: { did, handle: `cond-${Date.now().toString(36)}.bsky.social`, displayName: "Cond" },
+        },
+      ],
+    },
+  });
+  expect(configure.ok(), await configure.text()).toBeTruthy();
+
+  let calls = 0;
+  const search = async (params: Record<string, string>) => {
+    // 検索の回数制限にかからないよう、閲覧者を2回ごとに替える。
+    const viewer = viewers[Math.floor(calls++ / 2)];
+    const response = await request.get(`/api/notes/search?${new URLSearchParams(params)}`, {
+      headers: { Authorization: `Bearer ${viewer.token}` },
+    });
+    expect(response.ok(), await response.text()).toBeTruthy();
+    return ((await response.json()) as { notes: { text: string }[] }).notes.map((n) => n.text);
+  };
+
+  // 検索語なしでハッシュタグだけ。
+  expect(await search({ tag: `#${tag}` })).toEqual(expect.arrayContaining([localText, bskyText]));
+  expect(await search({ tag, server: "local" })).toEqual([localText]);
+  expect(await search({ tag, server: "bluesky" })).toEqual([bskyText]);
+  expect(await search({ q: "投稿", user_id: alice.actorId })).toEqual([localText]);
 });

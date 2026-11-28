@@ -12,6 +12,7 @@
 export * from "./core";
 export * from "./types";
 export { createNoteBody } from "./notes";
+export type { PostSearchConditions } from "./notes";
 
 import { openTarget, reports, meta, about, appTokens, appPasswords, media, emojis } from "./misc";
 import { setup, auth, miauth, oauth, atprotoOAuth, misskeyAppAuth } from "./auth";

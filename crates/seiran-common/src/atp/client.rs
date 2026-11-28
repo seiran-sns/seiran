@@ -55,6 +55,9 @@ pub struct BskyPost {
     /// あれば `embed`・`is_sensitive` の代わりにこちらを保存する
     /// （`crate::seiran_post::SeiranPost::received_attachments`）。
     pub seiran_attachments: Option<Vec<(crate::atp::ParsedAttachment, bool)>>,
+    /// `record.seiranPost.counterpartAuthorId`（他 seiran の投稿者が AP 側の相手として申告する
+    /// Actor URI）。投稿者の保存で宣言レコードの代わりに使う（`DeclarationLookup::Known`）。
+    pub seiran_counterpart_author: Option<String>,
     /// AppView の PostView に付いてきた threadgate の `allow`（threadgate が無い、または
     /// PostView から読み取っていなければ `None`）。`upsert_bsky_post_deferring_gates` が
     /// 後追いのジョブを待たずに返信制限を保存するのに使う。
@@ -78,6 +81,14 @@ fn seiran_attachments_of(
     record: &serde_json::Value,
 ) -> Option<Vec<(crate::atp::ParsedAttachment, bool)>> {
     crate::seiran_post::SeiranPost::extract(record).map(|sp| sp.received_attachments())
+}
+
+/// `record.seiranPost.counterpartAuthorId` が `https://` の URI ならそれ（AP の Actor URI。
+/// AT DID 等は AP 側の相手の申告にならない）。
+fn seiran_counterpart_author_of(record: &serde_json::Value) -> Option<String> {
+    crate::seiran_post::SeiranPost::extract(record)
+        .map(|sp| sp.counterpart_author_id)
+        .filter(|id| id.starts_with("https://"))
 }
 
 #[derive(Debug, Clone)]
@@ -271,6 +282,7 @@ pub async fn fetch_atp_history(
                 bridged_original_url,
                 is_sensitive: crate::atp::record_has_media_self_label(record),
                 seiran_attachments: seiran_attachments_of(record),
+                seiran_counterpart_author: seiran_counterpart_author_of(record),
                 threadgate_allow: None,
             });
 
@@ -352,6 +364,7 @@ pub async fn fetch_single_bsky_post(
         bridged_original_url,
         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
         seiran_attachments: seiran_attachments_of(&p["record"]),
+        seiran_counterpart_author: seiran_counterpart_author_of(&p["record"]),
         threadgate_allow: None,
     }))
 }
@@ -657,7 +670,9 @@ async fn upsert_bsky_post_with(
         .and_then(|embed| crate::atp::parse_bsky_embed_link_card(embed, &post.author_did));
     let extras = PostExtras {
         content_metadata: None,
-        hashtag_text: None,
+        // Jetstream 経由（`firehose.rs`）と同じく、facets を焼き込んだ後の本文から拾う
+        // （検索のハッシュタグ条件・ハッシュタグタイムラインは `post_hashtags` を見る）。
+        hashtag_text: Some(body.clone()),
         attachments: attachments_from_parsed(&attachments),
         link_cards: link_card
             .iter()
@@ -898,12 +913,23 @@ pub async fn fetch_bsky_followers(
 /// 戻り値: (post viewの正規化結果, 次ページカーソル)。`limit`と`until`はAppViewへ
 /// そのまま渡す。エラー時は空リストを返す（呼び出し元はローカル DB 検索結果のみへ
 /// フォールバックする設計のため、エラーを致命扱いしない）。
+/// `app.bsky.feed.searchPosts` に渡す絞り込み（検索語以外）。
+#[derive(Debug, Clone, Default)]
+pub struct AppViewSearchOptions {
+    pub since: Option<DateTime<Utc>>,
+    pub until: Option<DateTime<Utc>>,
+    /// 投稿者の DID。
+    pub author: Option<String>,
+    /// ハッシュタグ（先頭 `#` なし）。
+    pub tag: Option<String>,
+}
+
 pub async fn search_appview_posts(
     client: &reqwest::Client,
     query: &str,
     cursor: Option<&str>,
     limit: usize,
-    until: Option<DateTime<Utc>>,
+    options: &AppViewSearchOptions,
 ) -> (Vec<BskyPost>, Option<String>) {
     let mut url = format!(
         "{}/xrpc/app.bsky.feed.searchPosts?q={}&limit={}",
@@ -914,11 +940,23 @@ pub async fn search_appview_posts(
     if let Some(c) = cursor {
         url.push_str(&format!("&cursor={}", urlencoding::encode(c)));
     }
-    if let Some(until) = until {
+    if let Some(since) = options.since {
+        url.push_str(&format!(
+            "&since={}",
+            urlencoding::encode(&since.to_rfc3339())
+        ));
+    }
+    if let Some(until) = options.until {
         url.push_str(&format!(
             "&until={}",
             urlencoding::encode(&until.to_rfc3339())
         ));
+    }
+    if let Some(author) = &options.author {
+        url.push_str(&format!("&author={}", urlencoding::encode(author)));
+    }
+    if let Some(tag) = &options.tag {
+        url.push_str(&format!("&tag={}", urlencoding::encode(tag)));
     }
 
     let resp = match client.get(&url).send().await {
@@ -982,6 +1020,7 @@ pub async fn search_appview_posts(
                             .map(str::to_string),
                         is_sensitive: crate::atp::record_has_media_self_label(&p["record"]),
                         seiran_attachments: seiran_attachments_of(&p["record"]),
+                        seiran_counterpart_author: seiran_counterpart_author_of(&p["record"]),
                         threadgate_allow: threadgate_allow_of_post_view(p),
                     })
                 })

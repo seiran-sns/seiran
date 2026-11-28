@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "搜尋關鍵字（本地＋Bluesky）",
+    "placeholder": "搜尋",
     "noResults": "找不到符合的貼文。",
-    "prompt": "請輸入關鍵字進行搜尋。",
-    "loadMoreButton": "載入更多",
+    "prompt": "輸入關鍵字或新增條件來搜尋。",
+    "end": "已顯示全部結果。",
     "tabs": {
-      "quickNotifications": "快速通知"
+      "quickNotifications": "快速通知",
+      "posts": "貼文",
+      "users": "使用者"
+    },
+    "conditions": {
+      "label": "搜尋條件",
+      "add": "新增條件",
+      "remove": "移除條件",
+      "kindLabel": "條件類型",
+      "apply": "新增",
+      "replaceNote": "將取代同類型的現有條件。",
+      "kinds": {
+        "since": "日期（之後）",
+        "until": "日期（之前）",
+        "user": "使用者",
+        "server": "伺服器",
+        "tag": "主題標籤"
+      },
+      "labels": {
+        "since": "{{date}} 之後",
+        "until": "{{date}} 之前",
+        "user": "使用者：",
+        "server": "伺服器：{{server}}"
+      },
+      "server": {
+        "local": "本站",
+        "fediverse": "整個聯邦宇宙",
+        "bluesky": "整個 Bluesky",
+        "host": "指定伺服器",
+        "hostPlaceholder": "例如 misskey.io"
+      },
+      "tagPlaceholder": "主題標籤（可省略 #）",
+      "userNotFound": "找不到條件中的使用者。"
+    },
+    "users": {
+      "noResults": "找不到符合的使用者。",
+      "prompt": "可依名稱、ID 或簡介尋找使用者。"
     }
   },
   "searchPanel": {

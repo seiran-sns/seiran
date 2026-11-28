@@ -1,11 +1,47 @@
 {
   "searchPage": {
-    "placeholder": "Search keywords (local + Bluesky)",
+    "placeholder": "Search",
     "noResults": "No matching posts found.",
-    "prompt": "Enter a keyword to search.",
-    "loadMoreButton": "Load more",
+    "prompt": "Enter keywords or add conditions to search.",
+    "end": "That's everything.",
     "tabs": {
-      "quickNotifications": "Quick notifications"
+      "quickNotifications": "Quick notifications",
+      "posts": "Posts",
+      "users": "Users"
+    },
+    "conditions": {
+      "label": "Search conditions",
+      "add": "Add condition",
+      "remove": "Remove condition",
+      "kindLabel": "Condition type",
+      "apply": "Add",
+      "replaceNote": "This replaces the existing condition of the same type.",
+      "kinds": {
+        "since": "Date (on or after)",
+        "until": "Date (on or before)",
+        "user": "User",
+        "server": "Server",
+        "tag": "Hashtag"
+      },
+      "labels": {
+        "since": "On or after {{date}}",
+        "until": "On or before {{date}}",
+        "user": "User: ",
+        "server": "Server: {{server}}"
+      },
+      "server": {
+        "local": "Local",
+        "fediverse": "All of the Fediverse",
+        "bluesky": "All of Bluesky",
+        "host": "Specific server",
+        "hostPlaceholder": "e.g. misskey.io"
+      },
+      "tagPlaceholder": "Hashtag (# is optional)",
+      "userNotFound": "The user in the conditions was not found."
+    },
+    "users": {
+      "noResults": "No matching users found.",
+      "prompt": "Find users by name, handle, or bio."
     }
   },
   "searchPanel": {
