@@ -7,11 +7,12 @@ use axum::{
 };
 use serde::Deserialize;
 
+use seiran_common::repository::actor_search::ActorOrigin;
 use seiran_common::repository::{Actor, FollowListRow};
 
 use crate::error::ApiError;
+use crate::handlers::actor_search::{search_user_ids, UserSearch};
 use crate::handlers::follows::FollowTargetRequest;
-use crate::handlers::open_target::{resolve_open_target, ResolvedTarget};
 use crate::middleware::{AuthedUser, MaybeAuthedUser};
 use crate::AppState;
 
@@ -229,49 +230,6 @@ async fn relationship(
         .ok_or(ApiError::NotFound("RECORD_NOT_FOUND"))
 }
 
-/// `acct`（`user`・`user@host`・`@user@host`・Bsky ハンドル）を既知のアクターに引き当てる。
-/// 知らないアクターは `resolve` が真のときだけ WebFinger 等で取り込む。
-async fn lookup_acct(
-    state: &AppState,
-    acct: &str,
-    resolve: bool,
-) -> Result<Option<Actor>, ApiError> {
-    let acct = acct.trim().trim_start_matches('@');
-    if acct.is_empty() {
-        return Ok(None);
-    }
-    let local_domain = state.local_domain.as_str();
-    let candidates: Vec<(String, String)> = match acct.split_once('@') {
-        Some((u, d)) if d.eq_ignore_ascii_case(local_domain) => {
-            vec![(u.to_owned(), local_domain.to_owned())]
-        }
-        Some((u, d)) => vec![(u.to_owned(), d.to_owned())],
-        // `.` を含む単独ハンドルは Bsky ハンドル（`actors.domain` が空）の可能性もある。
-        None if acct.contains('.') => vec![
-            (acct.to_owned(), String::new()),
-            (acct.to_owned(), local_domain.to_owned()),
-        ],
-        None => vec![(acct.to_owned(), local_domain.to_owned())],
-    };
-    for (username, domain) in candidates {
-        if let Some(actor) = state
-            .actors
-            .find_by_username_domain(&username, &domain)
-            .await
-            .map_err(internal)?
-        {
-            return Ok(Some(actor));
-        }
-    }
-    if !resolve {
-        return Ok(None);
-    }
-    match resolve_open_target(state, &format!("@{acct}")).await {
-        Ok(ResolvedTarget::Actor(actor)) => Ok(Some(*actor)),
-        _ => Ok(None),
-    }
-}
-
 #[derive(Deserialize)]
 pub struct LookupParams {
     pub acct: String,
@@ -282,7 +240,7 @@ pub async fn lookup(
     State(state): State<AppState>,
     MastodonQuery(params): MastodonQuery<LookupParams>,
 ) -> Result<Json<MastodonAccount>, ApiError> {
-    let actor = lookup_acct(&state, &params.acct, true)
+    let actor = crate::handlers::actor_search::lookup_acct(&state, &params.acct, true)
         .await?
         .ok_or(ApiError::NotFound("RECORD_NOT_FOUND"))?;
     refresh_if_remote(&state, &actor).await;
@@ -295,55 +253,40 @@ pub struct AccountSearchParams {
     pub q: String,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub limit: Option<i64>,
+    #[serde(default, deserialize_with = "lenient::opt_i64")]
+    pub offset: Option<i64>,
     #[serde(default, deserialize_with = "lenient::opt_bool")]
     pub resolve: Option<bool>,
+    #[serde(default, deserialize_with = "lenient::opt_bool")]
+    pub following: Option<bool>,
 }
 
-/// アカウント検索（`/api/v1/accounts/search` と `/api/v2/search` 共通）。表示名・各ハンドルの
-/// 部分一致（カスタム API の `GET /api/actors/search` と同じ）。`resolve` かつ `q` が
-/// `@user@host` 等として解決できれば、そのアクターを先頭に置く（未知なら取り込む）。
+/// アカウント検索（`/api/v1/accounts/search` と `/api/v2/search` 共通）。検索そのものは
+/// Misskey 互換の `users/search` と同じ `actor_search::search_user_ids`。
 pub async fn search_accounts(
     state: &AppState,
-    q: &str,
-    limit: i64,
-    resolve: bool,
+    search: &UserSearch<'_>,
 ) -> Result<Vec<MastodonAccount>, ApiError> {
-    let q = q.trim();
-    if q.is_empty() {
-        return Ok(Vec::new());
-    }
-    let mut ids: Vec<i64> = Vec::new();
-    if q.starts_with('@') || q.contains('@') {
-        if let Some(actor) = lookup_acct(state, q, resolve).await? {
-            ids.push(actor.id);
-        }
-    }
-    let pattern = format!(
-        "%{}%",
-        crate::handlers::actor_search::escape_like(q.trim_start_matches('@'))
-    );
-    let rows = seiran_common::repository::actor_search::search_contains(&state.db, &pattern, limit)
-        .await
-        .map_err(internal)?;
-    for row in rows {
-        if !ids.contains(&row.id) {
-            ids.push(row.id);
-        }
-    }
-    ids.truncate(limit as usize);
+    let ids = search_user_ids(state, search).await?;
     build_accounts_ordered(state, &ids).await
 }
 
 /// GET /api/v1/accounts/search
 pub async fn search(
-    _user: AuthedUser,
+    user: AuthedUser,
     State(state): State<AppState>,
     MastodonQuery(params): MastodonQuery<AccountSearchParams>,
 ) -> Result<Json<Vec<MastodonAccount>>, ApiError> {
-    let limit = params.limit.unwrap_or(40).clamp(1, 80);
-    Ok(Json(
-        search_accounts(&state, &params.q, limit, params.resolve == Some(true)).await?,
-    ))
+    let search = UserSearch {
+        query: &params.q,
+        origin: ActorOrigin::Any,
+        viewer: Some(user.actor_id),
+        following_only: params.following == Some(true),
+        resolve: params.resolve == Some(true),
+        limit: params.limit.unwrap_or(40).clamp(1, 80),
+        offset: params.offset.unwrap_or(0),
+    };
+    Ok(Json(search_accounts(&state, &search).await?))
 }
 
 /// POST /api/v1/accounts/:id/follow — カスタム API のフォロー処理に委譲し、関係を返す

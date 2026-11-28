@@ -796,6 +796,14 @@ fn misskey_routes() -> Router<AppState> {
             post(handlers::misskey::endpoints::users_show),
         )
         .route(
+            "/api/users/search",
+            post(handlers::misskey::endpoints::users_search),
+        )
+        .route(
+            "/api/users/search-by-username-and-host",
+            post(handlers::misskey::endpoints::users_search_by_username_and_host),
+        )
+        .route(
             "/api/users/notes",
             post(handlers::misskey::endpoints::users_notes),
         )

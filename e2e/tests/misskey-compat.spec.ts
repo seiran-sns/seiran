@@ -843,3 +843,54 @@ test("Misskey互換API: users/reactionsでプロフィール「リアクショ�
   expect(list[0].note.id).toBe(String(note.id));
   expect(list[0].note.text).toBe(noteText);
 });
+
+test("Misskey互換API: users/searchとusers/search-by-username-and-hostでユーザーを探せる", async ({ request }) => {
+  const alice = await registerUserViaApi(request, "e2emksrcha");
+  const bob = await registerUserViaApi(request, "e2emksrchb");
+  const viewer = await registerUserViaApi(request, "e2emksrchv");
+  const asViewer = { Authorization: `Bearer ${viewer.token}` };
+  // 他のテストのユーザーと混ざらないよう、このテストだけの語を表示名に入れて探す。
+  const word = `srch${Date.now().toString(36)}`;
+  for (const u of [alice, bob]) {
+    const res = await request.patch("/api/users/profile", {
+      headers: { Authorization: `Bearer ${u.token}` },
+      data: { display_name: `${word} ${u.username}` },
+    });
+    expect(res.ok(), await res.text()).toBeTruthy();
+  }
+
+  const search = async (data: Record<string, unknown>) => {
+    const res = await request.post("/api/users/search", { headers: asViewer, data });
+    expect(res.ok(), await res.text()).toBeTruthy();
+    return (await res.json()) as { id: string; username: string; followersCount?: number }[];
+  };
+
+  const all = await search({ query: word, limit: 10 });
+  expect(all.map((u) => u.username).sort()).toEqual([alice.username, bob.username].sort());
+  expect(typeof all[0].followersCount).toBe("number");
+
+  // detail: false は UserLite（件数などの詳細を含まない）。
+  const lite = await search({ query: word, detail: false });
+  expect(lite).toHaveLength(2);
+  expect(lite[0].followersCount).toBeUndefined();
+
+  // offset で続きを取る。
+  const second = await search({ query: word, limit: 1, offset: 1 });
+  expect(second.map((u) => u.username)).toEqual([all[1].username]);
+
+  // リモートに絞るとローカルユーザーは出ない。
+  expect(await search({ query: word, origin: "remote" })).toEqual([]);
+
+  // ミュートした相手は出ない。
+  const mute = await request.post("/api/mutes/create", { headers: asViewer, data: { target: bob.username } });
+  expect(mute.ok(), await mute.text()).toBeTruthy();
+  expect((await search({ query: word })).map((u) => u.username)).toEqual([alice.username]);
+
+  // メンション補完: ユーザー名の前方一致。host が "." ならローカル。
+  const byName = await request.post("/api/users/search-by-username-and-host", {
+    headers: asViewer,
+    data: { username: alice.username.slice(0, -1), host: ".", detail: false },
+  });
+  expect(byName.ok(), await byName.text()).toBeTruthy();
+  expect((await byName.json()).map((u: { username: string }) => u.username)).toContain(alice.username);
+});

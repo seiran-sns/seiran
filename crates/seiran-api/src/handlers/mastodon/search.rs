@@ -4,9 +4,11 @@ use axum::{extract::State, Json};
 use serde::Deserialize;
 
 use crate::error::ApiError;
+use crate::handlers::actor_search::UserSearch;
 use crate::handlers::open_target::{resolve_open_target, ResolvedTarget};
 use crate::middleware::MaybeAuthedUser;
 use crate::AppState;
+use seiran_common::repository::actor_search::ActorOrigin;
 
 use super::accounts::search_accounts;
 use super::convert::{build_account, build_statuses, find_status};
@@ -28,6 +30,8 @@ pub struct SearchParams {
     pub resolve: Option<bool>,
     #[serde(default, deserialize_with = "lenient::opt_i64")]
     pub offset: Option<i64>,
+    #[serde(default, deserialize_with = "lenient::opt_bool")]
+    pub following: Option<bool>,
     #[serde(flatten)]
     pub page: PageParams,
 }
@@ -121,8 +125,17 @@ pub async fn search(
     }
 
     let limit = params.page.page(20, 40).limit;
-    if wants("accounts") && params.offset.unwrap_or(0) == 0 {
-        results.accounts = search_accounts(&state, &q, limit, resolve).await?;
+    if wants("accounts") {
+        let search = UserSearch {
+            query: &q,
+            origin: ActorOrigin::Any,
+            viewer,
+            following_only: params.following == Some(true),
+            resolve,
+            limit,
+            offset: params.offset.unwrap_or(0),
+        };
+        results.accounts = search_accounts(&state, &search).await?;
     }
     if wants("hashtags") && params.offset.unwrap_or(0) == 0 {
         results.hashtags = search_hashtags(&q, &state.local_domain);

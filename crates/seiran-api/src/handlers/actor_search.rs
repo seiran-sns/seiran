@@ -19,7 +19,11 @@ pub struct ActorSearchQuery {
     pub limit: Option<i64>,
 }
 
-use seiran_common::repository::actor_search;
+use seiran_common::repository::actor_search::{self, ActorOrigin, HostFilter, UserSearchFilter};
+use seiran_common::repository::Actor;
+
+use crate::error::ApiError;
+use crate::handlers::open_target::{resolve_open_target, ResolvedTarget};
 
 /// `GET /api/actors/search?q=...&limit=...`
 /// ユーザー名・表示名の部分一致でDB上のアクターを検索する（リスト機能のメンバー追加
@@ -168,6 +172,174 @@ pub(crate) fn escape_like(s: &str) -> String {
     s.replace('\\', "\\\\")
         .replace('%', "\\%")
         .replace('_', "\\_")
+}
+
+/// `acct`（`user`・`user@host`・`@user@host`・Bsky ハンドル）を既知のアクターに引き当てる。
+/// 知らないアクターは `resolve` が真のときだけ WebFinger 等で取り込む。
+pub async fn lookup_acct(
+    state: &AppState,
+    acct: &str,
+    resolve: bool,
+) -> Result<Option<Actor>, ApiError> {
+    let acct = acct.trim().trim_start_matches('@');
+    if acct.is_empty() {
+        return Ok(None);
+    }
+    let local_domain = state.local_domain.as_str();
+    let candidates: Vec<(String, String)> = match acct.split_once('@') {
+        Some((u, d)) if d.eq_ignore_ascii_case(local_domain) => {
+            vec![(u.to_owned(), local_domain.to_owned())]
+        }
+        Some((u, d)) => vec![(u.to_owned(), d.to_owned())],
+        // `.` を含む単独ハンドルは Bsky ハンドル（`actors.domain` が空）の可能性もある。
+        None if acct.contains('.') => vec![
+            (acct.to_owned(), String::new()),
+            (acct.to_owned(), local_domain.to_owned()),
+        ],
+        None => vec![(acct.to_owned(), local_domain.to_owned())],
+    };
+    for (username, domain) in candidates {
+        if let Some(actor) = state
+            .actors
+            .find_by_username_domain(&username, &domain)
+            .await
+            .map_err(|e| ApiError::Internal(e.to_string()))?
+        {
+            return Ok(Some(actor));
+        }
+    }
+    if !resolve {
+        return Ok(None);
+    }
+    match resolve_open_target(state, &format!("@{acct}")).await {
+        Ok(ResolvedTarget::Actor(actor)) => Ok(Some(*actor)),
+        _ => Ok(None),
+    }
+}
+
+// ─── ユーザー検索（Misskey 互換・Mastodon 互換で共通） ─────────────────────
+
+/// ユーザー検索の条件。Misskey の `users/search` と Mastodon の `accounts/search`・
+/// `v2/search` が同じ関数を通し、差は応答の整形だけにする。
+pub struct UserSearch<'a> {
+    pub query: &'a str,
+    pub origin: ActorOrigin,
+    pub viewer: Option<i64>,
+    /// 閲覧者がフォローしている相手だけにする（Mastodon の `following`）。
+    pub following_only: bool,
+    /// 完全一致のハンドルが未知のとき WebFinger 等で取り込む（Mastodon の `resolve`）。
+    /// 未ログインでは取り込まない。
+    pub resolve: bool,
+    pub limit: i64,
+    pub offset: i64,
+}
+
+/// ユーザー検索の ID 一覧（表示順）。表示名・各ハンドル表記・自己紹介の部分一致を、
+/// 表示名かハンドルに一致した人を先にしてユーザー名順に並べる（2文字以上のときだけ）。`query` が `user@host`・`@user`・Bsky ハンドル等として既知のアクター（`resolve`
+/// なら取り込んだアクター）に引き当たれば、最初のページの先頭に置き、以降のページには
+/// 出さない（部分一致の並びに埋もれると目当ての相手が見つからないため）。
+/// ブロック・ミュートの相手、凍結・退会済みは出さない。未ログインではローカルのうち
+/// ログアウト中の閲覧者に見せてよいアクターだけを出す。
+pub async fn search_user_ids(state: &AppState, s: &UserSearch<'_>) -> Result<Vec<i64>, ApiError> {
+    let query = s.query.trim();
+    if query.is_empty() || s.limit <= 0 {
+        return Ok(Vec::new());
+    }
+    let escaped = escape_like(query.trim_start_matches('@'));
+    let pattern = format!("%{escaped}%");
+    let prefix = format!("{escaped}%");
+    let mut filter = UserSearchFilter {
+        contains_pattern: &pattern,
+        prefix_pattern: &prefix,
+        origin: s.origin,
+        viewer: s.viewer,
+        following_only: s.following_only && s.viewer.is_some(),
+        exclude_id: None,
+        limit: s.limit,
+        offset: s.offset.max(0),
+    };
+    let internal = |e: sqlx::Error| ApiError::Internal(e.to_string());
+
+    let exact = if looks_like_acct(query) {
+        let resolve = s.resolve && s.viewer.is_some() && s.offset <= 0;
+        match lookup_acct(state, query, resolve).await? {
+            Some(actor) => {
+                actor_search::filter_searchable_user_ids(&state.db, &filter, &[actor.id])
+                    .await
+                    .map_err(internal)?
+                    .first()
+                    .copied()
+            }
+            None => None,
+        }
+    } else {
+        None
+    };
+    filter.exclude_id = exact;
+
+    let mut ids = Vec::new();
+    if let Some(id) = exact {
+        if filter.offset == 0 {
+            ids.push(id);
+            filter.limit -= 1;
+        } else {
+            // 最初のページで1件分を使ったので、部分一致の位置を1つ戻す。
+            filter.offset -= 1;
+        }
+    }
+    if filter.limit > 0 && query.trim_start_matches('@').chars().count() >= MIN_PARTIAL_MATCH_CHARS
+    {
+        ids.extend(
+            actor_search::search_user_ids(&state.db, &filter)
+                .await
+                .map_err(internal)?,
+        );
+    }
+    Ok(ids)
+}
+
+/// 部分一致で探す最短の文字数。1文字はほぼすべてのアクターに一致し、索引を使っても
+/// 並べ替えに秒単位かかる（入力のたびに検索するクライアントが最初の1文字で投げてくる）。
+/// 1文字のハンドル・名前の相手は、完全一致の引き当てで見つかる。
+const MIN_PARTIAL_MATCH_CHARS: usize = 2;
+
+/// ハンドルとして引き当てを試す入力か（空白を含まない）。`@` もドメインも無い語は
+/// ローカルのユーザー名として引き当てる（完全一致の相手を先頭に出すため）。
+fn looks_like_acct(q: &str) -> bool {
+    !q.chars().any(char::is_whitespace)
+}
+
+/// Misskey の `users/search-by-username-and-host`（メンションの補完）。`host` が `None`
+/// なら全サーバー、自ドメインか `.` ならローカル、それ以外はサーバー名の前方一致。
+pub async fn search_user_ids_by_username_and_host(
+    state: &AppState,
+    viewer: Option<i64>,
+    username: Option<&str>,
+    host: Option<&str>,
+    limit: i64,
+) -> Result<Vec<i64>, ApiError> {
+    let username_pattern = username
+        .map(str::trim)
+        .filter(|u| !u.is_empty())
+        .map(|u| format!("{}%", escape_like(u.trim_start_matches('@'))));
+    let host_pattern;
+    let host_filter = match host.map(str::trim).filter(|h| !h.is_empty()) {
+        None => HostFilter::Any,
+        Some(h) if h == "." || h.eq_ignore_ascii_case(&state.local_domain) => HostFilter::Local,
+        Some(h) => {
+            host_pattern = format!("{}%", escape_like(h));
+            HostFilter::Prefix(&host_pattern)
+        }
+    };
+    actor_search::search_user_ids_by_username_and_host(
+        &state.db,
+        viewer,
+        username_pattern.as_deref(),
+        host_filter,
+        limit,
+    )
+    .await
+    .map_err(|e| ApiError::Internal(e.to_string()))
 }
 
 #[cfg(test)]
