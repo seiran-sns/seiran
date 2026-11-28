@@ -116,6 +116,7 @@ DB プールの上限（`DB_MAX_CONNECTIONS` 未設定時）は `db::recommended
 - 更新は blue-green（`scripts/deploy.sh`）: 動いていない方の色を新しい版で起動し、`/health` が通ったら `lb`（標準の nginx。版の入れ替えでは作り直さない）の向き先 `docker/lb/active.conf` を書き換えて reload し、古い方を `docker stop` する。reload は graceful なので処理中のリクエストは古い方で終わり、新しいリクエストは新しい方にだけ流れる。新しい方が healthy にならなければ止めて終わり、動いている方には触れない。版を戻すのも `SEIRAN_VERSION` を戻して同じ手順。
 - 新旧が重なっている間は、ジョブキュー・リアルタイム配信・subscribeRepos を Redis で共有し、常駐処理は片方だけが動く（3節）。同じアクターの ATP コミットが両方で起きても SERIALIZABLE のトランザクションで直列化される（`docs/protocols.md` 6節）。
 - 新しい版は起動時にマイグレーションを適用し、古い版はそのスキーマのまま動き続ける。管理者は版を大きく飛ばして更新しうるので、スキーマは互換を保つ範囲のすべての版（1.0.0 以降は同じメジャー版のそれより前のすべての版と、1つ前のメジャー版の最終版。0.x では1つ前の版）が動けるものにし、守れない変更はメジャー版を上げる（`docs/coding_rules.md` 21）。管理者は各メジャー版の最終版を順に経由すれば、どの版からでも更新できる（例: 1.4.2 → 1 系の最終版 → 2 系の最新）。
+- 同時に起動した複数のプロセスがマイグレーションを適用するのは1つずつにする（`db::run_migrations`）。sqlx の Migrator 自体の直列化は `pg_advisory_lock` で文の途中のまま待つので、先行側が `CREATE INDEX CONCURRENTLY`（ほかのトランザクションの終了を待つ）を流すと待ち合ってデッドロックになり、待っていた側の起動が失敗する。そこで先に別の advisory lock を `pg_try_advisory_lock` で間隔を空けて取り直し、取れたプロセスだけが Migrator を動かす。
 - `lb` は Docker の内部 DNS で毎回名前を引くので（`resolver 127.0.0.11`）、色のコンテナを作り直して IP が変わっても追従する。`active.conf` はファイルを置き換えて書くので、ファイル単体ではなくディレクトリごとマウントする。
 
 **リリース**（開発機、`scripts/release.sh`）: `Cargo.toml` の版（と `frontend/package.json` の一致）を確かめ、未コミットの変更が無く push 済みであることを確かめてから、linux/amd64・linux/arm64 のイメージを両方のレジストリへ `<版>` と浮動タグ（`<メジャー>`・`<メジャー>.<マイナー>`・`latest`。版に接尾辞があるときは付けない）で push し、git タグ `v<版>` を付けて push する。
