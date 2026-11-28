@@ -14,6 +14,7 @@ import SearchConditionsField, {
   SearchConditionUser,
 } from "../components/search/SearchConditionsField";
 import { useRightPane } from "../contexts/RightPaneContext";
+import { useIsMobileViewport } from "../hooks/useIsNarrowViewport";
 import { profilePath } from "../lib/format";
 import panel from "../components/common/Panel.module.css";
 import rp from "../components/right/RightPanels.module.css";
@@ -64,6 +65,7 @@ export default function SearchPage() {
     []
   );
 
+  const isMobile = useIsMobileViewport();
   const q = (searchParams.get("q") ?? "").trim();
   const tab: SearchTab = searchParams.get("type") === "users" ? "users" : "posts";
   const urlConditions = useMemo(() => conditionsFromParams(searchParams), [searchParams]);
@@ -190,7 +192,9 @@ export default function SearchPage() {
     </div>
   );
 
-  return <AppShell center={center} right={right} />;
+  // スマホでは右ペインが中央の下に縦積みになり、検索結果の下にクイック通知が続くだけになる
+  // （通知は下部の🔔から開ける）ので出さない。
+  return <AppShell center={center} right={isMobile ? undefined : right} />;
 }
 
 /** 「ポスト」タブの結果。検索語か条件のどちらかがあれば検索する。 */
