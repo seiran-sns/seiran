@@ -505,7 +505,7 @@ test("Mastodon互換API: Fedibird互換の絵文字リアクションを付け�
     ).json()) as { type: string; status?: { id: string }; emoji_reaction?: { name: string } }[];
     expect(notifications).toEqual(
       expect.arrayContaining([
-        expect.objectContaining({ type: "emoji_reaction", status: expect.objectContaining({ id: post.id }), emoji_reaction: { name: "🎉" } }),
+        expect.objectContaining({ type: "emoji_reaction", status: expect.objectContaining({ id: post.id }), emoji_reaction: { name: "🎉", count: 1, me: false } }),
       ]),
     );
 
